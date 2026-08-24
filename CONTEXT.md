@@ -5,14 +5,20 @@ reader tool, and an example Rails app tailored for testing it.
 
 ## Glossary
 
-**Reader** — the tool being built. A local Node/Bun/Deno process that serves a React +
-TypeScript SPA and streams Rails log events to it. Never deployed; never remote.
+**Reader** — the tool being built. A local Bun process that serves a React + TypeScript
+SPA and streams Rails log events to it. Never deployed; never remote. See
+`docs/adr/0001-bun-is-the-runtime.md`.
 
 **Example app** — a Rails 8 app living in this repo purely to exercise the Reader. Not
 the product; a test fixture that happens to be a Rails app.
 
+**Initializer** — the Rails half of the product: one Ruby file the developer copies into
+their Work app's `config/initializers/`, where Rails runs it once at boot. It hooks Rails
+and forwards Events to the Reader. Distributed by copy-paste, not as a gem.
+_Avoid_: plugin, agent, shim.
+
 **Work app** — the user's real Rails 8 application at their job. The Reader must work
-against it with only a copy-paste initializer added, opt-in per developer.
+against it with only the Initializer added, opt-in per developer.
 
 **Event** — a single thing the Rails process emitted. Three kinds in v1:
 - **Request event** — an HTTP request. Has a start and a finish; is *in-flight* between them.
