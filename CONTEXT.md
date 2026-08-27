@@ -32,6 +32,25 @@ is unreadable.
 **Unattributed** — an event with no owning request (boot lines, background jobs, rake
 tasks). Not dropped; shown in the Console.
 
+**Run** — one boot-to-shutdown lifetime of the Rails process. Every Event belongs to
+exactly one Run. In development a Run is short: any restart of `rails s` ends one and
+begins the next. Ordering keys and elapsed times are only comparable *within* a Run, so
+the Reader treats a Run boundary as a visible event, not a seam to hide.
+
+**Ordering key** — what puts every Event of a Run into one true order, including across
+kinds: a sequence number taken at the moment the Rails process *observes* the Event, not
+when the Event completes. Because observation happens inline on the request thread, this
+reproduces causal order by construction. See *dual-homing* for why a `request_id` alone
+cannot do this.
+
+**Partial request** — a Request event the Reader pieced together without having observed
+its start, because the Reader attached mid-flight or started after the request did. It is
+promoted as its finish arrives, gaining method, path, status and duration — but it stays
+Partial for its whole life, because the events emitted before the Reader attached are lost
+and their number is unknowable. Distinct from *unattributed*: a Partial request's children
+are correctly correlated; it is the parent that was missed.
+_Avoid_: orphan, stub, inferred.
+
 **Dual-homing** — an App log event appears in *two* places at once: inline within its
 request's timeline, interleaved in emission order with that request's SQL events, and
 in the global Console stream. This is why every event needs an **ordering key**, not
