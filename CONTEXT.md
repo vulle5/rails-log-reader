@@ -51,6 +51,13 @@ and their number is unknowable. Distinct from *unattributed*: a Partial request'
 are correctly correlated; it is the parent that was missed.
 _Avoid_: orphan, stub, inferred.
 
+**Interrupted request** — a Request event whose Run ended before it finished: the process
+was reaped, restarted or killed while the request was still in flight. Concluded from
+evidence — a `run_end`, or a `run_header` bearing a new `run_id` — never from a timer, since
+in-flight requests are given no timeout, ever. The mirror of a *Partial request*: that one
+missed a start, this one will never get a finish.
+_Avoid_: dropped (a *dropped event* is a volume concern and unrelated), abandoned, cut off.
+
 **Dual-homing** — an App log event appears in *two* places at once: inline within its
 request's timeline, interleaved in emission order with that request's SQL events, and
 in the global Console stream. This is why every event needs an **ordering key**, not
@@ -62,6 +69,12 @@ not, in emission order.
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
 most valuable thing to see.
+
+**Sidecar** — `log/rails_log_reader.jsonl`, the append-only file the Initializer writes one
+Event per line to and the Reader tails. The transport between the two halves, and the only
+file the product creates. Rails' generated `.gitignore` already covers it. Never confused
+with `log/development.log`, which the Reader only ever leaves alone. See
+`docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
 
 ## Standing constraints
 

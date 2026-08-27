@@ -58,3 +58,28 @@ entered, so its *absence* is the signal that routing failed.
   event stream is Partial or not depending only on when the Reader attached.
 - The contract is transport-agnostic by construction, which is what lets #6 choose a socket,
   a file, or both without reopening this.
+
+## Amendments
+
+### From #6 (transport): `run_end`, and a pid-keyed `run_id`
+
+Choosing the sidecar file ([ADR-0003](0003-a-sidecar-jsonl-file-is-the-transport.md))
+exposed two gaps in the envelope. Both are additions, not reversals.
+
+- **`run_end` joins the `type` union.** A Run announced its beginning (`run_header`) but not
+  its end, so a request that was in flight when the process died stayed in flight forever —
+  this ADR grants in-flight requests *no timeout, ever*, so nothing would ever resolve it.
+  Under puma-dev, which reaps an idle app after 15 minutes by default, that is a nightly
+  occurrence rather than an edge case. `run_end` is emitted best-effort from `at_exit`
+  (`SIGTERM` reaches it; `SIGKILL` does not), and a `run_header` bearing a new `run_id` is an
+  implicit end for the previous Run. In-flight requests of an ended Run become **Interrupted**
+  — a third fate alongside finished and in-flight, and the mirror of a *Partial request*: that
+  one missed a start, this one will never get a finish. Both are concluded from evidence, not
+  from a clock.
+- **`run_id` is derived lazily, keyed on `Process.pid`.** The Initializer runs once at boot,
+  *before* a clustered Puma forks its workers. Every worker would inherit the same `run_id`
+  while keeping its own `seq` counter, so two genuinely distinct events would collide on
+  `(run_id, seq)` — the identity this ADR relies on for free deduplication — and one would be
+  silently eaten. Memoising `[pid, run_id]` and regenerating on mismatch makes each worker its
+  own Run, which is accurate: a forked process has its own `seq` space. This covers Spring and
+  Passenger for the same reason, without naming them.
