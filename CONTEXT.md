@@ -10,7 +10,10 @@ SPA and streams Rails log events to it. Never deployed; never remote. See
 `docs/adr/0001-bun-is-the-runtime.md`.
 
 **Example app** — a Rails 8 app living in this repo purely to exercise the Reader. Not
-the product; a test fixture that happens to be a Rails app.
+the product: its purpose is to *emit* Events, not to be used. It is a test fixture in the
+plain sense of the word, but never call it "the fixture" — Rails already owns that word
+for `test/fixtures/*.yml`, and the Example app has seed data of its own.
+_Avoid_: fixture (as a name), demo app, sample app.
 
 **Initializer** — the Rails half of the product: one Ruby file the developer copies into
 their Work app's `config/initializers/`, where Rails runs it once at boot. It hooks Rails
@@ -24,6 +27,13 @@ against it with only the Initializer added, opt-in per developer.
 - **Request event** — an HTTP request. Has a start and a finish; is *in-flight* between them.
 - **SQL event** — one database query, attributed to a request.
 - **App log event** — a bare `Rails.logger.*` call from application code.
+
+**Scenario** — a named, reproducible traffic pattern the Example app generates on demand:
+parallel in-flight requests, an N+1-shaped request, a slow query, a request that hangs, a
+rake-task query burst. Triggered from the Example app's own `/scenarios` page or by `curl`
+against the same endpoint. A Scenario is a *shape of traffic*, never a feature of the
+Reader — the Reader detects nothing and is never told which Scenario is running.
+_Avoid_: test, demo, case.
 
 **Attribution** — binding an SQL or App log event to the Request event it occurred
 within, via `request_id`. The core problem: with parallel requests, an unattributed log
