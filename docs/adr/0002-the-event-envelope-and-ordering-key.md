@@ -83,3 +83,50 @@ exposed two gaps in the envelope. Both are additions, not reversals.
   silently eaten. Memoising `[pid, run_id]` and regenerating on mismatch makes each worker its
   own Run, which is accurate: a forked process has its own `seq` space. This covers Spring and
   Passenger for the same reason, without naming them.
+
+### From #14 (events outside the span): the boundary moves to our own middleware
+
+This ADR chose `request.action_dispatch` as the request boundary. Its **start** is instrumented
+in `Rails::Rack::Logger#call_app` — middleware #61 — while `ActionDispatch::RequestId` sits at
+#54, so a band of middleware exists where a request already has a `request_id` but no row.
+[#14](https://github.com/vulle5/rails-log-reader/issues/14) closed that band by moving the start
+marker; the finish marker is unchanged.
+
+- **`request_start` is emitted by the Initializer's own middleware**, inserted with
+  `insert_after ActionDispatch::RequestId`. This is not a new footprint: the research on
+  [#2](https://github.com/vulle5/rails-log-reader/issues/2) established there is no zero-config
+  path from `env` to an `sql.active_record` subscriber, so that middleware has to exist anyway
+  to write `request_id` into the Initializer's `CurrentAttributes`. Emitting the start from the
+  same place makes attribution and the request row begin on the *same line of code* — which is
+  what makes an early arrival **structurally impossible** rather than a case to handle. Nothing
+  is lost from the payload: the middleware holds `env`, so `ActionDispatch::Request.new(env)`
+  yields exactly the `{ request: }` that `request.action_dispatch` carried. 404s and
+  non-controller requests still get a row, and `request_route`'s absence still signals a routing
+  failure.
+- **`request_finish` still comes from `request.action_dispatch`'s finish**, via the object-form
+  subscriber — its start is now simply ignored. That finish is deferred to `Rack::BodyProxy`
+  close and so fires after every middleware has unwound, which makes it the truest "request over"
+  marker available. Its one cost is accepted knowingly: a row stays *in-flight* while a slow
+  client is still reading the body, which is a false positive on the product's headline signal.
+  In a strictly-local tool the client is a browser on `localhost`, so this is largely imported
+  worry; if it bites, `process_action.action_controller`'s finish is already observed and can be
+  promoted to a second field, and how it is *displayed* belongs to
+  [#8](https://github.com/vulle5/rails-log-reader/issues/8), not here.
+- **The asymmetry leaves one hole, accepted rather than closed.** Start and finish no longer come
+  from the same handle, so if a middleware in the #55–#60 band raises
+  (`ActionDispatch::RemoteIp::IpSpoofAttackError`) or short-circuits with a response without
+  calling `@app`, a `request_start` is emitted for which no finish is possible. Ordinary 500s are
+  *not* affected — `DebugExceptions` at #63 is well inside the span and those requests finish
+  normally. Such a request is never-finishing and resolves as **Interrupted** at `run_end`, which
+  is machinery that already exists. Closing the hole properly would need an `ensure` and a
+  "did the inner start fire" flag — a second finish path in the one file that has to survive a
+  skeptical colleague's one-minute read, spent on a six-slot window containing two default
+  middlewares that neither log nor query.
+- **A Trailing event is a Reader-side derivation**, like *in-flight*, *Partial* and *Interrupted*
+  before it: it appears nowhere on the wire. What survives the new boundary is narrow — a callback
+  on a body proxy registered *outside* `Rails::Rack::Logger`, chiefly `ActionDispatch::Executor`'s
+  `to_complete`, which runs after the finish and before `CurrentAttributes` is cleared, so
+  `request_id` is still readable there. A request row therefore accepts children for as long as
+  the Reader holds it, with no timer — the memory bound in
+  [#12](https://github.com/vulle5/rails-log-reader/issues/12) is the only thing that ever ends a
+  row's life, so the retention policy and the attribution horizon are one rule, not two.

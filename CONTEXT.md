@@ -86,6 +86,19 @@ file the product creates. Rails' generated `.gitignore` already covers it. Never
 with `log/development.log`, which the Reader only ever leaves alone. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
 
+**Trailing event** — an SQL or App log event whose `seq` places it *after* its request's
+`request_finish`. Attribution is not in doubt — the `request_id` is right there — only the
+position is. The Reader appends it to a visibly separate **trailing section** at the end of
+the request row, never silently inside the timeline, because a log line arriving after its
+request finished is genuinely surprising and hiding it would read as a Reader bug. There is
+no time limit and no buffering: the row accepts trailing events for as long as the Reader
+still holds it, and once the row is evicted under the memory bound the event is simply
+*unattributed*. Positional, never temporal — "late" would imply a clock, and `at_wall` is
+never sorted on. Structurally rare: the request boundary is the Initializer's own middleware,
+so almost nothing can outlive it. See
+`docs/adr/0002-the-event-envelope-and-ordering-key.md`.
+_Avoid_: late arrival, straggler, orphan.
+
 ## Standing constraints
 
 1. **`log/development.log` stays pristine.** A collaborator running `tail -f` must see
