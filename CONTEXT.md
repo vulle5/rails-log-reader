@@ -51,7 +51,9 @@ the Reader treats a Run boundary as a visible event, not a seam to hide.
 kinds: a sequence number taken at the moment the Rails process *observes* the Event, not
 when the Event completes. Because observation happens inline on the request thread, this
 reproduces causal order by construction. See *dual-homing* for why a `request_id` alone
-cannot do this.
+cannot do this. Exact *within* a Run and meaningless across Runs — it restarts at 1 in
+every process — so it orders a request's own timeline and nothing wider. See *append
+order* for what orders the rest.
 
 **Partial request** — a Request event the Reader pieced together without having observed
 its start, because the Reader attached mid-flight or started after the request did. It is
@@ -74,11 +76,15 @@ in the global Console stream. This is why every event needs an **ordering key**,
 just a parent id: a `request_id` alone cannot interleave logs with queries.
 
 **Console** — a global, dev-tools-style stream of every App log event, attributed or
-not, in emission order.
+not, in *append order*. Rendered as the **Console rail**, the leftmost of the Reader's
+three columns.
 
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
-most valuable thing to see.
+most valuable thing to see — and is *not a separate state*: because in-flight requests
+are given no timeout, ever, the Reader has no threshold to declare a hang. A climbing
+elapsed time is the entire signal, and the human draws the conclusion. In-flight ends
+only in a finish or in *Interrupted*.
 
 **Sidecar** — `log/rails_log_reader.jsonl`, the append-only file the Initializer writes one
 Event per line to and the Reader tails. The transport between the two halves, and the only
@@ -98,6 +104,30 @@ never sorted on. Structurally rare: the request boundary is the Initializer's ow
 so almost nothing can outlive it. See
 `docs/adr/0002-the-event-envelope-and-ordering-key.md`.
 _Avoid_: late arrival, straggler, orphan.
+
+**Append order** — the position of a line in the *Sidecar*, and the Reader's global
+ordering key. `seq` restarts at 1 per Run and `at_mono` is a per-process clock, so when
+Runs overlap — clustered Puma workers, a rake burst beside a live server — neither can
+order two Events against each other, and `at_wall` is never sorted. One file opened
+`O_APPEND` with synchronous inline writes makes byte order a real total order across
+every writer. Not observation order: two processes can swap by microseconds, accepted
+rather than buffered away.
+_Avoid_: arrival order, wire order (the wire has no order of its own).
+
+**Request table** — the middle of the Reader's three columns, one row per Request event.
+A row sits at the append position of the earliest Event the Reader observed for that
+request, so a new row is always an append at the bottom and never an insert — including
+a *Partial request*, which has no start to be positioned by. Rows mutate in place and
+never move.
+
+**Detail column** — the rightmost of the Reader's three columns, showing one selected
+request's timeline: its SQL and App log events in `seq` order, plus its *trailing
+section*. Pinned once opened, so selecting a request never reflows the layout.
+
+**Selection** — which request the *detail column* is showing. Set by clicking a row in the
+*request table* or a line in the *Console*. Purely a detail-column concern: selecting
+never pauses the request table, because you must scroll up to click a moving row anyway,
+and that scroll has already paused it.
 
 ## Standing constraints
 

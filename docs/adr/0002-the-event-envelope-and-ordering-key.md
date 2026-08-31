@@ -69,7 +69,8 @@ exposed two gaps in the envelope. Both are additions, not reversals.
 - **`run_end` joins the `type` union.** A Run announced its beginning (`run_header`) but not
   its end, so a request that was in flight when the process died stayed in flight forever —
   this ADR grants in-flight requests *no timeout, ever*, so nothing would ever resolve it.
-  Under puma-dev, which reaps an idle app after 15 minutes by default, that is a nightly
+  Under puma-dev, which reaps an idle app after 15 minutes by default (the user has raised
+  theirs to 60), that is a nightly
   occurrence rather than an edge case. `run_end` is emitted best-effort from `at_exit`
   (`SIGTERM` reaches it; `SIGKILL` does not), and a `run_header` bearing a new `run_id` is an
   implicit end for the previous Run. In-flight requests of an ended Run become **Interrupted**
@@ -130,3 +131,32 @@ marker; the finish marker is unchanged.
   the Reader holds it, with no timer — the memory bound in
   [#12](https://github.com/vulle5/rails-log-reader/issues/12) is the only thing that ever ends a
   row's life, so the retention policy and the attribution horizon are one rule, not two.
+
+### From #8 (auto-scroll and ordering): append order is the Reader's spine
+
+This ADR says `seq` "reproduces causal order by construction" and calls it what makes
+"nothing ever reorders" implementable. That is true **within a Run** and only within a Run.
+[#6](https://github.com/vulle5/rails-log-reader/issues/6) put concurrent Runs in one Sidecar
+and [#7](https://github.com/vulle5/rails-log-reader/issues/7) made them routine — a clustered
+Puma's workers, a rake burst alongside a live server — at which point the envelope offers no
+way to order two events at all. `seq` restarts at 1 per Run, `at_mono` is a per-process clock,
+and `at_wall` this ADR forbids sorting on. Ordering by `(run_id, seq)` does not dodge the gap,
+it hides it: two Puma workers serving concurrently would render as two consecutive blocks of
+traffic, and the rake burst as one slab above or below ten seconds of requests it was actually
+woven through.
+
+The resolution changes nothing on the wire. **Append order in the Sidecar is the Reader's
+global ordering key**; `seq` orders events within a single request's timeline, where they
+share a Run and it is exact. `O_APPEND` and ADR-0003's synchronous inline write make the byte
+order a real total order across writers, and the Reader already tracks its file offset for
+resumption — so this is not a new mechanism, it is noticing that the order it reads lines in
+*is* the answer. The honest cost: append order is not observation order, so two processes can
+swap by microseconds in the Console. Correcting that would need the cross-Run buffer ADR-0003
+refused.
+
+One consequence worth stating, because it removes a special case rather than adding a rule: a
+request row sits at the append position of the **earliest event the Reader observed for it**,
+not at its start time. For an ordinary request that is `request_start` and nothing changes;
+for a *Partial request*, which by definition has no observed start, it is whichever child
+arrived first. Every new row is therefore an append at the bottom and never an insert, which
+is what makes "nothing ever reorders" true by construction under concurrency too.
