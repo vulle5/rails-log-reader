@@ -20,6 +20,15 @@ their Work app's `config/initializers/`, where Rails runs it once at boot. It ho
 and forwards Events to the Reader. Distributed by copy-paste, not as a gem.
 _Avoid_: plugin, agent, shim.
 
+**Marker file** — `log/rails_log_reader.enabled`, the git-ignored file whose *presence*
+turns the Initializer on. Content is never read: presence is the whole gate, so `touch`
+is the entire act of enabling and the file never becomes a config file. Read once, at
+boot, so enabling needs a restart. Chosen over an env var because the Work app runs under
+puma-dev — there is no shell to export from, and a variable is per terminal, so it would
+miss the `rake` and `rails c` Runs. Never created by the Reader, which only ever reads the
+Work app's files. See `docs/adr/0004-a-marker-file-gates-the-initializer.md`.
+_Avoid_: flag file, lock file, config.
+
 **Work app** — the user's real Rails 8 application at their job. The Reader must work
 against it with only the Initializer added, opt-in per developer.
 
@@ -134,8 +143,13 @@ and that scroll has already paused it.
 1. **`log/development.log` stays pristine.** A collaborator running `tail -f` must see
    exactly what they see today. This is the defining failure of `log_bench`, which
    replaces the Rails logger with a JSON formatter and makes the file unreadable.
-2. **Opt-in per developer.** Inert unless explicitly enabled. A teammate who never uses
-   the Reader notices nothing.
+2. **Opt-in per developer.** Inert unless explicitly enabled by a *Marker file*. A
+   teammate who never uses the Reader notices nothing — which means, precisely: no
+   middleware inserted, no subscribers registered, no `BroadcastLogger` sink attached, no
+   file opened. Those four are promises the Example app tests; request overhead is not.
 3. **Strictly local.** No remote, staging, or production log reading.
-4. **Rails 8+** is the target. Rails 7 support is welcome, not required.
+4. **Rails 7.1+**, refused below. `BroadcastLogger#broadcast_to` is both the only
+   capture mechanism that keeps constraint 1 and the one thing Rails 7.0 lacks. Rails 8
+   is what gets tested; 7.1 and 7.2 are accepted, with their absent `sql.active_record`
+   fields treated as absent rather than as an error. Development environment only.
 5. **Dark and light mode** both required.
