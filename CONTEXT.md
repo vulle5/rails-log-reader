@@ -49,7 +49,8 @@ within, via `request_id`. The core problem: with parallel requests, an unattribu
 is unreadable.
 
 **Unattributed** — an event with no owning request (boot lines, background jobs, rake
-tasks). Not dropped; shown in the Console.
+tasks). Not dropped, and no longer homeless: its *Run* owns it, so it appears in that
+Run's *Run row*, and — if it is an App log event — in the *Console* as well.
 
 **Run** — one boot-to-shutdown lifetime of the Rails process. Every Event belongs to
 exactly one Run. In development a Run is short: any restart of `rails s` ends one and
@@ -80,13 +81,20 @@ missed a start, this one will never get a finish.
 _Avoid_: dropped (a *dropped event* is a volume concern and unrelated), abandoned, cut off.
 
 **Dual-homing** — an App log event appears in *two* places at once: inline within its
-request's timeline, interleaved in emission order with that request's SQL events, and
-in the global Console stream. This is why every event needs an **ordering key**, not
-just a parent id: a `request_id` alone cannot interleave logs with queries.
+owner's timeline in the *detail column*, interleaved in emission order with that owner's
+SQL events, and in the global *Console* stream. True of **every** App log event, not just
+attributed ones — an unattributed line is dual-homed against its *Run row* exactly as an
+attributed one is against its request. This is why every event needs an **ordering key**,
+not just a parent id: a `request_id` alone cannot interleave logs with queries.
 
 **Console** — a global, dev-tools-style stream of every App log event, attributed or
 not, in *append order*. Rendered as the **Console rail**, the leftmost of the Reader's
-three columns.
+three columns. **App log events only** — never SQL, attributed or not. The Console exists
+so that a `Rails.logger` call you wrote is findable and one click from the request that
+ran it; queries outnumber log lines and would bury it. Every line is clickable and sets
+*Selection*. Volume is a **level** problem, never an attribution one: all levels show by
+default, thinned by persisted per-level chips, because a floor above `debug` would hide
+the developer's own calls — the exact failure the Console is here to prevent.
 
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
@@ -123,20 +131,57 @@ every writer. Not observation order: two processes can swap by microseconds, acc
 rather than buffered away.
 _Avoid_: arrival order, wire order (the wire has no order of its own).
 
-**Request table** — the middle of the Reader's three columns, one row per Request event.
-A row sits at the append position of the earliest Event the Reader observed for that
-request, so a new row is always an append at the bottom and never an insert — including
-a *Partial request*, which has no start to be positioned by. Rows mutate in place and
-never move.
+**Activity table** — the middle of the Reader's three columns, one row per thing that
+owns events: a *Request row* or a *Run row*. A row sits at the append position of the
+earliest Event the Reader observed for it, so a new row is always an append at the bottom
+and never an insert — including a *Partial request*, which has no start to be positioned
+by. Rows mutate in place and never move. Tabs filter by **row kind only** — Requests,
+Runs, All, each carrying a count — never by method, status or controller, which v1 rules
+out; a tab that grows one of those is that exclusion returning and must be decided, not
+drifted into.
+_Avoid_: request table (it holds more than requests), trace (promises spans and sampling
+that are not shipped), feed.
+
+**Request row** — an *Activity table* row for one Request event.
+
+**Run row** — an *Activity table* row holding everything a *Run* emitted with no owning
+request. One per Run, always, anchored at that Run's marker — a `rake` burst and a worker
+process still alive at the end of the day get the same rule, and no gap threshold splits
+either, because a threshold is the timer this project refuses everywhere else. The
+division of labour with the *Console*: the Console is where you read **when** something
+happened, the Run row is where you read **what**. Groups by *process*, never by job —
+every job a worker ever ran lands in one undifferentiated row, which is precisely why
+this is not the first-class background-job grouping v1 rules out.
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
-request's timeline: its SQL and App log events in `seq` order, plus its *trailing
-section*. Pinned once opened, so selecting a request never reflows the layout.
+row's timeline: its SQL and App log events in `seq` order, plus its *trailing section*.
+Pinned once opened, so selecting never reflows the layout.
 
-**Selection** — which request the *detail column* is showing. Set by clicking a row in the
-*request table* or a line in the *Console*. Purely a detail-column concern: selecting
-never pauses the request table, because you must scroll up to click a moving row anyway,
-and that scroll has already paused it.
+**Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
+a row in the *Activity table*, or any line in the *Console* — including an unattributed
+one, which selects its *Run row*. If a tab filter hides the row being selected, the click
+clears that filter first: click means "take me there", and taking you to a row you cannot
+see is a broken promise. Purely a detail-column concern: selecting never pauses the
+Activity table, because you must scroll up to click a moving row anyway, and that scroll
+has already paused it.
+
+**Hover grouping** — hovering a *Console* line draws a gutter rule from that line to its
+*Activity table* row. Clicking pins the group lit and jumps: the table scrolls to the row
+(clearing a hiding tab filter first, if that's why it's hidden), because clicking means
+"take me there" and neither a filter nor a scroll position should be able to break that
+promise. Pinning exists because the lit group is lost the moment the mouse moves, and
+moving the mouse is exactly what you do next.
+
+The rule assumes both ends are on screen, and at real volume — 58 rows, 145 console
+lines — the row usually isn't: it runs to a stub captioned "row is off screen — click to
+jump" instead of connecting. Built and measured, not argued away: at low volume the rule
+connects and reads fine; it degrades only at the volume the Console exists for, and a
+click dissolves the case rather than leaving it dangling. Per-request **colour coding**,
+**dimming** the non-matching lines, and **scrollbar markers** (ticks showing every
+occurrence, including off screen) were all built and rejected — colour collides long
+before a busy dev app runs out of requests, dimming makes everything else unreadable
+exactly when you are hovering constantly, and markers tell you *that* something is
+elsewhere without letting you read the connection to it.
 
 ## Standing constraints
 
