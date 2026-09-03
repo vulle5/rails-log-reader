@@ -109,13 +109,24 @@ file the product creates. Rails' generated `.gitignore` already covers it. Never
 with `log/development.log`, which the Reader only ever leaves alone. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
 
+**Memory bound** — the Reader's bounded in-memory fold of *Activity table* rows: a ring
+buffer that evicts the oldest rows once exceeded, sized to match the load-on-open figure
+(the last ~5,000 events, read backward from EOF over the file offset the Reader already
+tracks) so there is one number, not two. Doubles as the attribution horizon: a finished
+request stops accepting *Trailing events* the instant its row is evicted. Reachable past
+load-on-open only through an explicit **load-earlier** control that continues the same
+backward scan — no infinite scroll, no silent fetch. A live request reset mid-Run by
+boot-time truncation gets no extra signal; it surfaces as an ordinary *Partial request*,
+which already reads honestly on its own. See
+`docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
+
 **Trailing event** — an SQL or App log event whose `seq` places it *after* its request's
 `request_finish`. Attribution is not in doubt — the `request_id` is right there — only the
 position is. The Reader appends it to a visibly separate **trailing section** at the end of
 the request row, never silently inside the timeline, because a log line arriving after its
 request finished is genuinely surprising and hiding it would read as a Reader bug. There is
 no time limit and no buffering: the row accepts trailing events for as long as the Reader
-still holds it, and once the row is evicted under the memory bound the event is simply
+still holds it, and once the row is evicted under the *Memory bound* the event is simply
 *unattributed*. Positional, never temporal — "late" would imply a clock, and `at_wall` is
 never sorted on. Structurally rare: the request boundary is the Initializer's own middleware,
 so almost nothing can outlive it. See
