@@ -14,7 +14,15 @@ bin/setup
 ```
 
 That checks for Ruby (and tells you how to get one — it never installs it), installs the
-gems, and prepares the database. Then:
+gems, and prepares the database.
+
+The Ruby version is pinned twice, because the two files are read by different things:
+`.ruby-version` for rbenv, rvm, chruby and asdf, and `mise.toml` for mise, which ignores
+`.ruby-version` unless you turn idiomatic version files back on. If you use mise, note
+that `mise use` only writes config — it does nothing to your `PATH` until mise is hooked
+into your shell with `mise activate`. `bin/setup` says so when that is what is wrong.
+
+Then:
 
 ```sh
 bin/dev            # http://localhost:3000

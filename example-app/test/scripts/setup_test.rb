@@ -19,6 +19,17 @@ class SetupTest < ActiveSupport::TestCase
     assert_includes output, "mise use ruby@3.4"
   end
 
+  # The failure the message existed to prevent and then walked straight into: `mise use`
+  # writes a config file, and with mise unhooked from the shell that is *all* it does — so
+  # telling someone to run it again is a loop, not an instruction.
+  test "bin/setup names the activation step when mise is installed but not hooked into the shell" do
+    output, status = run_setup_with_unhooked_mise
+
+    assert_not status.success?
+    assert_includes output, "mise activate bash"
+    assert_includes output, "~/.bashrc"
+  end
+
   private
     def run_setup_with_no_ruby_on_the_path
       # An absolute bash, because the empty PATH is the whole point of the test. `/bin/bash`
@@ -28,6 +39,22 @@ class SetupTest < ActiveSupport::TestCase
         "/bin/bash", Rails.root.join("bin/setup").to_s,
         unsetenv_others: true
       )
+    end
+
+    # A stub `mise` that reports it has a Ruby for this directory, on a PATH holding only
+    # it — the shape of a machine where `mise use ruby@3.4` has already been run and the
+    # shell hook never has.
+    def run_setup_with_unhooked_mise
+      Dir.mktmpdir do |bin|
+        File.write(File.join(bin, "mise"), "#!/bin/sh\nexit 0\n")
+        File.chmod(0o755, File.join(bin, "mise"))
+
+        Open3.capture2e(
+          { "PATH" => bin, "SHELL" => "/bin/bash" },
+          "/bin/bash", Rails.root.join("bin/setup").to_s,
+          unsetenv_others: true
+        )
+      end
     end
 
     # A stub `ruby` that answers the version question and nothing else, on a PATH holding

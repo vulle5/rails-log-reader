@@ -3,8 +3,8 @@
 #
 # Shell rather than the Ruby script `rails new` generates, because this script's first job
 # is to report that Ruby is *missing*, and a Ruby script cannot run to say so. Nothing
-# above that check runs an external command, for the same reason — `read` and `${...}` are
-# builtins where `cat` and `dirname` are not.
+# *above* that check runs an external command, for the same reason — `read` and `${...}`
+# are builtins where `cat` and `dirname` are not.
 #
 # It never installs Ruby. Which version manager a contributor uses is their call, so this
 # names the one line that gets a supported Ruby and stops.
@@ -21,7 +21,33 @@ required="${required%.*}"
 if ! command -v ruby > /dev/null 2>&1; then
   echo "bin/setup: no Ruby on your PATH, and this script will not install one for you." >&2
   echo >&2
-  echo "  mise use ruby@$required" >&2
+
+  # Past the check, shelling out is fine again — and worth it, because "no Ruby" has three
+  # different next steps and printing the wrong one sends you round a loop. The middle case
+  # is the quiet one: mise installed but not hooked into the shell, where `mise use` writes
+  # config, changes nothing about PATH, and looks like it did nothing.
+  if ! command -v mise > /dev/null 2>&1; then
+    echo "  mise use ruby@$required" >&2
+    echo >&2
+    echo "mise itself: https://mise.jdx.dev — or put any Ruby $required on your PATH." >&2
+  elif mise which ruby > /dev/null 2>&1; then
+    # `:-` because `set -u` is on and a login shell is not guaranteed to export SHELL.
+    activate_shell="${SHELL:-bash}"
+    activate_shell="${activate_shell##*/}"
+    case "$activate_shell" in
+      bash | zsh) ;;
+      *) activate_shell=bash ;;
+    esac
+
+    echo "mise has a Ruby for this directory, but it is not hooked into your shell — so" >&2
+    echo "\`mise use\` writes config and leaves your PATH alone. Hook it in, once:" >&2
+    echo >&2
+    echo "  echo 'eval \"\$(mise activate $activate_shell)\"' >> ~/.${activate_shell}rc" >&2
+    echo "  exec $activate_shell" >&2
+  else
+    echo "  mise use ruby@$required" >&2
+  fi
+
   echo >&2
   echo "Then run bin/setup again." >&2
   exit 1
