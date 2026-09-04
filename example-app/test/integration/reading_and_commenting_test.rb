@@ -19,8 +19,8 @@ class ReadingAndCommentingTest < ActionDispatch::IntegrationTest
     assert_select "body", text: /The loop in note G is the part everyone skips\./
   end
 
-  # The shape the Reader exists to make readable: a read, a write, a redirect, and the
-  # read that follows it — four log entries for what the user experiences as one click.
+  # The shape the Reader exists to make readable: three Request events — a read, a write
+  # that redirects, and the read that follows — for what the user experiences as one click.
   test "leaving a comment is GET, POST, redirect, GET, with the write in the middle" do
     get post_path(posts(:analytical_engine))
     assert_response :success

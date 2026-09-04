@@ -1,7 +1,7 @@
 # Example app
 
-A Rails 8 app that exists to be *read*, not used. Its job is to emit genuine ActiveRecord
-and `Rails.logger` output for the Reader next door to be developed against — real models,
+A Rails 8 app that exists to be *read*, not used. Its job is to emit genuine SQL events and
+App log events for the Reader next door to be developed against — real models,
 real associations, real migrations, and a seed that is the same every time.
 
 It is not the product. See `../CONTEXT.md` for what "Example app" means here, and what it

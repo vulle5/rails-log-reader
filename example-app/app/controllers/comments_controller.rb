@@ -1,4 +1,6 @@
 class CommentsController < ApplicationController
+  include PostPage
+
   def create
     @post = Post.find(params[:post_id])
     @comment = @post.comments.new(comment_params)
@@ -6,8 +8,7 @@ class CommentsController < ApplicationController
     if @comment.save
       redirect_to @post, notice: "Comment added."
     else
-      @comments = @post.comments.includes(:author)
-      @authors = Author.order(:name)
+      load_post_page
       render "posts/show", status: :unprocessable_content
     end
   end

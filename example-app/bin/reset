@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Restores the deterministic seed in db/seeds.rb: drops the database, rebuilds it from
-# db/schema.rb, and seeds it again. Dropping is what makes the restored row ids identical
-# and not merely the rows.
+# db/schema.rb, and seeds it again.
+#
+# Dropping is the point. `db:seed:replant` would put the same rows back, but SQLite's
+# AUTOINCREMENT never reuses a row id, so the restored posts would be /posts/61 upwards
+# rather than /posts/1 — the rows restored but not the URLs. Rails drops the test database
+# alongside the development one here; `bin/rails test` rebuilds it on its own.
 
 set -euo pipefail
 

@@ -12,10 +12,11 @@
 # a database connection instead of on the database.
 threads 8, 8
 
-# One worker means Puma's single mode, so the app is one Run. Setting WEB_CONCURRENCY
-# clusters it and each forked worker becomes a Run of its own, with its own pid and its own
-# `seq` — the case the Reader has to keep apart. That is an env var, deliberately, so
-# trying it is `WEB_CONCURRENCY=2 bin/dev` rather than an edit to this file.
+# Zero here is Puma's *single mode*: one process serving requests directly, which is the
+# one worker this app runs by default and not a cluster of size one. Setting WEB_CONCURRENCY
+# puts it into cluster mode, where each forked worker becomes a Run of its own with its own
+# pid and its own `seq` — the case the Reader has to keep apart. That is an env var,
+# deliberately, so trying it is `WEB_CONCURRENCY=2 bin/dev` rather than an edit to this file.
 workers Integer(ENV.fetch("WEB_CONCURRENCY", 0))
 
 # Specifies the `port` that Puma will listen on to receive requests; default is 3000.

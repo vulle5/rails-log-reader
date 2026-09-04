@@ -1,5 +1,6 @@
 require "test_helper"
 require "open3"
+require "tmpdir"
 
 class SetupTest < ActiveSupport::TestCase
   # `bin/setup` is shell rather than the Ruby script `rails new` generates, precisely so it
@@ -8,6 +9,13 @@ class SetupTest < ActiveSupport::TestCase
     output, status = run_setup_with_no_ruby_on_the_path
 
     assert_not status.success?, "bin/setup carried on without Ruby:\n#{output}"
+    assert_includes output, "mise use ruby@3.4"
+  end
+
+  test "bin/setup names the same command when the Ruby on the PATH is the wrong one" do
+    output, status = run_setup_with_ruby_version("3.1.4")
+
+    assert_not status.success?, "bin/setup carried on with the wrong Ruby:\n#{output}"
     assert_includes output, "mise use ruby@3.4"
   end
 
@@ -20,5 +28,20 @@ class SetupTest < ActiveSupport::TestCase
         "/bin/bash", Rails.root.join("bin/setup").to_s,
         unsetenv_others: true
       )
+    end
+
+    # A stub `ruby` that answers the version question and nothing else, on a PATH holding
+    # only it — so what bin/setup finds is a Ruby of the wrong version, not no Ruby.
+    def run_setup_with_ruby_version(version)
+      Dir.mktmpdir do |bin|
+        File.write(File.join(bin, "ruby"), "#!/bin/sh\nprintf %s #{version}\n")
+        File.chmod(0o755, File.join(bin, "ruby"))
+
+        Open3.capture2e(
+          { "PATH" => bin },
+          "/bin/bash", Rails.root.join("bin/setup").to_s,
+          unsetenv_others: true
+        )
+      end
     end
 end
