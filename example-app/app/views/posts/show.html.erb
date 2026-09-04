@@ -1,0 +1,53 @@
+<% content_for :title, @post.title %>
+
+<p><%= link_to "← All posts", posts_path %></p>
+
+<article>
+  <h1><%= @post.title %></h1>
+  <p class="meta">
+    <%= @post.author.name %>
+    <% if @post.draft? %>
+      &middot; draft
+    <% else %>
+      &middot; <%= @post.published_at.to_fs(:long) %>
+    <% end %>
+  </p>
+  <p><%= @post.body %></p>
+</article>
+
+<h2><%= pluralize(@comments.size, "comment") %></h2>
+
+<ol class="comments">
+  <% @comments.each do |comment| %>
+    <li>
+      <p class="meta"><%= comment.author.name %> &middot; <%= comment.created_at.to_fs(:long) %></p>
+      <p><%= comment.body %></p>
+    </li>
+  <% end %>
+</ol>
+
+<h2>Leave a comment</h2>
+
+<%# A plain form: GET renders it, POST writes, and the redirect sends the browser back
+    for a second GET. No JavaScript is involved in any of the four steps. %>
+<%= form_with model: [ @post, @comment ] do |form| %>
+  <% if @comment.errors.any? %>
+    <ul class="errors">
+      <% @comment.errors.full_messages.each do |message| %>
+        <li><%= message %></li>
+      <% end %>
+    </ul>
+  <% end %>
+
+  <div class="field">
+    <%= form.label :author_id, "Commenting as" %>
+    <%= form.collection_select :author_id, @authors, :id, :name %>
+  </div>
+
+  <div class="field">
+    <%= form.label :body %>
+    <%= form.text_area :body, rows: 4 %>
+  </div>
+
+  <%= form.submit "Post comment" %>
+<% end %>

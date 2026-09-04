@@ -1,0 +1,11 @@
+note_g:
+  post: analytical_engine
+  author: grace
+  body: The loop in note G is the part everyone skips.
+  created_at: 2026-01-03 10:00:00
+
+note_g_reply:
+  post: analytical_engine
+  author: ada
+  body: It is the only part that matters.
+  created_at: 2026-01-03 11:00:00

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Restores the deterministic seed in db/seeds.rb: drops the database, rebuilds it from
+# db/schema.rb, and seeds it again. Dropping is what makes the restored row ids identical
+# and not merely the rows.
+
+set -euo pipefail
+
+cd "${0%/*}/.."
+
+exec bin/rails db:reset

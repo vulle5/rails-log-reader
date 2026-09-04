@@ -1,0 +1,20 @@
+<% content_for :title, "Posts" %>
+
+<h1>Posts</h1>
+
+<p class="lede">
+  <%= pluralize(@posts.size, "published post") %>. Drafts are not listed.
+</p>
+
+<ol class="posts">
+  <% @posts.each do |post| %>
+    <li>
+      <h2><%= link_to post.title, post %></h2>
+      <p class="meta">
+        <%= post.author.name %>
+        &middot; <%= post.published_at.to_fs(:long) %>
+        &middot; <%= pluralize(post.comments_count, "comment") %>
+      </p>
+    </li>
+  <% end %>
+</ol>

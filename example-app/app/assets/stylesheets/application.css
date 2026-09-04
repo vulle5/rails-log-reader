@@ -1,0 +1,65 @@
+/*
+ * The Example app's whole stylesheet. It is deliberately small: this app exists to emit
+ * events, and every rule here is one a reader of the log never sees.
+ */
+
+:root {
+  color-scheme: light dark;
+  --rule: color-mix(in srgb, currentColor 15%, transparent);
+  --muted: color-mix(in srgb, currentColor 60%, transparent);
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+  font-weight: 600;
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.125rem; margin-top: 2rem; }
+
+.lede, .meta { color: var(--muted); }
+.meta { font-size: 0.875rem; margin: 0.25rem 0; }
+
+.notice {
+  margin: 0;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.posts, .comments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.posts li, .comments li {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.posts h2 { margin: 0; font-size: 1.125rem; }
+
+.errors { color: crimson; }
+
+.field { margin-bottom: 0.75rem; }
+.field label { display: block; font-size: 0.875rem; color: var(--muted); }
+
+input, select, textarea {
+  font: inherit;
+  padding: 0.375rem;
+}
+
+textarea { width: 100%; box-sizing: border-box; }

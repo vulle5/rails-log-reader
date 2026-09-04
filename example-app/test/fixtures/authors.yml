@@ -1,0 +1,9 @@
+ada:
+  name: Ada Lovelace
+  email: ada@example.com
+  bio: Wrote the first algorithm, for a machine that was never built.
+
+grace:
+  name: Grace Hopper
+  email: grace@example.com
+  bio: Found the first bug, and it was a moth.

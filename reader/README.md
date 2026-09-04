@@ -16,8 +16,7 @@ bun dev     # http://localhost:5273, with hot reload
 bun start
 ```
 
-Both commands run the Reader against the Example app next door (which arrives with
-[#17](https://github.com/vulle5/rails-log-reader/issues/17)), because the Reader is
+Both commands run the Reader against the Example app next door, because the Reader is
 always started from inside a Rails root and auto-detects it — there is no config file and
 no flag for the host, the port or the path. To point it at another app, start it from
 inside that app:

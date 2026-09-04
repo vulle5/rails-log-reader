@@ -1,0 +1,17 @@
+analytical_engine:
+  title: Notes on the Analytical Engine
+  body: Note G is the part everyone skips, and it is the part that matters.
+  published_at: 2026-01-01 09:00:00
+  author: ada
+
+nanoseconds:
+  title: A Nanosecond in Your Hand
+  body: A foot of wire is how far light travels in a nanosecond.
+  published_at: 2026-01-02 09:00:00
+  author: grace
+
+draft_on_compilers:
+  title: Draft on Compilers
+  body: Unfinished, and unpublished, so it stays out of the index.
+  published_at:
+  author: grace
