@@ -13,8 +13,9 @@ is deliberately not.
 bin/setup
 ```
 
-That checks for Ruby (and tells you how to get one — it never installs it), installs the
-gems, and prepares the database.
+That checks for Ruby and for a C toolchain — several gems build native extensions — and
+tells you the one command that gets each. It never installs either. Then it installs the
+gems and prepares the database.
 
 The Ruby version is pinned twice, because the two files are read by different things:
 `.ruby-version` for rbenv, rvm, chruby and asdf, and `mise.toml` for mise, which ignores

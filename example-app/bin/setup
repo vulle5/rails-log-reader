@@ -64,6 +64,56 @@ if [ "${running%.*}" != "$required" ]; then
   exit 1
 fi
 
+# Ruby is necessary but not sufficient: several of this app's gems ship C extensions, and
+# without a toolchain `bundle install` fails per-gem with two thousand lines of mkmf
+# backtrace whose actual cause — "You have to install development tools first" — is four
+# screens up. Same contract as the Ruby check above: name the one command, install nothing.
+compiler=""
+for candidate in cc gcc clang; do
+  if command -v "$candidate" > /dev/null 2>&1; then
+    compiler="$candidate"
+    break
+  fi
+done
+
+# A real compile rather than trusting `command -v`, because macOS ships a `/usr/bin/cc`
+# whose entire job is to tell you the Command Line Tools are missing.
+if [ -z "$compiler" ] || ! printf 'int main(void){return 0;}\n' | "$compiler" -x c -o /dev/null - > /dev/null 2>&1; then
+  missing="no working C compiler"
+elif ! command -v make > /dev/null 2>&1; then
+  missing="no make"
+else
+  missing=""
+fi
+
+if [ -n "$missing" ]; then
+  echo "bin/setup: $missing on your PATH, and this script will not install one." >&2
+  echo >&2
+  echo "Gems with C extensions cannot build without it." >&2
+  echo >&2
+
+  case "$(uname -s)" in
+    Darwin)
+      echo "  xcode-select --install" >&2
+      ;;
+    *)
+      if command -v apt-get > /dev/null 2>&1; then
+        echo "  sudo apt-get install -y build-essential" >&2
+      elif command -v dnf > /dev/null 2>&1; then
+        echo "  sudo dnf group install -y development-tools" >&2
+      elif command -v pacman > /dev/null 2>&1; then
+        echo "  sudo pacman -S --needed base-devel" >&2
+      else
+        echo "  install your distribution's C toolchain (gcc and make)" >&2
+      fi
+      ;;
+  esac
+
+  echo >&2
+  echo "Then run bin/setup again." >&2
+  exit 1
+fi
+
 echo "== Installing gems =="
 bundle install
 

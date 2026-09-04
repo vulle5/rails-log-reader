@@ -30,6 +30,17 @@ class SetupTest < ActiveSupport::TestCase
     assert_includes output, "~/.bashrc"
   end
 
+  # Ruby present and a toolchain absent is the other way a clean machine stalls: `bundle
+  # install` fails per native gem, and the cause scrolls off the top long before the
+  # backtraces stop.
+  test "bin/setup names the toolchain when Ruby is present but nothing can compile" do
+    output, status = run_setup_with_ruby_version("3.4.10")
+
+    assert_not status.success?
+    assert_includes output, "C compiler"
+    assert_not_includes output, "Installing gems", "bin/setup went on to bundle anyway"
+  end
+
   private
     def run_setup_with_no_ruby_on_the_path
       # An absolute bash, because the empty PATH is the whole point of the test. `/bin/bash`
