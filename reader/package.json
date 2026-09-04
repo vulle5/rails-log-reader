@@ -1,0 +1,21 @@
+{
+  "name": "rails-log-reader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd ../example-app && bun --hot ../reader/src/server/index.ts",
+    "start": "cd ../example-app && NODE_ENV=production bun ../reader/src/server/index.ts"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.14.0",
+    "@types/bun": "^1.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "happy-dom": "^20.14.0",
+    "typescript": "^7.0.2"
+  }
+}

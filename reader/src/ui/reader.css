@@ -1,0 +1,98 @@
+/* Tokens for both themes. Following the OS is the whole story until the manual
+   override lands; nothing here reads a preference. */
+:root {
+  --bg: #ffffff;
+  --bg-sunken: #f4f5f7;
+  --bg-raised: #ffffff;
+  --border: #d8dce1;
+  --fg: #14181d;
+  --fg-muted: #5c6773;
+  --fg-faint: #8b95a1;
+  --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216;
+    --bg-sunken: #0a0c0f;
+    --bg-raised: #171b21;
+    --border: #262d36;
+    --fg: #e4e8ee;
+    --fg-muted: #9aa5b1;
+    --fg-faint: #6b7682;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The three tracks are fixed by the grid, so a column that fills scrolls inside its own
+   track and never widens, narrows or displaces its neighbours. */
+.reader {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 40%);
+  height: 100%;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid var(--border);
+}
+
+.column-console {
+  background: var(--bg-sunken);
+}
+
+.column-detail {
+  background: var(--bg-raised);
+  border-right: none;
+}
+
+.column-heading {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.column-heading h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+/* Each column scrolls on its own, which is also what keeps its height off the grid. */
+.column-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.placeholder {
+  margin: 0;
+  padding: 20px;
+  color: var(--fg-faint);
+  text-align: center;
+}
