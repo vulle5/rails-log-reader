@@ -5,9 +5,9 @@ on:
     branches: [main]
   pull_request:
 
-# The Reader's two halves are joined only by the wire contract, and this job guards the
-# TypeScript half of it. Rails is never booted here: the Example app's minitest suite is
-# a local job, by design.
+# The Reader's two halves are joined only by the wire contract, and the Reader job guards
+# the TypeScript half of it. Rails is never booted here: the Example app's minitest suite is
+# a local job, by design. CI's whole share of the Rails half is the copy diff below.
 jobs:
   reader:
     name: Reader
@@ -27,3 +27,16 @@ jobs:
       - run: bunx tsc --noEmit
 
       - run: bun test
+
+  initializer:
+    name: Initializer copy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Example app installs the Initializer the way a human does — `bin/setup` copies
+      # it in — so the copy can be edited in place and drift from its master. Copy-paste is
+      # the distribution mechanism, not an accident of the repo layout, so this is the check
+      # that keeps copying from becoming drifting.
+      - name: The Example app's copy matches its master
+        run: diff reader/rails/rails_log_reader.rb example-app/config/initializers/rails_log_reader.rb

@@ -7,6 +7,7 @@ step, no bundler config, no `dist/` — Bun serves `src/ui/index.html` directly.
 src/server   the Bun server
 src/ui       the SPA
 src/shared   the wire contract both halves are built against
+rails/       the Initializer: the Rails half, distributed by copy-paste
 ```
 
 ## Running it

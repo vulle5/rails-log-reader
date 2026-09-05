@@ -54,6 +54,26 @@ Puma — every worker its own Run — is an env var rather than an edit:
 WEB_CONCURRENCY=2 bin/dev
 ```
 
+## The Initializer
+
+`bin/setup` copies `../reader/rails/rails_log_reader.rb` into `config/initializers/`. A
+copy rather than a symlink, because copy-paste is how the product is distributed and this
+app has to install it the way a human does; CI diffs the copy against its master and fails
+on any difference.
+
+The copy is inert until you turn it on for yourself:
+
+```sh
+touch log/rails_log_reader.enabled
+bin/dev
+```
+
+Events then land in `log/rails_log_reader.jsonl`, one JSON object per line, for the Reader
+to tail. Both files are git-ignored already — Rails' generated `.gitignore` covers
+`/log/*`, which is why the marker lives there. Delete it and restart to turn the
+Initializer off again: it is read once, at boot, so enabling and disabling both take a
+restart.
+
 ## Tests
 
 ```sh
@@ -61,3 +81,9 @@ bin/rails test     # or bin/ci for the full local run
 ```
 
 The suite is local by design: the repo's CI never boots Rails.
+
+`test/initializer/` is the Rails half's own seam, and it works differently from the rest:
+the Initializer refuses every environment but `development`, so those tests boot the app as
+a real development Run in a throwaway Rails root — `test/support/development_run.rb` — and
+read the Sidecar and `log/development.log` it wrote. Nothing there touches this app's own
+`log/` or `config/`.

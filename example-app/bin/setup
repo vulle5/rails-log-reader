@@ -122,4 +122,15 @@ echo "== Preparing the database =="
 bin/rails db:prepare
 
 echo
+echo "== Installing the Initializer =="
+# A copy, not a symlink, because the Example app has to install the product the same way a
+# human does — by copy-paste, which is the whole distribution mechanism. That is also what
+# makes the copy able to drift from its master, which is why CI diffs the two.
+cp ../reader/rails/rails_log_reader.rb config/initializers/rails_log_reader.rb
+echo "Copied reader/rails/rails_log_reader.rb into config/initializers/."
+
+echo
 echo "Done. Run the app with bin/dev, and bin/reset to restore the seed."
+echo "The Initializer stays inert until you turn it on for yourself:"
+echo
+echo "  touch log/rails_log_reader.enabled"
