@@ -9,14 +9,18 @@ class RunTest < ActiveSupport::TestCase
 
     assert run.booted?, run.output
     headers = run.events_of("run_header")
-    assert_equal 1, headers.size, "expected exactly one run_header:\n#{run.sidecar}"
+    assert_equal 1, headers.size, "expected exactly one run_header:\n#{run.sidecar_bytes}"
 
     header = headers.first
     assert_equal 1, header["v"]
     assert_equal 1, header["seq"], "the header is the Run's first observation"
     assert_match(/\A[0-9a-f-]{36}\z/, header["run_id"])
     assert_nil header["request_id"], "a run_header belongs to no request"
-    assert_operator header["at_mono"], :>, 0
+    # CLOCK_MONOTONIC counts from the machine's boot and is shared across processes, so
+    # this process can read the very same clock. An at_mono that was epoch-anything, or
+    # milliseconds rather than nanoseconds, would be out by orders of magnitude.
+    assert_in_delta Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond),
+      header["at_mono"], 60_000_000_000
     assert_in_delta Time.now.to_f * 1000, header["at_wall"], 60_000
     assert_nil header["truncated"], "nothing in a run_header is anywhere near 64 KB"
 
@@ -59,5 +63,15 @@ class RunTest < ActiveSupport::TestCase
 
     assert_not_equal header["run_id"], worker["run_id"], "the worker is a Run of its own"
     assert_equal 1, worker["seq"], "and its seq space starts over, which is why it must be"
+  end
+
+  # The branch that matters, and the one a check for a constant would get wrong: `rails s`
+  # leaves a Rails::Server behind, but puma-dev boots straight through config.ru and leaves
+  # nothing at all. Puma itself is no help — `Bundler.require` loads it in every Run there is.
+  test "a Run that came in through the rack entry point knows it is a server" do
+    run = DevelopmentRun.boot(through: :config_ru)
+
+    assert run.booted?, run.output
+    assert_equal "server", run.events_of("run_header").sole["payload"]["kind"]
   end
 end

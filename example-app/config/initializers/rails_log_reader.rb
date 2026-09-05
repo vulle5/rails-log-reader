@@ -16,8 +16,9 @@
 # is ever written into log/development.log except the boot warnings below — and those cannot
 # reach a developer who has not opted in, because they sit below the gate too.
 #
-# The master copy lives at reader/rails/rails_log_reader.rb in the rails-log-reader repo,
-# and the Reader diffs this file against it. Edit it there, not here.
+# This is a copy. The master lives at reader/rails/rails_log_reader.rb in the
+# rails-log-reader repo, and that is where to edit it — an edit made here is a difference
+# between the two, which is what the repo's CI exists to catch.
 
 # The one gate, and the reason inertness is structural rather than audited: with no marker
 # file, or in any environment but development, the rest of this file never happens.
@@ -68,13 +69,18 @@ module RailsLogReader
     # Every Event goes through here, inline on the thread that observed it: one mutex, one
     # write, `sync = true`, no queue and no background thread. A drain thread would need a
     # queue bound, a drop policy and a flush at shutdown — and would lose events exactly at
-    # shutdown, which is when they matter most. `seq` is taken under the same lock as the
-    # write, so within a Run the numbers and the bytes in the file agree.
+    # shutdown, which is when they matter most.
+    #
+    # `seq` and both clocks are read under the same lock as the write, so a Run's three
+    # orderings — its numbers, its clock and the bytes in the file — can never disagree with
+    # each other. What that costs is the lock wait: on a contended write the stamps say when
+    # the event reached the file rather than when it was observed, microseconds earlier.
+    # Cheap, because the lock is held for one JSON.generate and one append to a page-cached
+    # file, and worth it, because an ordering that disagrees with itself reads as a bug in
+    # the Reader.
     def emit(type, payload, request_id: nil)
       return if @disabled
 
-      at_mono = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
-      at_wall = Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
       payload, truncated = cut_oversized_fields(payload)
 
       @mutex.synchronize do
@@ -84,7 +90,9 @@ module RailsLogReader
 
         envelope = {
           v: WIRE_VERSION, run_id: @run_id, seq: (@seq += 1),
-          at_mono:, at_wall:, request_id:, type:, payload:
+          at_mono: Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond),
+          at_wall: Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond),
+          request_id:, type:, payload:
         }
         envelope[:truncated] = truncated if truncated
 
@@ -199,12 +207,12 @@ module RailsLogReader
       # Recursive, because a 10 MB string arrives nested inside `params` or `binds` as easily
       # as it arrives as the field itself — and so does the backtrace this must not touch,
       # which a request_finish carries inside its `exception`.
-      def cut_strings(name, value)
-        return value if KEPT_WHOLE.include?(name.to_s)
+      def cut_strings(field, value)
+        return value if KEPT_WHOLE.include?(field.to_s)
 
         case value
         when String then value.bytesize > MAX_FIELD_BYTES ? cut_string(value) : value
-        when Array then value.map { |element| cut_strings(name, element) }
+        when Array then value.map { |element| cut_strings(field, element) }
         when Hash then value.to_h { |key, nested| [key, cut_strings(key, nested)] }
         else value
         end

@@ -19,6 +19,9 @@ class DevelopmentLogTest < ActiveSupport::TestCase
     Rails.logger.tagged("Scenario") { Rails.logger.info "a tagged line" }
   RUBY
 
+  # What this can catch today is a stray boot warning. It starts covering what it is for when
+  # #21 attaches a sink to Rails.logger — the one change in the whole product that could
+  # rewrite this file for everyone on the team.
   test "log/development.log is byte-identical to a Run that never had the Initializer" do
     enabled = DevelopmentRun.boot(script: TRAFFIC)
     untouched = DevelopmentRun.boot(script: TRAFFIC, initializer: false)

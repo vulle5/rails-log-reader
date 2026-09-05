@@ -17,8 +17,7 @@ class SidecarTest < ActiveSupport::TestCase
     assert_operator run.sidecar_size, :<, 1024, "the file was not emptied"
     assert_equal %w[run_header run_end], run.events.map { |event| event["type"] },
       "the Run's own events are all that should be left"
-    assert_equal 1, run.development_log.lines.grep(/rails_log_reader/).size,
-      "expected exactly one warning:\n#{run.development_log}"
+    assert_equal 1, run.warnings.size, "expected exactly one warning:\n#{run.development_log}"
     assert_match(/64 MB/, run.development_log)
   end
 
@@ -31,8 +30,8 @@ class SidecarTest < ActiveSupport::TestCase
     end
 
     assert run.booted?, run.output
-    assert run.sidecar.start_with?(earlier), "an earlier Run's events were thrown away"
-    assert_no_match(/rails_log_reader/, run.development_log)
+    assert run.sidecar_bytes.start_with?(earlier), "an earlier Run's events were thrown away"
+    assert_empty run.warnings
   end
 
   # No event this Initializer emits yet has a field that could reach 64 KB, so the Run is
@@ -63,8 +62,7 @@ class SidecarTest < ActiveSupport::TestCase
     assert run.booted?, run.output
     assert_includes run.output, "the app booted"
     assert_not run.sidecar?
-    assert_equal 1, run.development_log.lines.grep(/rails_log_reader/).size,
-      "expected exactly one warning:\n#{run.development_log}"
+    assert_equal 1, run.warnings.size, "expected exactly one warning:\n#{run.development_log}"
   end
 
   # The exemption has to survive the shape a backtrace actually arrives in: nested inside a

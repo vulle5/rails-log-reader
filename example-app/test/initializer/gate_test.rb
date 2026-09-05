@@ -16,6 +16,10 @@ class GateTest < ActiveSupport::TestCase
     )
   RUBY
 
+  # Three of the four promises are inert today, and are meant to be: nothing of ours is
+  # installed yet, so they would pass with the gate deleted. They start biting as #19, #20
+  # and #21 insert the middleware, register the subscribers and attach the sink — which is
+  # the moment a missing gate would first cost a teammate something.
   test "with no Marker file the Initializer installs nothing, and leaves no Sidecar behind" do
     installed = DevelopmentRun.boot(script: FINGERPRINT, marker: false)
     absent = DevelopmentRun.boot(script: FINGERPRINT, marker: false, initializer: false)
@@ -71,8 +75,7 @@ class GateTest < ActiveSupport::TestCase
 
     assert run.booted?, "a log reader must never be what stops an app booting:\n#{run.output}"
     assert_not run.sidecar?
-    assert_equal 1, run.development_log.lines.grep(/rails_log_reader/).size,
-      "expected exactly one warning:\n#{run.development_log}"
+    assert_equal 1, run.warnings.size, "expected exactly one warning:\n#{run.development_log}"
     assert_match(/broadcast_to/, run.development_log,
       "the warning has to name the mechanism, not just complain about a version")
     assert_match(/7\.0\.8/, run.development_log)
