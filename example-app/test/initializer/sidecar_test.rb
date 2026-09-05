@@ -34,19 +34,52 @@ class SidecarTest < ActiveSupport::TestCase
     assert_empty run.warnings
   end
 
-  # No event this Initializer emits yet has a field that could reach 64 KB, so the Run is
-  # asked to write one through the same front door every subscriber will use.
+  # Driven through a real request rather than RailsLogReader.emit directly, now that one
+  # exists: request_route's `params` is the first payload #18 didn't have, and the ordinary
+  # way a field gets this large is a request carrying an oversized query value, not a test
+  # calling the writer's own front door.
   test "a field past 64 KB is cut, and the file records how long it really was" do
+    huge = "x" * 100_000
+    run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts", params: { spoiler: huge }))
+
+    assert run.booted?, run.output
+    route = run.events_of("request_route").sole
+
+    assert_operator route["payload"]["params"]["spoiler"].bytesize, :<, huge.bytesize
+    assert_equal %w[action controller spoiler], route["payload"]["params"].keys.sort,
+      "a params hash losing a key would say the request never carried it — it must keep all three"
+    assert_operator route["truncated"]["params"], :>, 64 * 1024
+  end
+
+  # ADR-0003's line cap, past ADR-0002's field cap: nothing here writes a field over 64 KB
+  # except a backtrace, kept whole on purpose, so it is the one thing that can still make a
+  # single line this large. Unlike the field cap, the line cap is allowed to touch it — a
+  # write(2) too large to be atomic is the one way append order can be corrupted.
+  #
+  # Driven through RailsLogReader.emit rather than a real request, unlike the 64 KB test
+  # above: reaching 256 KB needs tens of thousands of frames, and the only way to make a
+  # real request raise with a backtrace that deep is scaffolding built for no other reason
+  # than to be deep — worse than naming the writer's own front door. RequestTest already
+  # proves a real exception's real backtrace reaches request_finish intact; this test's job
+  # is the cap itself, at a scale nothing in the Example app can produce honestly.
+  test "a line past 256 KB is shrunk further, backtrace included, and the file says so" do
+    frames = ["a frame of it"] * 30_000
     run = DevelopmentRun.boot(script: <<~RUBY)
-      RailsLogReader.emit("app_log", { severity: "info", message: "x" * 100_000, source: "app", tags: [] })
+      RailsLogReader.emit("request_finish", {
+        status: 500, duration_ms: 1.0,
+        exception: { class: "RuntimeError", message: "boom", backtrace: #{frames.inspect} }
+      })
     RUBY
 
     assert run.booted?, run.output
-    logged = run.events_of("app_log").sole
+    finish = run.events_of("request_finish").sole
+    line = run.lines[run.events.index(finish)]
 
-    assert_equal 64 * 1024, logged["payload"]["message"].bytesize
-    assert_equal({ "message" => 100_000 }, logged["truncated"],
-      "the original byte length is what lets the Reader say 'showing 64KB of 98KB'")
+    assert_operator line.bytesize, :<=, 256 * 1024
+    assert_operator finish["truncated"]["exception"], :>, 256 * 1024,
+      "the original byte length, from before any shrinking, is what the Reader shows"
+    assert_operator finish["payload"]["exception"]["backtrace"].size, :<, frames.size,
+      "past the line cap a backtrace is shed from its tail rather than kept whole"
   end
 
   # An unwritable log/ is the case that cannot report itself into the Sidecar, which is why
@@ -67,6 +100,12 @@ class SidecarTest < ActiveSupport::TestCase
 
   # The exemption has to survive the shape a backtrace actually arrives in: nested inside a
   # request_finish's `exception`, not as a field of its own.
+  #
+  # Still driven through RailsLogReader.emit, not a real request: this proves the exemption
+  # holds *at scale* — hundreds of KB past the cap — which no real Example app route can
+  # produce without a controller action built only to recurse. RequestTest's exception test
+  # already re-drives the exemption itself through a real, ordinary-sized backtrace; this
+  # one is the writer's own robustness test, not a second copy of that.
   test "a backtrace is kept whole however far past the cap it runs" do
     run = DevelopmentRun.boot(script: <<~RUBY)
       RailsLogReader.emit("request_finish", {

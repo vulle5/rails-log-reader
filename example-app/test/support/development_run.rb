@@ -43,8 +43,12 @@ class DevelopmentRun
 
     def sidecar_size = sidecar_bytes&.bytesize
 
+    # Raw lines, in append order — for assertions about the bytes themselves (the 256 KB
+    # line cap) rather than about what they parse into.
+    def lines = sidecar_bytes.to_s.each_line.to_a
+
     # One JSON object per line, in append order — which is the order the Reader reads them in.
-    def events = sidecar_bytes.to_s.each_line.map { |line| JSON.parse(line) }
+    def events = lines.map { |line| JSON.parse(line) }
 
     def events_of(type) = events.select { |event| event["type"] == type }
 
@@ -75,6 +79,19 @@ class DevelopmentRun
         # A test may have made `log/` unwritable; the temp root still has to be removable.
         FileUtils.chmod_R("u+rwX", root, force: true)
       end
+    end
+
+    # The one real HTTP request the request-event tests drive: an in-process Integration
+    # session against the app the Run just booted, so a test exercises the actual middleware
+    # and subscriber stack rather than calling RailsLogReader.emit as its own front door.
+    # `host!` sidesteps ActionDispatch::HostAuthorization, which blocks the Integration
+    # session's default host otherwise.
+    def real_request(path, params: {})
+      <<~RUBY
+        session = ActionDispatch::Integration::Session.new(Rails.application)
+        session.host! "localhost"
+        session.get(#{path.inspect}, params: #{params.inspect})
+      RUBY
     end
 
     private

@@ -40,7 +40,11 @@ type EventEnvelope<T extends EventType, Payload> = {
   at_wall: number
   /** `null` means unattributed: its Run owns it. */
   request_id: string | null
-  /** Field name -> original byte length, for the fields truncated at 64 KB. Backtraces are exempt. */
+  /**
+   * Field name -> original byte length. Backtraces are exempt from the 64 KB per-field cap,
+   * but not from the 256 KB whole-line cap — a single line that large can outrun one
+   * `write(2)`, so past that cap a backtrace is shrunk too, and recorded here like any other.
+   */
   truncated?: Record<string, number>
   type: T
   payload: Payload
