@@ -145,6 +145,132 @@ module RailsLogReader
       end
   end
 
+  # Object-form for one reason, and it is not the duration: `publish_event`. A `load_async`
+  # query is instrumented on a background thread and *replayed* on the request thread by
+  # ActiveRecord::FutureResult::EventBuffer#flush, which publishes the finished Event rather
+  # than calling start and finish. Fanout hands that to a subscriber's own `publish_event`
+  # if it has one and otherwise to `publish`, which this file does not define — so a
+  # subscriber without the method below loses every async query and says nothing. That
+  # cannot show up in the Example app, which configures no async query executor for
+  # `load_async` to use; it bites only in the tuned Work app this exists for.
+  #
+  # Every query is forwarded, including the SCHEMA and EXPLAIN ones ActiveRecord's own log
+  # subscriber drops: "why was the first request after a restart the slow one" is a question
+  # only the dropped ones answer.
+  class SqlSubscriber
+    # Neither call of the object form carries a duration, so the start's clock reading waits
+    # here for its finish. A stack, and per execution context, for the reason
+    # ActiveSupport::Subscriber keeps its own event stack the same way: only the thread that
+    # observed the start can close it.
+    def start(_name, _id, _payload)
+      RailsLogReader.guard { starts.push(now_ns) }
+    end
+
+    def finish(_name, _id, payload)
+      started_at = starts.pop
+      # Nothing to pop is a query that was already in flight on this thread when this
+      # subscriber was registered at boot. There is no duration to give it, and inventing
+      # one would be a worse answer than the one boot-time query this costs.
+      return unless started_at
+
+      RailsLogReader.guard { record(payload, (now_ns - started_at) / 1_000_000.0) }
+    end
+
+    # `event.time` is float milliseconds off the same CLOCK_MONOTONIC everything else here
+    # reads, taken on the background thread when the query really went to the database — so
+    # it, and not this moment, is the `at_mono` ADR-0002 asks for while `seq` records the
+    # replay. `event.duration` is Rails' own measurement of a query this thread never saw run.
+    def publish_event(event)
+      RailsLogReader.guard do
+        record(event.payload, event.duration, at_mono: (event.time * 1_000_000).round)
+      end
+    end
+
+    private
+      def starts = ActiveSupport::IsolatedExecutionState[:rails_log_reader_sql_starts] ||= []
+
+      def now_ns = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
+
+      def record(payload, duration_ms, at_mono: nil)
+        query = { sql: payload[:sql], name: payload[:name], duration_ms:,
+                  cached: payload[:cached] || false, async: payload[:async] || false }
+        # Rails 7.1 and 7.2 carry no `:row_count` at all — nor the `:transaction` this file
+        # has no use for — and absence is absence: the field is left off the wire rather
+        # than sent as a zero that would read as a query returning nothing.
+        query[:row_count] = payload[:row_count] if payload.key?(:row_count)
+        query[:binds] = binds(payload)
+
+        RailsLogReader.emit("sql", query, request_id: Current.request_id, at_mono:)
+      end
+
+      # Filtered here, by us, with the filter `ActiveRecord::Base#inspect` uses, because
+      # development.log redacts bind values and a file that did not would be a downgrade the
+      # developer never asked for. An empty list is the ordinary case, not a degraded one:
+      # mysql2 and trilogy never parameterize at the wire level, and any app with QueryLogs
+      # enabled has prepared statements switched off, which puts every value in the SQL
+      # string instead.
+      def binds(payload)
+        binds = payload[:binds]
+        return [] if binds.nil? || binds.empty?
+
+        casted = casted_binds(payload, binds)
+        filter = ActiveRecord::Base.inspection_filter
+
+        binds.each_with_index.map do |bind, index|
+          serialize(filter.filter_param(name_of(bind), casted[index]))
+        end
+      end
+
+      # `type_casted_binds` is the value as the adapter would send it, and it arrives as a
+      # lazy Proc when the query cache re-instruments a hit — hence "whenever it is
+      # callable", which is what ActiveRecord::LogSubscriber does and the reason a CACHE line
+      # in development.log has values at all. An adapter that carries fewer of them than
+      # there are binds — none at all, or an empty array beside a full one — falls back to
+      # the binds' own values, because indexing past the end of that list would put a row of
+      # `null`s on the wire and `null` is a legal bind value the Reader would render.
+      def casted_binds(payload, binds)
+        casted = payload[:type_casted_binds]
+        casted = casted.call if casted.respond_to?(:call)
+        return casted if casted && casted.size >= binds.size
+
+        binds.map { |bind| bind.respond_to?(:value) ? bind.value : bind }
+      end
+
+      # Only ever to give the filter something to match on — the name itself never reaches
+      # the wire. An ActiveModel::Attribute knows its own; some adapters hand binds over as
+      # [attribute, value] pairs instead.
+      def name_of(bind)
+        return bind.name if bind.respond_to?(:name)
+
+        bind.first.name if bind.is_a?(Array) && bind.first.respond_to?(:name)
+      end
+
+      # The spec's stated assumption, and the smallest thing that cannot crash the append: a
+      # value that is already a JSON primitive goes as-is, anything else goes as its `to_s`.
+      # The filter has already run by the time a value gets here, and `[FILTERED]` is a
+      # delegator around a String rather than a String, so it takes the `to_s` branch and
+      # stays filtered. How any of this is *displayed* is the Reader's problem, not this
+      # file's.
+      def serialize(value)
+        case value
+        when nil, true, false, Integer then value
+        when Float then value.finite? ? value : value.to_s
+        when Time, DateTime then value.iso8601(3)
+        when String then utf8(value)
+        else utf8(value.to_s)
+        end
+      end
+
+      # JSON.generate raises on a string that is not valid UTF-8, and a raise inside `emit`
+      # costs the Run every event after it. A binary column's value is exactly such a string,
+      # so it goes as its size — which is what development.log shows for one too.
+      def utf8(string)
+        return string if string.encoding != Encoding::BINARY && string.valid_encoding?
+
+        "<#{string.bytesize} bytes of binary data>"
+      end
+  end
+
   @mutex = Mutex.new
   @disabled = false
   @run_pid = nil
@@ -162,7 +288,13 @@ module RailsLogReader
     # Cheap, because the lock is held for one JSON.generate and one append to a page-cached
     # file, and worth it, because an ordering that disagrees with itself reads as a bug in
     # the Reader.
-    def emit(type, payload, request_id: nil)
+    #
+    # `at_mono` is that stamp for everything but the one case ADR-0002 named: a `load_async`
+    # query, issued on a background thread and replayed on the request thread long after.
+    # There `seq` records the replay and `at_mono` has to record the issue, which is the
+    # whole reason the envelope carries both — so a caller that knows the true moment hands
+    # it in rather than letting this method invent a later one.
+    def emit(type, payload, request_id: nil, at_mono: nil)
       return if @disabled
 
       payload, truncated = cut_oversized_fields(payload)
@@ -174,7 +306,7 @@ module RailsLogReader
 
         envelope = {
           v: WIRE_VERSION, run_id: @run_id, seq: (@seq += 1),
-          at_mono: Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond),
+          at_mono: at_mono || Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond),
           at_wall: Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond),
           request_id:, type:, payload:
         }
@@ -258,11 +390,19 @@ module RailsLogReader
       end
     end
 
+    # The third and last thing the bottom of this file runs, sharing `start`'s backstop for
+    # the same reason the other two do.
+    def install_sql_events
+      guard_boot do
+        ActiveSupport::Notifications.subscribe("sql.active_record", SqlSubscriber.new)
+      end
+    end
+
     private
-      # The backstop under `start` and `install_request_events`, both of which run once, at
-      # boot. Whatever goes wrong inside, the one thing that must not happen is this file
-      # being the reason an app fails to boot — so, unlike `guard`, this one is not silent:
-      # it is a boot-time refusal, the kind ADR-0004 says warns exactly once.
+      # The backstop under the three methods above, all of which run once, at boot. Whatever
+      # goes wrong inside, the one thing that must not happen is this file being the reason
+      # an app fails to boot — so, unlike `guard`, this one is not silent: it is a boot-time
+      # refusal, the kind ADR-0004 says warns exactly once.
       def guard_boot
         yield
       rescue StandardError => e
@@ -343,9 +483,9 @@ module RailsLogReader
 
       # Recursive, and the one place this file's three truncation shapes diverge, because
       # they are not the same honesty problem. A String is cut from the end — a shortened
-      # string still says what it says. An Array — a backtrace today, a bind list once #20
-      # lands — sheds elements from its tail, its least-informative end, which for a
-      # backtrace is the framework frames farthest from where it actually broke. A Hash
+      # string still says what it says. An Array — a backtrace, or a bind list — sheds
+      # elements from its tail, its least-informative end, which for a backtrace is the
+      # framework frames farthest from where it actually broke. A Hash
       # never loses a key: a `params` hash missing one would be a lie about what the request
       # carried, so its values are shrunk instead, evenly, and no key goes unaccounted for.
       #
@@ -445,3 +585,4 @@ end
 
 RailsLogReader.start
 RailsLogReader.install_request_events
+RailsLogReader.install_sql_events

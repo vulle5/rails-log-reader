@@ -9,9 +9,13 @@ class RequestTest < ActiveSupport::TestCase
     run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts"))
 
     assert run.booted?, run.output
-    _header, start, route, finish, _ending = run.events
+    # By type rather than by position in the file: since #20 the request's own queries sit
+    # between these three, which is the entire point of them. `sole` is the assertion that
+    # there is exactly one of each.
+    start = run.events_of("request_start").sole
+    route = run.events_of("request_route").sole
+    finish = run.events_of("request_finish").sole
 
-    assert_equal %w[request_start request_route request_finish], [start, route, finish].map { |event| event["type"] }
     assert_match(/\A[0-9a-f-]{36}\z/, start["request_id"])
     assert_equal [start["request_id"]] * 3, [start, route, finish].map { |event| event["request_id"] },
       "all three belong to the one request they narrate"

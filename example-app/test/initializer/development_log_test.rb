@@ -8,8 +8,9 @@ require "support/development_run"
 class DevelopmentLogTest < ActiveSupport::TestCase
   # Deliberately traffic that logs and nothing else. Development's formatter writes no
   # timestamp, so two Runs of this produce the same bytes and the comparison can be exactly
-  # what it claims — no masking, no normalising, no "identical apart from". Requests and SQL
-  # join it when the Initializer starts capturing them (#19, #20).
+  # what it claims — no masking, no normalising, no "identical apart from". Requests and
+  # queries cannot join it and never will: Rails logs a duration for both, and no two Runs
+  # of anything measure the same one.
   TRAFFIC = <<~RUBY
     Rails.logger.debug "a debug line"
     Rails.logger.info "an info line"
