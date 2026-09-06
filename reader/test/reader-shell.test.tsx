@@ -59,11 +59,18 @@ describe("opening the Reader", () => {
     }
   })
 
-  test("shows the Console and the Activity table empty, because nothing is captured yet", async () => {
+  test("shows the Console empty, because nothing is captured yet", async () => {
     const container = await openTheReader()
 
     expect(body(column(container, "Console")).children).toHaveLength(0)
-    expect(body(column(container, "Activity table")).children).toHaveLength(0)
+  })
+
+  test("heads the Activity table with its columns before there is a single row to put under them", async () => {
+    const container = await openTheReader()
+    const table = body(column(container, "Activity table")).querySelector("table.activity")
+
+    expect(table?.querySelectorAll("thead th").length).toBeGreaterThan(0)
+    expect(table?.querySelectorAll("tbody tr")).toHaveLength(0)
   })
 
   test("holds the Detail column open on a placeholder, so selecting never reflows the layout", async () => {

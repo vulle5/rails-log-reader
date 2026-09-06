@@ -8,6 +8,7 @@
   --fg: #14181d;
   --fg-muted: #5c6773;
   --fg-faint: #8b95a1;
+  --accent: #2f6feb;
   --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
@@ -21,6 +22,7 @@
     --fg: #e4e8ee;
     --fg-muted: #9aa5b1;
     --fg-faint: #6b7682;
+    --accent: #6ea0ff;
   }
 }
 
@@ -95,4 +97,93 @@ body {
   padding: 20px;
   color: var(--fg-faint);
   text-align: center;
+}
+
+/* The Activity table is dense and its rows are a fixed height, so a row that gains a
+   status or a duration changes what it says without changing what it displaces — and the
+   eye can hold a position in a table that is being appended to underneath it. */
+.activity {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.activity-row {
+  height: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.activity td {
+  height: 24px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-started,
+.cell-status,
+.cell-method,
+.cell-path,
+.cell-action,
+.cell-count,
+.cell-ms {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cell-started {
+  color: var(--fg-faint);
+}
+
+.cell-method {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* The path is the column given the slack, and — with Controller#action — the one that may
+   be cut when there is none: everything else is a fixed handful of characters wide. */
+.column-path {
+  width: 100%;
+}
+
+.cell-path {
+  max-width: 40ch;
+}
+
+.cell-action {
+  max-width: 28ch;
+  color: var(--fg-muted);
+}
+
+.column-sql,
+.column-log,
+.column-db,
+.column-view,
+.column-total,
+.cell-count,
+.cell-ms {
+  text-align: right;
+  color: var(--fg-muted);
+}
+
+.cell-total {
+  font-weight: 600;
+  color: var(--fg);
 }
