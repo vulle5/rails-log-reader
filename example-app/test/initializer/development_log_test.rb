@@ -20,9 +20,11 @@ class DevelopmentLogTest < ActiveSupport::TestCase
     Rails.logger.tagged("Scenario") { Rails.logger.info "a tagged line" }
   RUBY
 
-  # What this can catch today is a stray boot warning. It starts covering what it is for when
-  # #21 attaches a sink to Rails.logger — the one change in the whole product that could
-  # rewrite this file for everyone on the team.
+  # Since #21 attached a sink to Rails.logger this covers what it is for, rather than merely
+  # a stray boot warning: that sink is the one change in the whole product that could rewrite
+  # this file for everyone on the team. The tagged line above is what catches it — build the
+  # sink the way RailsLogReader::LoggerSink documents at length that it must not be built,
+  # and it arrives here twice.
   test "log/development.log is byte-identical to a Run that never had the Initializer" do
     enabled = DevelopmentRun.boot(script: TRAFFIC)
     untouched = DevelopmentRun.boot(script: TRAFFIC, initializer: false)

@@ -16,10 +16,10 @@ class GateTest < ActiveSupport::TestCase
     )
   RUBY
 
-  # Three of the four promises bite already: a Sidecar has existed since #18, #19 inserted
-  # the middleware and #20 registered the subscribers. The sink is the one still inert, and
-  # is meant to be — that line would pass with the gate deleted until #21 attaches one,
-  # which is the promise a missing gate would cost a teammate most of all.
+  # All four promises bite now: #18 wrote a Sidecar, #19 inserted the middleware, #20
+  # registered the subscribers and #21 attached the sink. Each of those lines would fail with
+  # the gate deleted, which is what makes this a test of the gate rather than a description
+  # of one.
   test "with no Marker file the Initializer installs nothing, and leaves no Sidecar behind" do
     installed = DevelopmentRun.boot(script: FINGERPRINT, marker: false)
     absent = DevelopmentRun.boot(script: FINGERPRINT, marker: false, initializer: false)

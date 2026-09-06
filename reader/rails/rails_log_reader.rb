@@ -271,6 +271,153 @@ module RailsLogReader
       end
   end
 
+  # The sink on Rails.logger, and the one piece of this file that could rewrite what a
+  # colleague reads. `broadcast_to` appends it, so development.log's own logger stays first
+  # in the broadcast and keeps answering for it: `dispatch` returns the first sink's value,
+  # and `Rails.logger.formatter` hands back the first sink's formatter.
+  #
+  # A plain ::Logger, never an ActiveSupport::TaggedLogging one, and the reason is not taste.
+  # A call a BroadcastLogger does not dispatch itself goes through `method_missing`, which
+  # forwards to *every* sink that responds and — unlike `dispatch` — does not memoise the
+  # block. With two tagged sinks in the broadcast, `Rails.logger.tagged("X") { ... }` runs
+  # its block twice and development.log gains the line twice, once tagged and once not,
+  # because the first sink has already popped by the time the second runs it; `push_tags`
+  # comes back as [["X"], ["X"]], so `tagged` then pops two tags for one push. Measured
+  # against the Example app, not deduced. This sink responds to none of that, so a tag can
+  # only ever be read.
+  #
+  # One capture gap comes with that, and it is Rails' own rather than ours:
+  # `Rails.logger.tagged("X")` *without* a block returns a tagged clone of whichever single
+  # sink answered — development.log's — and lines written through that object never reach the
+  # broadcast, so they never reach here. It read exactly that way before this sink existed.
+  class LoggerSink < ::Logger
+    SEVERITIES = %w[debug info warn error fatal unknown].freeze
+
+    # Stripped, never interpreted: development.log carries ANSI because a terminal reads it,
+    # and the Reader is not a terminal. Every colourised Rails line has these — the SQL
+    # `verbose_query_logs` writes most of all.
+    ANSI = /\e\[[0-9;]*[a-zA-Z]/
+
+    # Deep enough to clear the five frames a broadcast dispatch costs, and bounded because
+    # this runs on every log line and a full backtrace is not free.
+    FRAME_DEPTH = 12
+
+    # Level UNKNOWN, and yet nothing here is filtered by level — the two are one decision.
+    # `BroadcastLogger#level` is the *minimum* across its sinks and every `debug?` is an
+    # `any?`, so a sink claiming the highest severity there is cannot change a single answer
+    # the broadcast gives about itself, while an `add` that reads no level drops nothing that
+    # reaches it. What `log_level` hides is development.log's business; the Console's own
+    # per-level chips are the Reader's, and they need the lines to be there to hide them.
+    #
+    # The same reasoning is why this is not an ActiveSupport::Logger: that one answers
+    # `local_level=`, which is how `silence` works, so `config.assets.quiet` and every
+    # `logger.silence` block would reach in here and take lines out. A sink that cannot be
+    # silenced keeps them, exactly as SqlSubscriber keeps the SCHEMA queries Rails' own log
+    # subscriber drops.
+    def initialize
+      super(nil, level: UNKNOWN)
+
+      # Both of these are asked of Ruby rather than spelled out, so a gem update that moves a
+      # file cannot quietly relabel every line in the Console — and both are asked *here*
+      # rather than in a constant, which would be evaluated as this file is read and so
+      # outside `guard_boot`'s reach. Where a method lives is exactly the kind of question a
+      # Rails version this has never met could answer with a NameError, and a log reader must
+      # never be the thing that stops an app from booting. Built inside
+      # `install_app_log_events`, that costs the Console and one warning instead.
+      #
+      # The machinery is the files that stand between a `Rails.logger.info` and the `add`
+      # below: the broadcast that dispatched it, ::Logger's own severity methods, and this
+      # file. The gem roots are where the installed gems sit, taken from the specs Bundler
+      # activated — one directory in the ordinary case, a second when the bundle holds a
+      # git-sourced gem, and whatever `vendor/bundle` adds when an app keeps its gems inside
+      # its own root.
+      @machinery_paths = [
+        __FILE__,
+        ::Logger.instance_method(:add).source_location&.first,
+        ActiveSupport::BroadcastLogger.instance_method(:info).source_location&.first
+      ].compact.freeze
+
+      @gem_roots = Gem.loaded_specs.values.map { |spec| File.dirname(spec.full_gem_path) }.uniq.freeze
+    end
+
+    # Where every logging call on the broadcast arrives: `info`, `debug` and the rest all
+    # funnel into `add`. `log` is ::Logger's own alias for it, and an alias keeps the method
+    # it was given — so without the one below, `Rails.logger.log(...)` would still reach the
+    # original, which writes to a log device this sink does not have and loses the line
+    # without a word.
+    def add(severity, message = nil, progname = nil)
+      severity ||= UNKNOWN
+      frames = caller_locations(1, FRAME_DEPTH)
+
+      RailsLogReader.guard do
+        # The block form is the one place this sink could change what the app itself does.
+        # BroadcastLogger#dispatch memoises the block so that it runs once for the whole
+        # broadcast — but only once *something* runs it, and a sink whose level suppresses
+        # the line never does. Being last in the broadcast, ours would then be the first and
+        # only caller: a `logger.debug { expensive }` that a Work app's log_level had made
+        # free would start costing it again, and a block that raises — dead code until now —
+        # would raise out of this method and into the developer's request. So the block is
+        # read only once the rest of the broadcast has already read it, which
+        # `Rails.logger.level` answers exactly, this sink's own UNKNOWN being unable to lower
+        # that minimum. There is no message to record without it, so there is no event.
+        #
+        # A message that arrived already built is a different question and gets the opposite
+        # answer, above: keeping a string the app has already paid for costs it nothing.
+        if message.nil? && block_given?
+          next unless Rails.logger.level <= severity
+
+          message = yield
+        end
+
+        record(severity, message.nil? ? progname : message, frames)
+      end
+
+      true
+    end
+    alias_method :log, :add
+
+    # ::Logger writes `<<` straight to its log device, bypassing `add` and every severity
+    # there is. Whatever the caller meant by it, they did not say.
+    def <<(message) = add(UNKNOWN, message)
+
+    private
+      def record(severity, message, frames)
+        RailsLogReader.emit("app_log", {
+          severity: SEVERITIES.fetch(severity, "unknown"),
+          message: message.to_s.gsub(ANSI, ""),
+          source: source_of(frames),
+          tags: current_tags
+        }, request_id: Current.request_id)
+      end
+
+      # Deterministic, and never a guess at the message's shape: the first frame that is not
+      # the logging machinery is whoever wrote the line, and a frame inside a gem is not the
+      # developer. That is the split the Console needs — mine and not-mine — so Rails' own
+      # lines and a third-party gem's are both `rails`, and a line from `app/`, from
+      # `lib/tasks`, from an initializer or typed into `rails c` is `app` wherever its file
+      # happens to sit. An app carrying an engine as a `path:` gem is the coarse case: those
+      # frames sit under a gem root too, and read as `rails`.
+      def source_of(frames)
+        frame = frames&.find { |location| !@machinery_paths.include?(location.path) }
+        return "rails" unless frame&.path
+
+        frame.path.start_with?(*@gem_roots) ? "rails" : "app"
+      end
+
+      # Read, and only ever read. `Rails.logger.formatter` is dispatched to every sink and
+      # answers with the first one's, which is development.log's own tagged formatter — so
+      # these are exactly the tags that file is being written with, a team's custom
+      # `log_tags` included, and the push/pop accounting behind them is never touched.
+      # `respond_to?` because an app that replaced its formatter has no tags, which is not an
+      # error.
+      def current_tags
+        formatter = Rails.logger.formatter
+        return [] unless formatter.respond_to?(:current_tags)
+
+        formatter.current_tags.map(&:to_s)
+      end
+  end
+
   @mutex = Mutex.new
   @disabled = false
   @run_pid = nil
@@ -390,16 +537,39 @@ module RailsLogReader
       end
     end
 
-    # The third and last thing the bottom of this file runs, sharing `start`'s backstop for
-    # the same reason the other two do.
+    # The third of the four things the bottom of this file runs, sharing `start`'s backstop
+    # for the same reason the others do.
     def install_sql_events
       guard_boot do
         ActiveSupport::Notifications.subscribe("sql.active_record", SqlSubscriber.new)
       end
     end
 
+    # The fourth and last, and the one that has to come after `start`: the sink starts
+    # capturing the moment it is attached, so it is attached only once there is somewhere to
+    # write to.
+    def install_app_log_events
+      guard_boot do
+        # Rails wraps whatever `config.logger` is in a BroadcastLogger at boot, so this is
+        # only ever false when something replaced Rails.logger afterwards — a gem's railtie
+        # initializer runs before this file does. The branch is here rather than left to
+        # `guard_boot` because of what the two cost: an unguarded `broadcast_to` would raise,
+        # and `guard_boot` would disable this file for the whole Run, taking requests and
+        # queries down with the Console. Nothing else here depends on a sink, so this refuses
+        # the Console alone and says which one it refused.
+        if Rails.logger.respond_to?(:broadcast_to)
+          Rails.logger.broadcast_to(LoggerSink.new)
+        else
+          Rails.logger.warn(
+            "[rails_log_reader] no app_log events: Rails.logger is a #{Rails.logger.class}, " \
+            "which cannot be broadcast to. Requests and queries are unaffected."
+          )
+        end
+      end
+    end
+
     private
-      # The backstop under the three methods above, all of which run once, at boot. Whatever
+      # The backstop under the four methods above, all of which run once, at boot. Whatever
       # goes wrong inside, the one thing that must not happen is this file being the reason
       # an app fails to boot — so, unlike `guard`, this one is not silent: it is a boot-time
       # refusal, the kind ADR-0004 says warns exactly once.
@@ -586,3 +756,4 @@ end
 RailsLogReader.start
 RailsLogReader.install_request_events
 RailsLogReader.install_sql_events
+RailsLogReader.install_app_log_events

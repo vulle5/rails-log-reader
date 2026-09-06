@@ -35,7 +35,11 @@ against it with only the Initializer added, opt-in per developer.
 **Event** — a single thing the Rails process emitted. Three kinds in v1:
 - **Request event** — an HTTP request. Has a start and a finish; is *in-flight* between them.
 - **SQL event** — one database query, attributed to a request.
-- **App log event** — a bare `Rails.logger.*` call from application code.
+- **App log event** — one `Rails.logger.*` call, whoever made it. The developer's own and
+  Rails' own alike, kept and labelled apart by a `source` of `app` or `rails` rather than
+  one of them dropped: `Started GET` is all a request that died before reaching a
+  controller ever says about itself. Which one it is, is read from `caller_locations` —
+  a frame inside a gem is not the developer — and never from the message's shape.
 
 **Scenario** — a named, reproducible traffic pattern the Example app generates on demand:
 parallel in-flight requests, an N+1-shaped request, a slow query, a request that hangs, a
