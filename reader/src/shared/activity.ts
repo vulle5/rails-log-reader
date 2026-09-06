@@ -45,11 +45,18 @@ export type RequestRow = {
   dbRuntimeMs: number | null
   viewRuntimeMs: number | null
   sqlCount: number
+  /**
+   * App log events, *Echoes* excluded — the count and the timeline are one number and one
+   * list of the same thing, so a table reading `12` beside a column showing eight lines
+   * cannot happen. Counting them would also make this column nearly a restatement of the
+   * one beside it: Rails echoes every query, so the two would rise together.
+   */
   logCount: number
   /**
    * The request's own timeline: its SQL and App log events interleaved, in the order they
    * were emitted, which is what lets a log line be read as the explanation of the query
-   * that follows it.
+   * that follows it. Minus the *Echoes* — the query lines Rails logs for
+   * `development.log`'s benefit, which are the SQL events beside them said again and worse.
    */
   timeline: readonly TimelineEvent[]
   /**
@@ -126,6 +133,7 @@ export function activityTable(): ActivityTable {
         backtraceCutFrom: null,
       },
       finishSeq: null,
+      echoing: null,
     }
     byRequest.set(requestId, folding)
     rows.push(folding.row)
@@ -142,6 +150,38 @@ export function activityTable(): ActivityTable {
     const trailing = folding.finishSeq !== null && event.seq > folding.finishSeq
     if (trailing) folding.row.trailing.push(event)
     else folding.row.timeline.push(event)
+  }
+
+  /**
+   * An *Echo*: ActiveRecord's own log subscriber writing out a query the Reader already
+   * holds as an SQL event. Rails logs every query twice by design — once through
+   * `sql.active_record`, which is where the Reader's structured event comes from, and once
+   * as a `debug` line for `development.log` to print — so a timeline that kept both would
+   * show every query twice, the second time worse: no binds, no row count, a rounded
+   * duration and no highlighting.
+   *
+   * The test is containment, not the message's shape: this line, written by Rails rather
+   * than by the developer, holds the previous query's SQL verbatim inside it. That is a
+   * fact about two payloads rather than a guess at a format, which is the same standard
+   * `source` is held to — and it is deliberately unable to prove anything about a line that
+   * is *not* an echo. So `↳ app/views/posts/index.html.erb:11`, the callsite Rails prints
+   * under a query when `verbose_query_logs` is on, stays: it is the one thing in those two
+   * lines the SQL event does not carry, and dropping it would cost the N+1 hunt its answer.
+   *
+   * Two ways this deliberately declines to fire, both of them the safe direction. A query
+   * whose SQL the wire had to cut cannot be found inside a line the wire also cut, so a
+   * truncated query keeps its echo and the developer sees the duplication rather than a
+   * silent guess. And an echo only ever answers for the query directly before it, because
+   * Rails writes it there and then — a match further back would be a coincidence.
+   */
+  function isEcho(folding: Folding, event: AppLogEvent) {
+    const query = folding.echoing
+    folding.echoing = null
+
+    if (query === null || event.payload.source !== "rails") return false
+    // A hand-written Sidecar line can carry an empty statement, and `includes("")` is true
+    // of every string there is.
+    return query.payload.sql !== "" && event.payload.message.includes(query.payload.sql)
   }
 
   function fold(envelopes: readonly Envelope[]) {
@@ -175,9 +215,13 @@ export function activityTable(): ActivityTable {
           break
         case "sql":
           row.sqlCount += 1
+          folding.echoing = envelope
           place(folding, envelope)
           break
         case "app_log":
+          // Dropped from the row rather than marked on it: the Console reads the envelope
+          // stream and not this fold, so the line itself survives where the log lives.
+          if (isEcho(folding, envelope)) break
           row.logCount += 1
           place(folding, envelope)
           break
@@ -197,4 +241,6 @@ export function activityTable(): ActivityTable {
 type Folding = {
   row: RequestRow & { timeline: TimelineEvent[]; trailing: TimelineEvent[] }
   finishSeq: number | null
+  /** The query an *Echo* could still be echoing: the last SQL event, until the next App log event. */
+  echoing: SqlEvent | null
 }

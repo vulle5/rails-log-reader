@@ -137,6 +137,25 @@ describe("the timeline", () => {
     expect(timeline(container)).toEqual(["SELECT 1", "Feed cache MISS", "SELECT 2", "Feed cache WRITE"])
   })
 
+  test("shows a query once, not beside the line Rails logged it as", async () => {
+    const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = 12 LIMIT 1 /*action='show'*/`
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", statement, { name: "Post Load" }),
+      run.log("req-1", `  Post Load (0.2ms)  ${statement}`, { severity: "debug", source: "rails" }),
+      run.log("req-1", "  \u21b3 app/controllers/posts_controller.rb:9", { severity: "debug", source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    await select(container, "/posts/12")
+
+    // The highlighted, bind-carrying event and its callsite — and not Rails' rounded,
+    // unhighlighted rendering of the query in between them.
+    expect(timeline(container)).toEqual([statement, "  \u21b3 app/controllers/posts_controller.rb:9"])
+    expect(entries(container, ".entry-sql")).toHaveLength(1)
+  })
+
   test("shows an App log event's severity and keeps a Rails line labelled apart", async () => {
     const run = aRun("srv-1")
     const container = await theReader(

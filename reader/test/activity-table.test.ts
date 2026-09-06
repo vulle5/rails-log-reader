@@ -385,6 +385,89 @@ describe("a request's timeline", () => {
     expect(rows[0]?.exception).toBeNull()
   })
 
+  test("drops the line Rails logs beside a query it already holds, keeping the callsite under it", async () => {
+    const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = 58 LIMIT 1 /*action='show'*/`
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", statement),
+      // What ActiveRecord's own log subscriber writes for that same query, and then the
+      // callsite `verbose_query_logs` puts under it.
+      run.log("req-1", `  Post Load (0.2ms)  ${statement}`, { severity: "debug", source: "rails" }),
+      run.log("req-1", "  \u21b3 app/controllers/posts_controller.rb:9", { severity: "debug", source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline.map(describeEvent)).toEqual([
+      statement,
+      "  \u21b3 app/controllers/posts_controller.rb:9",
+    ])
+    // The count and the timeline are one thing counted and the same thing listed.
+    expect(rows[0]).toMatchObject({ sqlCount: 1, logCount: 1 })
+  })
+
+  test("keeps a line the developer wrote themselves, even when they logged the query into it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1"),
+      // Someone debugging their own Arel. It says what Rails' line says and is not the same
+      // event: a developer's own call is the one thing the Console exists to keep findable.
+      run.log("req-1", "about to run SELECT 1", { source: "app" }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1", "about to run SELECT 1"])
+  })
+
+  test("keeps a Rails line that quotes a query from further back than the one before it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1"),
+      run.sql("req-1", "SELECT 2"),
+      // Rails writes a query's line there and then, so this one cannot be SELECT 1's.
+      run.log("req-1", "  Post Load (0.2ms)  SELECT 1", { severity: "debug", source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1", "SELECT 2", "  Post Load (0.2ms)  SELECT 1"])
+  })
+
+  test("keeps both lines when the query's SQL was cut, rather than guessing they are one", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const query = run.sql("req-1", "SELECT huge FROM enormous WHERE it = 'was cut here")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      { ...query, truncated: { sql: 812_400 } },
+      // Cut at its own cap, a few characters earlier, so it does not hold the statement.
+      run.log("req-1", "  Load (9.1ms)  SELECT huge FROM enormous WHERE it = 'was cut", {
+        severity: "debug",
+        source: "rails",
+      }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    // Duplicated on screen, which is the honest outcome: nothing here can prove they match.
+    expect(rows[0]?.timeline).toHaveLength(2)
+  })
+
   test("keeps the twenty-four queries of the N+1 request, in the order the file has them", async () => {
     const log = await aLogDirectory()
     await appendToSidecar(log, ...DENSE_TRAFFIC)

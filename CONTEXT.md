@@ -90,6 +90,19 @@ SQL events, and in the global *Console* stream. True of **every** App log event,
 attributed ones — an unattributed line is dual-homed against its *Run row* exactly as an
 attributed one is against its request. This is why every event needs an **ordering key**,
 not just a parent id: a `request_id` alone cannot interleave logs with queries.
+The one qualification is the *Echo*, which is homed in the Console alone.
+
+**Echo** — an App log event that is ActiveRecord's own rendering of an SQL event the
+Reader already holds. Rails logs every query twice by design: once through
+`sql.active_record`, which is where the structured SQL event comes from, and once as a
+`debug` line for `development.log` to print. The *detail column* shows the SQL event and
+drops the Echo — the same query said again and worse, with no binds, no row count, a
+rounded duration and no highlighting — while the *Console*, being the log, keeps it. An
+Echo is recognised by **containment**: a `rails`-sourced line holding the previous query's
+SQL verbatim. Never by the message's shape, and never further back than the query directly
+before it, because Rails writes the line there and then. What that deliberately cannot
+prove, it leaves alone: the `↳` callsite `verbose_query_logs` prints under a query is the
+one thing in those two lines the SQL event does not carry, and it stays.
 
 **Console** — a global, dev-tools-style stream of every App log event, attributed or
 not, in *append order*. Rendered as the **Console rail**, the leftmost of the Reader's
@@ -169,8 +182,8 @@ every job a worker ever ran lands in one undifferentiated row, which is precisel
 this is not the first-class background-job grouping v1 rules out.
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
-row's timeline: its SQL and App log events in `seq` order, the exception it raised if it
-did — backtrace full and uncleaned, gem frames included — and its *trailing section*.
+row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded — the
+exception it raised if it did — backtrace full and uncleaned, gem frames included — and its *trailing section*.
 Pinned once opened, so selecting never reflows the layout. Renders what the Initializer
 emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
 cut says so where it is read rather than passing as whole.
