@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SIDECAR_NAME } from "../src/server/sidecar"
-import type { Envelope, Severity } from "../src/shared/wire"
+import type { AppLogPayload, Envelope, RequestFinishPayload, SqlPayload } from "../src/shared/wire"
 
 /**
  * Seam 1's whole apparatus: a real `log/` directory with a real Sidecar in it, and an
@@ -105,24 +105,33 @@ export function aRun(runId: string) {
       envelope("request_start", requestId, { method, path }, at_wall),
     route: (requestId: string, controller = "PostsController", action = "show") =>
       envelope("request_route", requestId, { controller, action, format: "html", params: {} }),
-    finish: (
-      requestId: string,
-      finished: { status?: number; duration_ms?: number; view_runtime_ms?: number; db_runtime_ms?: number } = {},
-    ) =>
+    finish: (requestId: string, finished: Partial<RequestFinishPayload> = {}) =>
       // No view or db runtime unless a test asks for them: a request that died before
       // reaching a controller has neither, and Rails 7.1 and 7.2 carry neither ever.
       envelope("request_finish", requestId, { status: 200, duration_ms: 78.3, ...finished }),
-    sql: (requestId: string | null, sql = 'SELECT "posts".* FROM "posts"', duration_ms = 0.41) =>
+    // The rest of a payload is overridable rather than positional, because what a test about
+    // SQL wants to say next is as often `name: null` as it is a duration. The one positional
+    // field is `Omit`ted from the bag rather than left in it: two ways to set one field, one
+    // of which silently wins, is a fixture lying to the test that used the other.
+    sql: (
+      requestId: string | null,
+      sql = 'SELECT "posts".* FROM "posts"',
+      query: Omit<Partial<SqlPayload>, "sql"> = {},
+    ) =>
       envelope("sql", requestId, {
         sql,
         name: "Post Load",
-        duration_ms,
+        duration_ms: 0.41,
         cached: false,
         async: false,
         row_count: 1,
         binds: [12],
+        ...query,
       }),
-    log: (requestId: string | null, message = "Rendering posts/show.html.erb", severity: Severity = "info") =>
-      envelope("app_log", requestId, { severity, message, source: "app" as const, tags: [] }),
+    log: (
+      requestId: string | null,
+      message = "Rendering posts/show.html.erb",
+      line: Omit<Partial<AppLogPayload>, "message"> = {},
+    ) => envelope("app_log", requestId, { severity: "info", message, source: "app", tags: [], ...line }),
   }
 }

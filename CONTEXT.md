@@ -169,8 +169,11 @@ every job a worker ever ran lands in one undifferentiated row, which is precisel
 this is not the first-class background-job grouping v1 rules out.
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
-row's timeline: its SQL and App log events in `seq` order, plus its *trailing section*.
-Pinned once opened, so selecting never reflows the layout.
+row's timeline: its SQL and App log events in `seq` order, the exception it raised if it
+did — backtrace full and uncleaned, gem frames included — and its *trailing section*.
+Pinned once opened, so selecting never reflows the layout. Renders what the Initializer
+emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
+cut says so where it is read rather than passing as whole.
 
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed

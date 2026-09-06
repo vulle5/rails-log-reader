@@ -9,8 +9,21 @@
   --fg-muted: #5c6773;
   --fg-faint: #8b95a1;
   --accent: #2f6feb;
+  --selected: #e8effc;
   --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* One token per thing the SQL tokenizer can name, so the two themes differ in this block
+     and nowhere else. */
+  --sql-keyword: #8250df;
+  --sql-identifier: #0b5fa5;
+  --sql-string: #0a7c42;
+  --sql-number: #9a5400;
+  --sql-placeholder: #b02a6b;
+  --sql-comment: #8b95a1;
+
+  --warn: #9a6700;
+  --error: #cf222e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +36,17 @@
     --fg-muted: #9aa5b1;
     --fg-faint: #6b7682;
     --accent: #6ea0ff;
+    --selected: #1c2432;
+
+    --sql-keyword: #c792ea;
+    --sql-identifier: #79c0ff;
+    --sql-string: #7ee787;
+    --sql-number: #ffab70;
+    --sql-placeholder: #ff7b9c;
+    --sql-comment: #6b7682;
+
+    --warn: #e3b341;
+    --error: #ff7b72;
   }
 }
 
@@ -127,6 +151,18 @@ body {
 .activity-row {
   height: 24px;
   border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.activity-row:hover {
+  background: var(--bg-sunken);
+}
+
+/* The selected row and the detail column are one thing seen twice, so the mark has to be
+   readable at a glance from across the table — a background, not a hairline. */
+.activity-row-selected,
+.activity-row-selected:hover {
+  background: var(--selected);
 }
 
 .activity td {
@@ -186,4 +222,290 @@ body {
 .cell-total {
   font-weight: 600;
   color: var(--fg);
+}
+
+/* ---- the detail column ---------------------------------------------------- */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 24px;
+}
+
+/* Which request is being read, so the column says so without the table beside it. */
+.detail-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 12px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.detail-method {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.detail-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-action {
+  margin-left: auto;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Every entry starts at the same left edge and is laid out identically. That is the whole
+   mechanism behind an N+1 being obvious: fifty near-identical children become fifty blocks
+   the eye can see are the same, one chip apart. */
+.entry {
+  padding: 4px 12px 5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.entry-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.sql-marker {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+
+.sql-name {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.sql-duration {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* `pre-wrap` wraps a long query without touching a character of it: what is read is what
+   pastes into a console. */
+.sql {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sql-keyword {
+  color: var(--sql-keyword);
+  font-weight: 600;
+}
+
+.sql-identifier {
+  color: var(--sql-identifier);
+}
+
+.sql-string {
+  color: var(--sql-string);
+}
+
+.sql-number {
+  color: var(--sql-number);
+}
+
+.sql-placeholder {
+  color: var(--sql-placeholder);
+  font-weight: 600;
+}
+
+.sql-comment {
+  color: var(--sql-comment);
+  font-style: italic;
+}
+
+/* The caption is on screen, not only in the group's label: a row of chips under a query
+   reads as "what the database got" unless something says otherwise, and on trilogy that
+   reading is false. */
+.binds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.binds-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.bind-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bind {
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--fg-muted);
+}
+
+.bind-string {
+  color: var(--sql-string);
+}
+
+.bind-number {
+  color: var(--sql-number);
+}
+
+.bind-boolean {
+  color: var(--sql-keyword);
+}
+
+.bind-null {
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
+/* Not styled as an error — nothing failed. It is the file saying what it could not carry,
+   and it has to be legible without pretending the query is broken. */
+.cut {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--fg-faint);
+}
+
+/* A log line is one line, laid out across rather than down, so a run of queries is not
+   broken up by something that looks like another query. */
+.entry-log {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  background: var(--bg-sunken);
+  font-size: 12px;
+}
+
+.log-severity {
+  flex: 0 0 auto;
+  width: 5ch;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+
+.log-warn .log-severity,
+.log-warn .log-message {
+  color: var(--warn);
+}
+
+.log-error .log-severity,
+.log-error .log-message,
+.log-fatal .log-severity,
+.log-fatal .log-message {
+  color: var(--error);
+}
+
+/* Rails' own lines are kept and set back, never dropped: the developer's own calls are the
+   ones the eye should land on first. */
+.log-from-rails .log-message {
+  color: var(--fg-muted);
+}
+
+.log-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.log-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.exception {
+  padding: 8px 12px;
+  border-top: 1px solid var(--error);
+  border-bottom: 1px solid var(--border);
+}
+
+.exception-message {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--error);
+}
+
+.exception-class {
+  font-weight: 700;
+}
+
+/* Full and uncleaned, so it is long: it scrolls with the column rather than being capped. */
+.backtrace {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Set apart and captioned, so a *Trailing event* cannot be mistaken for the timeline it
+   sits below. */
+.trailing {
+  margin-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.trailing h3 {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
 }

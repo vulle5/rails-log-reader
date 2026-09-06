@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { openSidecar, type Sidecar } from "../src/server/sidecar"
-import { activityTable, type RequestRow } from "../src/shared/activity"
+import { activityTable, type RequestRow, type TimelineEvent } from "../src/shared/activity"
 import { CLOCK_STEPPED_BACK, DENSE_TRAFFIC, HANGS, NEVER_ROUTED } from "./traffic.fixtures"
 import {
   aLogDirectory,
@@ -33,6 +33,11 @@ async function theReaderReads(logDirectory: string) {
   const sidecar = await openSidecar(logDirectory, activity.fold)
   opened.push(sidecar)
   return { rows: activity.rows, caughtUp: () => sidecar.catchUp() }
+}
+
+/** What a timeline event is, in one string: the query it ran or the line it printed. */
+function describeEvent(event: TimelineEvent) {
+  return event.type === "sql" ? event.payload.sql : event.payload.message
 }
 
 function row(rows: readonly RequestRow[], path: string) {
@@ -281,5 +286,120 @@ describe("a busy dev app's Sidecar", () => {
       durationMs: null,
       sqlCount: 2,
     })
+  })
+})
+
+/**
+ * What the detail column reads: a row keeps the events themselves, not just a count of
+ * them. Still Seam 1 — a real Sidecar file in, rows out — because the timeline is folded
+ * from the same bytes by the same pass.
+ */
+describe("a request's timeline", () => {
+  test("keeps its SQL and App log events interleaved, in the order they were emitted", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1"),
+      run.log("req-1", "Feed cache MISS"),
+      run.sql("req-1", "SELECT 2"),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1", "Feed cache MISS", "SELECT 2"])
+  })
+
+  test("holds SQL exactly as it was emitted, QueryLogs comment and all", async () => {
+    const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = ? /*action='show',controller='posts'*/`
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1"), run.sql("req-1", statement), run.finish("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline[0]).toMatchObject({ type: "sql", payload: { sql: statement } })
+  })
+
+  test("puts an event whose seq is after the request_finish in a trailing section of its own", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1"),
+      run.finish("req-1"),
+      run.log("req-1", "Executor#to_complete ran after the body closed"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1"])
+    expect(rows[0]?.trailing.map(describeEvent)).toEqual(["Executor#to_complete ran after the body closed"])
+    // Attribution was never in doubt, so a Trailing event still counts against its request.
+    expect(rows[0]).toMatchObject({ logCount: 1 })
+  })
+
+  test("leaves a request that has not finished no trailing section to put anything in", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1"), run.sql("req-1"), run.log("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.timeline).toHaveLength(2)
+    expect(rows[0]?.trailing).toHaveLength(0)
+  })
+
+  test("keeps the exception a request finished with, its backtrace uncleaned", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.finish("req-1", {
+        status: 500,
+        exception: {
+          class: "NoMethodError",
+          message: "undefined method `price_cents' for nil",
+          backtrace: ["app/models/order.rb:44:in `block in recalculate_total!'", "puma (6.6.0) lib/puma/server.rb:443"],
+        },
+      }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.exception).toMatchObject({ class: "NoMethodError" })
+    expect(rows[0]?.exception?.backtrace).toHaveLength(2)
+  })
+
+  test("gives a request that finished without raising no exception rather than an empty one", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1"), run.finish("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(rows[0]?.exception).toBeNull()
+  })
+
+  test("keeps the twenty-four queries of the N+1 request, in the order the file has them", async () => {
+    const log = await aLogDirectory()
+    await appendToSidecar(log, ...DENSE_TRAFFIC)
+    const { rows } = await theReaderReads(log)
+
+    const feed = row(rows, "/api/v1/feed?page=1")
+    const authorLoads = feed.timeline.filter(
+      (event) => event.type === "sql" && event.payload.name === "Author Load",
+    )
+
+    const order = feed.timeline.map((event) => event.seq)
+
+    expect(feed.timeline).toHaveLength(28)
+    expect(authorLoads).toHaveLength(20)
+    // Append order put them in `seq` order already: the fold sorted nothing to achieve this.
+    expect(order).toEqual([...order].sort((one, other) => one - other))
   })
 })
