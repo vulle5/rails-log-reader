@@ -80,12 +80,101 @@ body {
    whole Reader instead of the column scrolling its own contents. Pinning the minimum to `0`
    is what lets the track be smaller than what is in it; `overflow: hidden` here says the
    remaining scroll is the columns' and never the page's. */
+/* The banner (#29) sits above the grid rather than inside it, so it needs a track of its
+   own — a flex column with the grid as its one growing child, rather than the grid owning
+   the full height itself. `.reader` no longer claims `height: 100%`: with the banner absent
+   most of the time, sizing it against a fixed height would leave the grid either short of
+   the shell or, worse, unaware the banner exists at all. */
+.reader-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
 .reader {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 40%);
   grid-template-rows: minmax(0, 1fr);
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
+}
+
+/* Not styled as an error even in its warning colour: nothing is broken, and #29 is explicit
+   that the Reader stays a read-only tail outside the one click this offers. */
+.initializer-banner {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.initializer-banner p {
+  margin: 0;
+}
+
+.initializer-banner-warn {
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg));
+  color: var(--warn);
+}
+
+.initializer-banner-ok {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  color: var(--fg);
+}
+
+.initializer-banner-error {
+  color: var(--error);
+}
+
+.initializer-banner button,
+.unsupported-wire button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.initializer-banner button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.initializer-banner code,
+.unsupported-wire code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* #29's refusal screen: rendered in place of the three columns, not beside them, because a
+   `v` this Reader does not understand could break an assumption any one of them makes. */
+.unsupported-wire {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 60ch;
+  height: 100%;
+  margin: 0 auto;
+  padding: 20% 20px 0;
+}
+
+.unsupported-wire h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.unsupported-wire p {
+  margin: 0;
+  color: var(--fg-muted);
 }
 
 /* `min-height: 0` for the same reason as `min-width: 0` beside it: a grid item's automatic

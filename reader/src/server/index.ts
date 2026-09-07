@@ -1,13 +1,14 @@
 import { join } from "node:path"
 
 import index from "../ui/index.html"
+import { initializerFileStatus, repairInitializerFile } from "./initializer-file"
 import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
 import { openSidecar, type Sidecar } from "./sidecar"
 
-const railsRoot = findRailsRoot(process.cwd())
+const detectedRailsRoot = findRailsRoot(process.cwd())
 
-if (railsRoot === null) {
+if (detectedRailsRoot === null) {
   console.error(
     `rails-log-reader: ${process.cwd()} is not a Rails root.\n` +
       `No ${RAILS_ROOT_MARKER} was found here or in any parent directory. ` +
@@ -15,6 +16,11 @@ if (railsRoot === null) {
   )
   process.exit(1)
 }
+
+// Narrowed into its own binding, straight-line, rather than trusted to stay narrowed inside
+// `initializerStatus` and `repairInitializer` below: both are closures TypeScript type-checks
+// independently of the control flow above, so the union type would otherwise survive into them.
+const railsRoot: string = detectedRailsRoot
 
 const port = readPort(process.env[PORT_VARIABLE])
 
@@ -73,6 +79,33 @@ function envelopeStream() {
   })
 }
 
+/**
+ * #29: is the Work app's copy of the Initializer the Reader's own master copy, byte for
+ * byte? A GET because it only ever reads — the two fixed-contract paths ADR-0004 relies on
+ * are read here exactly as they are for the Marker file check that never made it into this
+ * file at all, because the Reader only ever reads the Work app's files outside this one
+ * repair action.
+ */
+async function initializerStatus() {
+  return Response.json(await initializerFileStatus(railsRoot))
+}
+
+/**
+ * #29's one write: overwrite `config/initializers/rails_log_reader.rb` with the Reader's
+ * master copy, and nothing else. Never the Marker file, never any other path in the Work
+ * app — creating and removing the Marker stays the developer's own act. The Reader cannot
+ * restart Rails, so the client is left to prompt for one and confirm it by the arrival of a
+ * new `run_id` on the Sidecar it is already watching.
+ */
+async function repairInitializer() {
+  try {
+    await repairInitializerFile(railsRoot)
+    return Response.json({ ok: true })
+  } catch (problem) {
+    return Response.json({ ok: false, error: String(problem) }, { status: 500 })
+  }
+}
+
 const server = serveOrSaySo(port)
 
 // The port it actually bound, which with an ephemeral one is the only place that is written
@@ -92,6 +125,8 @@ function serveOrSaySo(port: number) {
       port,
       routes: {
         "/events": envelopeStream,
+        "/initializer-status": { GET: initializerStatus },
+        "/initializer-repair": { POST: repairInitializer },
         "/*": index,
       },
       development: process.env.NODE_ENV === "production" ? false : { hmr: true, console: true },

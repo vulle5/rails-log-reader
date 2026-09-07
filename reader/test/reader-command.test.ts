@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { INITIALIZER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
 import type { Envelope } from "../src/shared/wire"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
@@ -148,6 +149,57 @@ describe("starting the Reader", () => {
       "run_header",
       "request_start",
     ])
+  })
+})
+
+/** The Reader's own master copy, read the same way `initializerFileStatus` reads it. */
+const MASTER_INITIALIZER = join(import.meta.dir, "..", "rails", "rails_log_reader.rb")
+
+describe("the Initializer's version-mismatch surface (#29)", () => {
+  test("GET /initializer-status says not installed when the Work app has no copy at all", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const response = await Bun.fetch(new URL("initializer-status", url))
+
+    expect(await response.json()).toEqual({ installed: false, current: false })
+  })
+
+  test("GET /initializer-status says current once the copy matches the Reader's own master", async () => {
+    const root = await railsRoot()
+    await mkdir(join(root, "config", "initializers"), { recursive: true })
+    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), await readFile(MASTER_INITIALIZER))
+    const url = await readerUrl(run(root))
+
+    const response = await Bun.fetch(new URL("initializer-status", url))
+
+    expect(await response.json()).toEqual({ installed: true, current: true })
+  })
+
+  test("GET /initializer-status says not current when the copy has drifted", async () => {
+    const root = await railsRoot()
+    await mkdir(join(root, "config", "initializers"), { recursive: true })
+    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+    const url = await readerUrl(run(root))
+
+    const response = await Bun.fetch(new URL("initializer-status", url))
+
+    expect(await response.json()).toEqual({ installed: true, current: false })
+  })
+
+  test("POST /initializer-repair overwrites the copy in place and touches nothing else", async () => {
+    const root = await railsRoot()
+    await mkdir(join(root, "config", "initializers"), { recursive: true })
+    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+    const url = await readerUrl(run(root))
+
+    const repaired = await Bun.fetch(new URL("initializer-repair", url), { method: "POST" })
+
+    expect(await repaired.json()).toEqual({ ok: true })
+    expect(await readFile(join(root, INITIALIZER_RELATIVE_PATH))).toEqual(await readFile(MASTER_INITIALIZER))
+    // Never the Marker file: creating and removing it stays the developer's own act.
+    expect(await Bun.file(join(root, "log", "rails_log_reader.enabled")).exists()).toBe(false)
+
+    const status = await Bun.fetch(new URL("initializer-status", url))
+    expect(await status.json()).toEqual({ installed: true, current: true })
   })
 })
 
