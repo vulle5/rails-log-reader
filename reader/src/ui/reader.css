@@ -70,17 +70,32 @@ body {
 }
 
 /* The three tracks are fixed by the grid, so a column that fills scrolls inside its own
-   track and never widens, narrows or displaces its neighbours. */
+   track and never widens, narrows or displaces its neighbours.
+
+   The single row is `minmax(0, 1fr)` rather than the implicit `auto`, and that is what
+   makes the sentence above true down the page as well as across it. An `auto` row is
+   `minmax(min-content, max-content)`: `align-content: stretch` grows it to fill a container
+   it is smaller than, but never shrinks it to fit one it is larger than — so the tallest
+   column sized the row, the row overflowed this container, and the window scrolled the
+   whole Reader instead of the column scrolling its own contents. Pinning the minimum to `0`
+   is what lets the track be smaller than what is in it; `overflow: hidden` here says the
+   remaining scroll is the columns' and never the page's. */
 .reader {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 40%);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
+  overflow: hidden;
 }
 
+/* `min-height: 0` for the same reason as `min-width: 0` beside it: a grid item's automatic
+   minimum size is its content, so without this a column would overflow the track the line
+   above just constrained, and hand the overflow back to the page. */
 .column {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--border);
 }
 
@@ -108,7 +123,9 @@ body {
   color: var(--fg-muted);
 }
 
-/* Each column scrolls on its own, which is also what keeps its height off the grid. */
+/* Each column scrolls on its own, which is also what keeps its height off the grid — and
+   what the sticky headings inside one are sticky against: `.detail-heading` and the Activity
+   table's `th` need a scrollport of their own, and would otherwise stick to the window's. */
 .column-body {
   flex: 1 1 auto;
   min-height: 0;
