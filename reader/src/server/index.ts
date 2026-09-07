@@ -1,11 +1,9 @@
 import { join } from "node:path"
 
 import index from "../ui/index.html"
+import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
 import { openSidecar, type Sidecar } from "./sidecar"
-
-/** Fixed, so there is nothing to configure and nothing to tell the Reader about. */
-const PORT = 5273
 
 const railsRoot = findRailsRoot(process.cwd())
 
@@ -14,6 +12,15 @@ if (railsRoot === null) {
     `rails-log-reader: ${process.cwd()} is not a Rails root.\n` +
       `No ${RAILS_ROOT_MARKER} was found here or in any parent directory. ` +
       `Start the Reader from inside your Rails app.`,
+  )
+  process.exit(1)
+}
+
+const port = readPort(process.env[PORT_VARIABLE])
+
+if (port === null) {
+  console.error(
+    `rails-log-reader: ${PORT_VARIABLE} is set to "${process.env[PORT_VARIABLE]}", which is not a port number.`,
   )
   process.exit(1)
 }
@@ -66,14 +73,37 @@ function envelopeStream() {
   })
 }
 
-const server = Bun.serve({
-  port: PORT,
-  routes: {
-    "/events": envelopeStream,
-    "/*": index,
-  },
-  development: process.env.NODE_ENV === "production" ? false : { hmr: true, console: true },
-})
+const server = serveOrSaySo(port)
 
+// The port it actually bound, which with an ephemeral one is the only place that is written
+// down. Printed before anything else, because it is the line a developer came for.
 console.log(`Rails log reader  ${server.url}`)
 console.log(`Rails root        ${railsRoot}`)
+
+/**
+ * A port already in use is the ordinary consequence of a fixed one — a second Rails app, or
+ * a Reader still running in a tab that was closed — so it gets the plain sentence the
+ * missing-Rails-root case gets, and names the way out. Anything else that stops the server
+ * binding is genuinely unexpected and keeps its stack trace.
+ */
+function serveOrSaySo(port: number) {
+  try {
+    return Bun.serve({
+      port,
+      routes: {
+        "/events": envelopeStream,
+        "/*": index,
+      },
+      development: process.env.NODE_ENV === "production" ? false : { hmr: true, console: true },
+    })
+  } catch (problem) {
+    if ((problem as { code?: string }).code !== "EADDRINUSE") throw problem
+
+    console.error(
+      `rails-log-reader: port ${port} is already in use.\n` +
+        `Another Reader is probably still running. Stop it, or start this one with ` +
+        `${PORT_VARIABLE} set to a different port.`,
+    )
+    process.exit(1)
+  }
+}

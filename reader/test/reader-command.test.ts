@@ -3,18 +3,18 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
 import type { Envelope } from "../src/shared/wire"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
 
 const SERVER = Bun.fileURLToPath(new URL("../src/server/index.ts", import.meta.url))
-const READER_URL = "http://localhost:5273/"
 
 const started: Bun.Subprocess[] = []
 const temporary: string[] = []
 
 afterEach(async () => {
-  // Waited for, not just signalled: the next test binds the same fixed port, and a Reader
-  // still holding it would leave that test talking to this one's Rails root.
+  // Waited for, not just signalled: a Reader is a watcher on a temp directory this hook is
+  // about to delete, and one still following it would spend its last moments on ENOENT.
   for (const reader of started.splice(0)) {
     reader.kill()
     await reader.exited
@@ -37,26 +37,47 @@ async function railsRoot() {
   return root
 }
 
+/**
+ * Every Reader here starts on port `0` — an ephemeral one the OS hands out — so that a
+ * Reader a developer left running against their own app can never be the reason this suite
+ * fails, and so that two of these tests overlapping could never talk to each other's Rails
+ * root. Which port 0 became is a thing only the process knows, and `readerUrl` is how it
+ * says so. That the *default* is 5273 is asserted where it lives, next door.
+ */
 function run(cwd: string) {
-  const reader = Bun.spawn([Bun.which("bun") ?? "bun", SERVER], { cwd, stdout: "pipe", stderr: "pipe" })
+  const reader = Bun.spawn([Bun.which("bun") ?? "bun", SERVER], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, [PORT_VARIABLE]: "0" },
+  })
   started.push(reader)
   return reader
 }
 
 /**
- * Poll rather than parse startup output: the Reader is up when it answers. `Bun.fetch`
- * rather than the global, which the shell tests replace with happy-dom's.
+ * Where the Reader says it is, read from the line it prints on the way up. That line is
+ * written after the socket is bound, so arriving at it is also how these tests know the
+ * Reader is up — there is nothing to poll and no port to have guessed.
  */
-async function reachReader(reader: Bun.Subprocess) {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (reader.exitCode !== null) throw new Error(`the Reader exited with ${reader.exitCode}`)
-    try {
-      return await Bun.fetch(READER_URL)
-    } catch {
-      await Bun.sleep(100)
-    }
+async function readerUrl(reader: Bun.Subprocess) {
+  const stream = reader.stdout as ReadableStream<Uint8Array>
+  const decoder = new TextDecoder()
+  let said = ""
+
+  for await (const chunk of stream) {
+    said += decoder.decode(chunk, { stream: true })
+
+    const announced = said.match(/(http:\/\/\S+)/)
+    if (announced?.[1] !== undefined) return announced[1]
   }
-  throw new Error(`the Reader never answered on ${READER_URL}`)
+
+  throw new Error(`the Reader never said where it was, only: ${said}`)
+}
+
+/** `Bun.fetch` rather than the global, which the shell tests replace with happy-dom's. */
+async function reachReader(reader: Bun.Subprocess) {
+  return await Bun.fetch(await readerUrl(reader))
 }
 
 /** The first SSE message the Reader sends, decoded back into the envelopes it carries. */
@@ -83,7 +104,7 @@ async function firstEnvelopes(response: Response) {
 }
 
 describe("starting the Reader", () => {
-  test("serves the Reader on port 5273 when started from a Rails root", async () => {
+  test("serves the Reader when started from a Rails root", async () => {
     const response = await reachReader(run(await railsRoot()))
 
     expect(response.status).toBe(200)
@@ -114,8 +135,8 @@ describe("starting the Reader", () => {
 
   test("streams the Sidecar's envelopes to the browser as they are appended", async () => {
     const root = await railsRoot()
-    await reachReader(run(root))
-    const response = await Bun.fetch(`${READER_URL}events`)
+    const url = await readerUrl(run(root))
+    const response = await Bun.fetch(new URL("events", url))
 
     // Written only once the browser is attached, so what arrives is the file being
     // followed rather than the history it opened on.
@@ -127,5 +148,39 @@ describe("starting the Reader", () => {
       "run_header",
       "request_start",
     ])
+  })
+})
+
+/**
+ * The port is a rule rather than a number — a default, an override, and a refusal — and the
+ * rule is read here rather than by starting a Reader, because a test that binds 5273 to
+ * prove 5273 is the default is a test that fails whenever the Reader it is about is running.
+ * That is the bug this file had.
+ */
+describe("which port the Reader is on", () => {
+  test("is 5273 unless it is told otherwise", () => {
+    expect(readPort(undefined)).toBe(DEFAULT_PORT)
+    expect(DEFAULT_PORT).toBe(5273)
+  })
+
+  test("is whatever the override asks for, an ephemeral one included", () => {
+    expect(readPort("9999")).toBe(9999)
+    // What every test above starts a Reader with, and the reason none of them collide.
+    expect(readPort("0")).toBe(0)
+  })
+
+  test("is refused rather than fallen back from when the override is not a port", () => {
+    // Silently serving on 5273 instead would send a developer to the wrong tab and let them
+    // conclude the Reader was broken.
+    expect(readPort("808O")).toBeNull()
+    expect(readPort("70000")).toBeNull()
+    expect(readPort("-1")).toBeNull()
+    expect(readPort("5273.5")).toBeNull()
+  })
+
+  test("treats an override that is there but empty as not having been set", () => {
+    // `RAILS_LOG_READER_PORT= bun ...`, and a shell that exports it as the empty string.
+    expect(readPort("")).toBe(DEFAULT_PORT)
+    expect(readPort("  ")).toBe(DEFAULT_PORT)
   })
 })
