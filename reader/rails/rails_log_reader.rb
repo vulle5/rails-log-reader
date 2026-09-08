@@ -251,23 +251,20 @@ module RailsLogReader
       # delegator around a String rather than a String, so it takes the `to_s` branch and
       # stays filtered. How any of this is *displayed* is the Reader's problem, not this
       # file's.
+      #
+      # A binary column's value — a bind that is BINARY-encoded or not `valid_encoding?` —
+      # used to be caught right here, by a method of this class alone. #33 moved that check
+      # into `emit`'s own walk, where every payload gets it rather than binds only, so a bind
+      # goes through unscrubbed: whatever this returns still has to survive `cut_oversized_fields`
+      # before it reaches the wire, same as every other field on the envelope.
       def serialize(value)
         case value
         when nil, true, false, Integer then value
         when Float then value.finite? ? value : value.to_s
         when Time, DateTime then value.iso8601(3)
-        when String then utf8(value)
-        else utf8(value.to_s)
+        when String then value
+        else value.to_s
         end
-      end
-
-      # JSON.generate raises on a string that is not valid UTF-8, and a raise inside `emit`
-      # costs the Run every event after it. A binary column's value is exactly such a string,
-      # so it goes as its size — which is what development.log shows for one too.
-      def utf8(string)
-        return string if string.encoding != Encoding::BINARY && string.valid_encoding?
-
-        "<#{string.bytesize} bytes of binary data>"
       end
   end
 
@@ -636,11 +633,19 @@ module RailsLogReader
       # ordinary event is one walk and no allocation. Only an oversized field is walked twice
       # — and only it can be recorded, because a field can be over the cap without any single
       # string in it being over: fifty 2 KB binds are 100 KB that nothing shortens.
+      #
+      # That one walk is also where #33's scrub rides along: `scrub_and_size` is `byte_size`
+      # with a second job, checking every String it visits for the encoding JSON.generate
+      # cannot carry, wherever it sits nested inside an Array or a Hash. Riding the walk this
+      # method already pays for is what keeps the scrub unconditional without becoming a
+      # second traversal of the same payload — the alternative this file rejected was scoping
+      # it to "this field happened to be large", which is exactly the kind of accident #13
+      # already showed cannot be trusted to catch a bad byte.
       def cut_oversized_fields(payload)
         oversized = {}
 
         cut = payload.to_h do |field, value|
-          size = byte_size(value)
+          value, size = scrub_and_size(value)
           next [field, value] if size <= MAX_FIELD_BYTES
 
           shortened = shrink_to_fit(field, value, MAX_FIELD_BYTES)
@@ -649,6 +654,90 @@ module RailsLogReader
         end
 
         [cut, oversized.any? ? oversized : nil]
+      end
+
+      # `byte_size` below, plus one check `String` alone needs: BINARY-encoded or not
+      # `valid_encoding?` is not "large", it is "cannot reach JSON.generate at all", so it is
+      # caught here rather than left for `shrink_to_fit` to discover as an oversized field
+      # that never shrinks. Returns the value alongside its size, same as the field it sits
+      # in eventually needs both — and returns the very same object when there is nothing to
+      # scrub, so an ordinary event's Arrays and Hashes are never rebuilt, only walked. A
+      # String, Array or Hash that turns out to need scrubbing is rebuilt one level at a
+      # time going back up, the same "only pay when there's something to fix" shape
+      # `shrink_to_fit` already uses for size below.
+      #
+      # Not recorded in `truncated`: that field is specifically the original byte length
+      # before a shrink, and a scrub is not a length change in the cases that matter most — a
+      # bind's `<N bytes of binary data>` already says what happened in its own text, the
+      # same as `truncated` would, and a handful of bad bytes dropped from otherwise-readable
+      # text is the same silent, in-place correction `cut_string` already makes below when a
+      # byte-slice lands mid-character. A second field recording the same kind of fix that
+      # field already leaves unrecorded would be new machinery for old behaviour.
+      def scrub_and_size(value)
+        case value
+        when String
+          return [value, value.bytesize] if value.encoding != Encoding::BINARY && value.valid_encoding?
+
+          scrubbed = scrub_utf8(value)
+          [scrubbed, scrubbed.bytesize]
+        when Array
+          scrub_elements(value) { |element| scrub_and_size(element) }
+        when Hash
+          scrub_values(value) { |nested| scrub_and_size(nested) }
+        else
+          [value, 0]
+        end
+      end
+
+      # `equal?`, not `==`, is what makes the "rebuild only what changed" promise above hold:
+      # a String that scrubbed to something that reads the same (`scrub` on an already-valid
+      # copy, say) is still a different object, and comparing identity rather than value is
+      # the only way to know that *this* element never needed the walk at all.
+      def scrub_elements(array)
+        scrubbed = nil
+        size = 0
+
+        array.each_with_index do |element, index|
+          safe, element_size = yield(element)
+          size += element_size
+          next if safe.equal?(element)
+
+          (scrubbed ||= array.dup)[index] = safe
+        end
+
+        [scrubbed || array, size]
+      end
+
+      # `Array`'s own mirror above; a `key` is never touched, only ever the `value` beside
+      # it — a key holding a bad byte would be an app doing something stranger than this file
+      # has any business correcting for it.
+      def scrub_values(hash)
+        scrubbed = nil
+        size = 0
+
+        hash.each do |key, nested|
+          safe, nested_size = yield(nested)
+          size += nested_size
+          next if safe.equal?(nested)
+
+          (scrubbed ||= hash.dup)[key] = safe
+        end
+
+        [scrubbed || hash, size]
+      end
+
+      # Two different strings, two different honest answers — not one rule wearing an
+      # exception. BINARY is opaque by definition: a database blob, a file's raw bytes, and
+      # there is no readable part to salvage, so it goes as its size, which is
+      # development.log's own answer for a bind (#20) and now every other field's too. A
+      # string merely tagged UTF-8 that picked up a handful of bad bytes — a gem's exception
+      # message, a query string ActionDispatch never validated — is not opaque, and throwing
+      # the whole thing away would lose a log line that was otherwise perfectly legible.
+      # `scrub("")` is `cut_string`'s own answer to that problem already, a few lines down.
+      def scrub_utf8(string)
+        return "<#{string.bytesize} bytes of binary data>" if string.encoding == Encoding::BINARY
+
+        string.scrub("")
       end
 
       # Recursive, and the one place this file's three truncation shapes diverge, because
