@@ -85,7 +85,20 @@ describe("watching the log directory", () => {
       await appendFile(elsewhere, `${JSON.stringify(run.start("req-1"))}\n`)
 
       await eventually(() => reader.delivered.length === 2, "the 1 Hz stat catching the append")
-      expect(witnessed).toEqual([]) // the watcher really was blind to it
+
+      // On Linux, watching `log/` really is blind to a write through another path to the
+      // same inode — inotify reports on the directory entry, not the inode — so arriving
+      // at all here proves the backstop, not the watcher, did the catching. macOS's
+      // FSEvents has no such boundary: hard-linked names share one catalog entry, so a
+      // write through either name touches metadata FSEvents reports against both. That is
+      // not just noise on this `witness` watch — the Sidecar's own directory watcher
+      // (`sidecar.ts`'s `watchLogDirectory`) is watching the exact same directory the same
+      // way, so it almost certainly sees the identical spurious event and calls `catchUp()`
+      // from *there*, milliseconds in, before the backstop's 1 Hz tick ever fires. Measured
+      // on this machine: delivery lands in ~20 ms, not ~1 s. So on macOS this test still
+      // confirms the append is delivered, but can no longer tell you it was the backstop
+      // that delivered it — the isolation the hard link buys on Linux, it doesn't buy here.
+      if (process.platform !== "darwin") expect(witnessed).toEqual([])
     } finally {
       witness.close()
     }
