@@ -65,8 +65,12 @@ export const BOOT_MONO = 118_492_300_000
 /**
  * One Run, stamping `seq` per Run and both clocks off one tick counter — which is what
  * makes a test that wants `at_wall` to disagree with append order have to say so out loud.
+ *
+ * `epoch` moves the Run's wall clock without touching anything else, for the one thing a
+ * fixed one cannot express: a test about what an in-flight request's elapsed reads *now*,
+ * which is a distance from the machine's own clock rather than a number in the file.
  */
-export function aRun(runId: string) {
+export function aRun(runId: string, epoch = EPOCH) {
   let seq = 0
   let tick = 0
 
@@ -83,7 +87,7 @@ export function aRun(runId: string) {
       run_id: runId,
       seq,
       at_mono: BOOT_MONO + tick * 100_000_000,
-      at_wall: at_wall ?? EPOCH + tick * 100,
+      at_wall: at_wall ?? epoch + tick * 100,
       request_id: requestId,
       type,
       payload,

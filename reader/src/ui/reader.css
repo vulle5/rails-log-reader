@@ -198,8 +198,13 @@ body {
 }
 
 .column-heading {
+  display: flex;
   flex: 0 0 auto;
-  padding: 7px 12px;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 4px 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -328,6 +333,167 @@ body {
 .cell-total {
   font-weight: 600;
   color: var(--fg);
+}
+
+/* The tabs sit in the heading rather than in the body, because the body is the scrollport:
+   a filter that scrolled away with the rows it filters would be gone exactly when it is
+   wanted. They filter by row kind and by nothing else. */
+.row-kind-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.row-kind-tab {
+  display: inline-flex;
+  gap: 5px;
+  align-items: baseline;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.row-kind-tab:hover {
+  background: var(--bg-sunken);
+}
+
+.row-kind-tab-showing {
+  border-color: var(--border);
+  background: var(--selected);
+  color: var(--fg);
+}
+
+/* The count is of everything of that kind the Reader holds, not of what is on screen, so it
+   is read as "what is here" and never moves when a tab is switched. */
+.tab-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+
+/* A request that is still running, and the whole of what the Reader claims about it: a dot
+   that is moving. No threshold turns it another colour, and nothing expires — there is no
+   timeout, ever, so "it hangs" is a conclusion the human draws from a number that climbs. */
+.state-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.state-dot-in-flight {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* Stopped, because its Run ended under it. Faint rather than red: nothing failed. */
+.state-dot-interrupted {
+  background: var(--fg-faint);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* The dot still says which state it is in without moving — its colour, its `aria-label` and
+   the pill beside it all do — so this takes the motion away and nothing else. */
+@media (prefers-reduced-motion: reduce) {
+  .state-dot-in-flight {
+    animation: none;
+  }
+}
+
+/* The climbing elapsed, in the column a finished request shows its total in: the same
+   question, asked of a request that has not answered it yet. */
+.elapsed {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Frozen where its Run ended: the number stopped being about a request that is still
+   running, so it stops looking like one. */
+.elapsed-frozen {
+  background: var(--bg-sunken);
+  color: var(--fg-faint);
+}
+
+/* Marked for its whole life, in the column that would have said when it started — because
+   nobody saw it start. Never cleared: the events emitted before the Reader attached are
+   lost, and how many there were is unknowable. */
+.partial-mark {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+/* Set apart and set back, and deliberately not in the error colour: a request whose Run was
+   reaped did not fail, it stopped being answerable. */
+.activity-row-interrupted {
+  background: var(--bg-sunken);
+}
+
+.activity-row-interrupted .cell-path,
+.activity-row-interrupted .cell-action,
+.activity-row-interrupted .cell-method {
+  color: var(--fg-faint);
+}
+
+.activity-row-interrupted td:first-child {
+  box-shadow: inset 3px 0 0 var(--fg-faint);
+}
+
+/* A *Run row*: what one Run emitted with no owning request. It spans the columns a request
+   fills with its method, path and outcome, because a Run has none of those. */
+.activity-row-run {
+  background: var(--bg-sunken);
+}
+
+.cell-run {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.run-said + .run-said::before {
+  content: " · ";
+  color: var(--fg-faint);
+}
+
+/* The *Run marker*: a rule across the row where a `run_header` landed, meaning literally
+   *this Run started here* — never *everything below belongs to it*, which is why it is a
+   line at one position and not a band over the rows under it. */
+.activity-row-marker td {
+  border-top: 2px solid var(--accent);
+}
+
+.run-marker-label {
+  margin-right: 8px;
+  font-family: var(--ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
 /* ---- the detail column ---------------------------------------------------- */

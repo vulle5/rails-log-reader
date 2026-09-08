@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react"
 
-import type { RequestRow } from "../shared/activity"
+import type { ActivityRow } from "../shared/activity"
 import type { Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
@@ -8,6 +8,7 @@ import { ActivityTable } from "./ActivityTable"
 import { DetailColumn } from "./DetailColumn"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
+import { RowKindTabs, rowsOfKind, type RowKindFilter } from "./RowKindTabs"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and
@@ -32,7 +33,7 @@ import type { RepairState } from "./initializer-repair"
  * Initializer renders exactly as it always has.
  */
 type ReaderProps = {
-  rows?: readonly RequestRow[]
+  rows?: readonly ActivityRow[]
   /** File-on-disk vs. process-still-running, from `detectMismatch`. */
   mismatch?: Mismatch
   /** `v` off the most recently observed envelope, whichever process wrote it. */
@@ -50,11 +51,17 @@ export function Reader({
   onRepair = () => {},
   onDismissRepair = () => {},
 }: ReaderProps) {
-  // *Selection* is a `requestId` rather than a row, because rows mutate in place and are
+  // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
   // it named, and shows the placeholder again if that row is ever no longer there.
   const [selected, setSelected] = useState<string | null>(null)
-  const showing = rows.find((row) => row.requestId === selected) ?? null
+  const showing = rows.find((row) => row.id === selected) ?? null
+
+  // The tab filter lives here rather than inside the table for the same reason Selection
+  // does: #25's Console click has to be able to clear a filter that is hiding the row it is
+  // jumping to, and "take me there" is a promise neither a filter nor a scroll position may
+  // break. Nothing filters by Run — previous Runs stay visible on open.
+  const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
 
   // #29's one hard stop: a `v` newer than this Reader understands is a shape it has never
   // read a line from, so it declines to render any of the three columns rather than guess
@@ -81,8 +88,12 @@ export function Reader({
       />
       <div className="reader">
         <Column place="console" name="Console" />
-        <Column place="activity" name="Activity table">
-          <ActivityTable rows={rows} selected={selected} onSelect={setSelected} />
+        <Column
+          place="activity"
+          name="Activity table"
+          controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
+        >
+          <ActivityTable rows={rowsOfKind(rows, showingKind)} selected={selected} onSelect={setSelected} />
         </Column>
         <Column place="detail" name="Detail column">
           <DetailColumn row={showing} />
@@ -96,14 +107,21 @@ type ColumnProps = {
   place: "console" | "activity" | "detail"
   /** The glossary's name for the column: what it is headed with, and what a screen reader announces. */
   name: string
+  /**
+   * What sits in the heading beside the name — the Activity table's row-kind tabs, today.
+   * In the heading and not in the body, because the body is the scrollport: a filter that
+   * scrolled away with the rows it was filtering would be gone exactly when it is wanted.
+   */
+  controls?: ReactNode
   children?: ReactNode
 }
 
-function Column({ place, name, children }: ColumnProps) {
+function Column({ place, name, controls, children }: ColumnProps) {
   return (
     <section className={`column column-${place}`} role="region" aria-label={name}>
       <header className="column-heading">
         <h2>{name}</h2>
+        {controls}
       </header>
       <div className="column-body">{children}</div>
     </section>

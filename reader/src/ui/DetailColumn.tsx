@@ -1,6 +1,6 @@
-import type { RequestRow, TimelineEvent } from "../shared/activity"
+import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../shared/wire"
-import { controllerAction, ms } from "./format"
+import { controllerAction, ms, runDescription } from "./format"
 import { tokenizeSql } from "./sql-highlight"
 
 /**
@@ -18,7 +18,7 @@ import { tokenizeSql } from "./sql-highlight"
  * placeholder is what pins it — so selecting a row changes what this holds and nothing
  * about the layout around it.
  */
-export function DetailColumn({ row }: { row: RequestRow | null }) {
+export function DetailColumn({ row }: { row: ActivityRow | null }) {
   if (row === null) {
     return (
       <p className="placeholder">
@@ -27,6 +27,10 @@ export function DetailColumn({ row }: { row: RequestRow | null }) {
     )
   }
 
+  return row.kind === "request" ? <RequestDetail row={row} /> : <RunDetail row={row} />
+}
+
+function RequestDetail({ row }: { row: RequestRow }) {
   return (
     <article className="detail">
       <header className="detail-heading">
@@ -38,6 +42,31 @@ export function DetailColumn({ row }: { row: RequestRow | null }) {
       <Timeline events={row.timeline} />
       {row.exception !== null && <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} />}
       {row.trailing.length > 0 && <Trailing events={row.trailing} />}
+    </article>
+  )
+}
+
+/**
+ * A *Run row*'s timeline: everything that Run emitted with no owning request, read the same
+ * way a request's children are. The division of labour with the Console is the glossary's —
+ * the Console is where you read *when* something happened, and this is where you read
+ * *what*.
+ *
+ * No trailing section and no exception: a Run has no finish for anything to trail, and an
+ * exception on the wire belongs to a request.
+ */
+function RunDetail({ row }: { row: RunRow }) {
+  const { kind, facts } = runDescription(row)
+
+  return (
+    <article className="detail">
+      <header className="detail-heading">
+        <span className="detail-method">{kind}</span>
+        <span className="detail-path">{row.appName ?? ""}</span>
+        <span className="detail-action">{facts.join(" · ")}</span>
+      </header>
+
+      <Timeline events={row.timeline} />
     </article>
   )
 }
