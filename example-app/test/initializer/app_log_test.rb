@@ -156,6 +156,26 @@ class AppLogTest < ActiveSupport::TestCase
       "<< bypasses add and every severity there is, and `unknown` is the honest answer"
   end
 
+  # #33: `Rails.logger.info(blob)` is all it takes — a message this file never controls the
+  # encoding of. Before #33, JSON.generate raised inside `emit` on the bad byte, and the
+  # rescue there disabled the Run silently for everything after it, not just the one line.
+  test "a Run that logs a non-UTF-8 message keeps emitting afterwards" do
+    run = DevelopmentRun.boot(script: <<~'RUBY')
+      Rails.logger.info("hello \xff\xfe world".b)
+      Rails.logger.info("still going")
+    RUBY
+
+    assert run.booted?, run.output
+    messages = run.events_of("app_log").map { |event| event["payload"]["message"] }
+
+    bad = messages.find { |message| message.start_with?("<") }
+    assert bad, "the non-UTF-8 line never reached the Sidecar:\n#{messages.inspect}"
+    assert_match(/\A<\d+ bytes of binary data>\z/, bad)
+
+    assert_includes messages, "still going",
+      "one bad byte disabled the Run for everything after it, which is the bug #33 fixes"
+  end
+
   # `verbose_query_logs`, colourised SQL and every other Rails line arrive wrapped in escape
   # codes, because a terminal is what reads development.log. The Reader is not a terminal, so
   # they are removed rather than carried through for a renderer to interpret later.

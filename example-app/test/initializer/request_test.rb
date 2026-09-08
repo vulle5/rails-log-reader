@@ -77,4 +77,29 @@ class RequestTest < ActiveSupport::TestCase
     assert_nil finish["payload"]["view_runtime_ms"], "the view never rendered"
     assert_nil finish["truncated"], "a real backtrace is nowhere near the caps this Run enforces"
   end
+
+  # #33: ActionDispatch does not guarantee valid UTF-8 in a query string or a multipart
+  # field, but by the time a request of this Example app's own shape reaches a controller,
+  # Rails has already 400'd anything that fails its own recursive encoding check
+  # (Request::Utils.check_param_encoding) — so no request this app can make actually gets an
+  # invalid byte this far. What #33 protects against reaches `start_processing.action_controller`
+  # by a route Rails' check does not cover at all (a multipart upload's filename is force-encoded,
+  # never validated, in ActionDispatch::Http::UploadedFile#initialize), so this drives the real
+  # subscriber with the payload shape that route produces — same as SqlTest's own "handed to the
+  # real notification by hand" bind test, for the same reason.
+  test "a param carrying an invalid UTF-8 byte still produces a well-formed request_route, and the Run keeps emitting after it" do
+    run = DevelopmentRun.boot(script: <<~'RUBY')
+      ActiveSupport::Notifications.instrument("start_processing.action_controller",
+        controller: "PostsController", action: "index", format: "html",
+        params: { "q" => "hello \xff\xfe world".dup.force_encoding("UTF-8") })
+      RailsLogReader.emit("request_finish", { status: 200, duration_ms: 1.0 })
+    RUBY
+
+    assert run.booted?, run.output
+    route = run.events_of("request_route").sole
+
+    assert_equal "hello  world", route["payload"]["params"]["q"],
+      "readable text keeps what can be read, same as cut_string's own scrub"
+    assert run.events_of("request_finish").sole, "one bad byte disabled the Run for the finish after it"
+  end
 end
