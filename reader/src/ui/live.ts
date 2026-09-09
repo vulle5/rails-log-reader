@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { activityTable, type RequestRow } from "../shared/activity"
+import { activityTable, type ActivityRow } from "../shared/activity"
 import type { Envelope } from "../shared/wire"
 
 /**
@@ -12,7 +12,7 @@ import type { Envelope } from "../shared/wire"
  * and the same `run_id` regardless (#29).
  */
 export type WireStatus = {
-  rows: readonly RequestRow[]
+  rows: readonly ActivityRow[]
   liveWireVersion: number | null
   liveRunId: string | null
 }

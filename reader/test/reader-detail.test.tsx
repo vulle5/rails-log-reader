@@ -17,7 +17,16 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
+/**
+ * Unmounted rather than just emptied: an in-flight row's elapsed pill holds an interval for
+ * as long as it is mounted, and a root left behind goes on ticking into the next test.
+ */
+const mounted: { unmount: () => void }[] = []
+
 afterEach(() => {
+  act(() => {
+    for (const root of mounted.splice(0)) root.unmount()
+  })
   document.body.innerHTML = ""
 })
 
@@ -36,7 +45,11 @@ async function theReader(...envelopes: Parameters<ReturnType<typeof activityTabl
 
   const container = document.createElement("div")
   document.body.append(container)
-  await act(async () => createRoot(container).render(<Reader rows={activity.rows} />))
+  await act(async () => {
+    const root = createRoot(container)
+    mounted.push(root)
+    root.render(<Reader rows={activity.rows} />)
+  })
   return container
 }
 
@@ -439,5 +452,55 @@ describe("the N+1-shaped request in a busy dev app's Sidecar", () => {
     // Not a slab of queries with the logger calls above or below them.
     expect(kinds.indexOf("log")).toBeGreaterThan(0)
     expect(kinds.lastIndexOf("sql")).toBeGreaterThan(kinds.lastIndexOf("log"))
+  })
+})
+
+/**
+ * A *Run row* selects like any other row, and opens the same timeline: everything that Run
+ * emitted with no owning request. The division of labour with the Console is the glossary's
+ * — the Console is where you read *when* something happened, and this is where you read
+ * *what*.
+ */
+describe("selecting a Run row", () => {
+  async function selectTheRunRow(container: HTMLElement) {
+    const row = container.querySelector("tbody tr.activity-row-run")
+    if (row === null) throw new Error("the Activity table has no Run row")
+
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+  }
+
+  test("opens what its Run emitted with no owning request", async () => {
+    const run = aRun("rake-1")
+    const container = await theReader(
+      run.header("rake", 91_887),
+      run.log(null, "reports:rebuild — 41,209 orders to process"),
+      run.sql(null, 'SELECT COUNT(*) FROM "orders"'),
+    )
+
+    await selectTheRunRow(container)
+
+    expect(detail(container).textContent).toContain("rake")
+    expect(detail(container).textContent).toContain("pid 91887")
+    expect(timeline(container)).toEqual([
+      "reports:rebuild — 41,209 orders to process",
+      'SELECT COUNT(*) FROM "orders"',
+    ])
+  })
+
+  test("keeps the requests of the same Run out of it", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.header(),
+      run.log(null, "=> Booting Puma"),
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT 1"),
+      run.finish("req-1"),
+    )
+
+    await selectTheRunRow(container)
+
+    expect(timeline(container)).toEqual(["=> Booting Puma"])
   })
 })

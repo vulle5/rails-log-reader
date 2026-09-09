@@ -1,11 +1,26 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { openSidecar, type Sidecar } from "../src/server/sidecar"
-import { activityTable, type RequestRow, type TimelineEvent } from "../src/shared/activity"
-import { CLOCK_STEPPED_BACK, DENSE_TRAFFIC, HANGS, NEVER_ROUTED } from "./traffic.fixtures"
+import {
+  activityTable,
+  type ActivityRow,
+  type RequestRow,
+  type RunRow,
+  type TimelineEvent,
+} from "../src/shared/activity"
+import {
+  CLOCK_STEPPED_BACK,
+  CONSOLE_RUN,
+  DENSE_TRAFFIC,
+  HANGS,
+  NEVER_ROUTED,
+  RAKE_RUN,
+  SERVER_RUN,
+} from "./traffic.fixtures"
 import {
   aLogDirectory,
   aRun,
+  EPOCH,
   appendToSidecar,
   forgetLogDirectories,
   replaceSidecar,
@@ -40,10 +55,44 @@ function describeEvent(event: TimelineEvent) {
   return event.type === "sql" ? event.payload.sql : event.payload.message
 }
 
-function row(rows: readonly RequestRow[], path: string) {
-  const found = rows.find((candidate) => candidate.path === path)
-  if (found === undefined) throw new Error(`no row for ${path}, only ${rows.map((r) => r.path).join(", ")}`)
+/**
+ * The Activity table holds two kinds of row, and most of what follows is about one of them.
+ * Read through these rather than by index, so a test about requests keeps saying what it
+ * said before Run rows existed.
+ */
+function requests(rows: readonly ActivityRow[]): RequestRow[] {
+  return rows.filter((candidate) => candidate.kind === "request")
+}
+
+function runs(rows: readonly ActivityRow[]): RunRow[] {
+  return rows.filter((candidate) => candidate.kind === "run")
+}
+
+/**
+ * The one request row in the table, for the tests whose Sidecar holds a single request: it
+ * says that out loud, and fails rather than reading past a row that should not be there.
+ */
+function theOnlyRequest(rows: readonly ActivityRow[]) {
+  const only = requests(rows)
+  if (only.length !== 1) throw new Error(`${only.length} request rows, not one`)
+  return only[0] as RequestRow
+}
+
+function row(rows: readonly ActivityRow[], path: string) {
+  const found = requests(rows).find((candidate) => candidate.path === path)
+  if (found === undefined) throw new Error(`no row for ${path}, only ${requests(rows).map((r) => r.path).join(", ")}`)
   return found
+}
+
+function runRow(rows: readonly ActivityRow[], runId: string) {
+  const found = runs(rows).find((candidate) => candidate.runId === runId)
+  if (found === undefined) throw new Error(`no Run row for ${runId}, only ${runs(rows).map((r) => r.runId).join(", ")}`)
+  return found
+}
+
+/** What a timeline holds, in the order it holds it. */
+function timeline(row: { timeline: readonly TimelineEvent[] }) {
+  return row.timeline.map(describeEvent)
 }
 
 describe("folding a request", () => {
@@ -60,8 +109,8 @@ describe("folding a request", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({
+    expect(requests(rows)).toHaveLength(1)
+    expect(theOnlyRequest(rows)).toMatchObject({
       requestId: "req-1",
       method: "GET",
       path: "/posts/12",
@@ -85,9 +134,9 @@ describe("folding a request", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]).toMatchObject({ method: "GET", path: "/pots/12", status: 404 })
-    expect(rows[0]?.controller).toBeNull()
-    expect(rows[0]?.action).toBeNull()
+    expect(theOnlyRequest(rows)).toMatchObject({ method: "GET", path: "/pots/12", status: 404 })
+    expect(theOnlyRequest(rows).controller).toBeNull()
+    expect(theOnlyRequest(rows).action).toBeNull()
   })
 
   test("attaches SQL and App log events to their request and drives its counts", async () => {
@@ -105,17 +154,18 @@ describe("folding a request", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]).toMatchObject({ sqlCount: 3, logCount: 1 })
+    expect(theOnlyRequest(rows)).toMatchObject({ sqlCount: 3, logCount: 1 })
   })
 
-  test("an event with no owning request drives no request's counts", async () => {
+  test("gives an event with no owning request to its Run rather than to a request", async () => {
     const log = await aLogDirectory()
     const run = aRun("srv-1")
     await appendToSidecar(log, run.header(), run.sql(null), run.log(null, "Booting Puma"), run.end())
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows).toHaveLength(0)
+    expect(requests(rows)).toHaveLength(0)
+    expect(runRow(rows, "srv-1")).toMatchObject({ sqlCount: 1, logCount: 1 })
   })
 })
 
@@ -134,7 +184,7 @@ describe("where a row sits", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows.map((r) => r.requestId)).toEqual(["req-1", "req-2", "req-3"])
+    expect(requests(rows).map((r) => r.requestId)).toEqual(["req-1", "req-2", "req-3"])
   })
 
   test("mutates a row in place rather than moving it as its later events arrive", async () => {
@@ -147,9 +197,9 @@ describe("where a row sits", () => {
     await appendToSidecar(log, run.finish("req-1", { status: 500 }), run.finish("req-2", { status: 200 }))
     await reader.caughtUp()
 
-    expect(reader.rows.map((r) => r.path)).toEqual(["/first", "/second"])
+    expect(requests(reader.rows).map((r) => r.path)).toEqual(["/first", "/second"])
     expect(reader.rows[0]).toBe(first)
-    expect(reader.rows[0]?.status).toBe(500)
+    expect(requests(reader.rows)[0]?.status).toBe(500)
   })
 
   test("orders rows by append position even when at_wall jumps backwards", async () => {
@@ -163,7 +213,7 @@ describe("where a row sits", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows.map((r) => r.path)).toEqual(["/before-the-jump", "/after-the-jump"])
+    expect(requests(rows).map((r) => r.path)).toEqual(["/before-the-jump", "/after-the-jump"])
   })
 
   test("orders two Runs by append position, not by the seq each restarts at 1", async () => {
@@ -181,7 +231,7 @@ describe("where a row sits", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows.map((r) => r.path)).toEqual(["/first", "/second", "/third"])
+    expect(requests(rows).map((r) => r.path)).toEqual(["/first", "/second", "/third"])
   })
 })
 
@@ -197,8 +247,8 @@ describe("reading the same bytes twice", () => {
     await replaceSidecar(log, ...events, run.log("req-1", "and one the Reader has not seen"))
     await reader.caughtUp()
 
-    expect(reader.rows).toHaveLength(1)
-    expect(reader.rows[0]).toMatchObject({ sqlCount: 1, logCount: 2, status: 200 })
+    expect(requests(reader.rows)).toHaveLength(1)
+    expect(theOnlyRequest(reader.rows)).toMatchObject({ sqlCount: 1, logCount: 2, status: 200 })
   })
 
   test("tells apart two Runs that both count from 1", async () => {
@@ -209,7 +259,7 @@ describe("reading the same bytes twice", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows).toHaveLength(2)
+    expect(requests(rows)).toHaveLength(2)
   })
 })
 
@@ -229,8 +279,8 @@ describe("a busy dev app's Sidecar", () => {
   test("gives every request in the file exactly one row", async () => {
     const { rows } = await theReaderReadsTheSeed()
 
-    expect(rows).toHaveLength(56)
-    expect(new Set(rows.map((candidate) => candidate.requestId)).size).toBe(56)
+    expect(requests(rows)).toHaveLength(56)
+    expect(new Set(requests(rows).map((candidate) => candidate.requestId)).size).toBe(56)
   })
 
   test("appends rows in the order the file did, across all three Runs", async () => {
@@ -243,17 +293,18 @@ describe("a busy dev app's Sidecar", () => {
       }
     }
 
-    expect(rows.map((candidate) => candidate.requestId)).toEqual(firstSeen)
+    expect(requests(rows).map((candidate) => candidate.requestId)).toEqual(firstSeen)
   })
 
   test("leaves the request whose clock was stepped back where it was appended", async () => {
     const { rows } = await theReaderReadsTheSeed()
 
-    const stepped = rows.findIndex((candidate) => candidate.requestId === CLOCK_STEPPED_BACK.requestId)
-    const startedAt = rows[stepped]?.startedAtWall ?? 0
-    const above = rows.slice(0, stepped).map((candidate) => candidate.startedAtWall ?? 0)
+    const ordered = requests(rows)
+    const stepped = ordered.findIndex((candidate) => candidate.requestId === CLOCK_STEPPED_BACK.requestId)
+    const startedAt = ordered[stepped]?.startedAtWall ?? 0
+    const above = ordered.slice(0, stepped).map((candidate) => candidate.startedAtWall ?? 0)
 
-    expect(rows[stepped]?.path).toBe(CLOCK_STEPPED_BACK.path)
+    expect(ordered[stepped]?.path).toBe(CLOCK_STEPPED_BACK.path)
     // Sorting on at_wall would have carried it up past these; append order did not.
     expect(above.filter((wall) => wall > startedAt).length).toBeGreaterThan(0)
   })
@@ -276,12 +327,22 @@ describe("a busy dev app's Sidecar", () => {
     expect(row(rows, NEVER_ROUTED.path)).toMatchObject({ method: "GET", status: 404, controller: null })
   })
 
+  test("gives each of the three Runs writing into it a row of its own", async () => {
+    const { rows } = await theReaderReadsTheSeed()
+
+    // Previous Runs stay visible: nothing here filters the file down to the newest one.
+    expect(runs(rows).map((candidate) => candidate.runId)).toEqual([SERVER_RUN, RAKE_RUN, CONSOLE_RUN])
+    expect(runRow(rows, RAKE_RUN)).toMatchObject({ runKind: "rake", marker: false, sqlCount: 118 })
+    expect(runRow(rows, SERVER_RUN).marker).toBe(true)
+  })
+
   test("holds the hanging request open, naming the controller it is stuck in", async () => {
     const { rows } = await theReaderReadsTheSeed()
 
     expect(row(rows, HANGS.path)).toMatchObject({
       controller: "Admin::ReportsController",
       action: "monthly",
+      state: "in-flight",
       status: null,
       durationMs: null,
       sqlCount: 2,
@@ -309,7 +370,7 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1", "Feed cache MISS", "SELECT 2"])
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual(["SELECT 1", "Feed cache MISS", "SELECT 2"])
   })
 
   test("holds SQL exactly as it was emitted, QueryLogs comment and all", async () => {
@@ -320,7 +381,7 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline[0]).toMatchObject({ type: "sql", payload: { sql: statement } })
+    expect(theOnlyRequest(rows).timeline[0]).toMatchObject({ type: "sql", payload: { sql: statement } })
   })
 
   test("puts an event whose seq is after the request_finish in a trailing section of its own", async () => {
@@ -336,10 +397,10 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1"])
-    expect(rows[0]?.trailing.map(describeEvent)).toEqual(["Executor#to_complete ran after the body closed"])
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual(["SELECT 1"])
+    expect(theOnlyRequest(rows).trailing.map(describeEvent)).toEqual(["Executor#to_complete ran after the body closed"])
     // Attribution was never in doubt, so a Trailing event still counts against its request.
-    expect(rows[0]).toMatchObject({ logCount: 1 })
+    expect(theOnlyRequest(rows)).toMatchObject({ logCount: 1 })
   })
 
   test("leaves a request that has not finished no trailing section to put anything in", async () => {
@@ -349,8 +410,8 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline).toHaveLength(2)
-    expect(rows[0]?.trailing).toHaveLength(0)
+    expect(theOnlyRequest(rows).timeline).toHaveLength(2)
+    expect(theOnlyRequest(rows).trailing).toHaveLength(0)
   })
 
   test("keeps the exception a request finished with, its backtrace uncleaned", async () => {
@@ -371,8 +432,8 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.exception).toMatchObject({ class: "NoMethodError" })
-    expect(rows[0]?.exception?.backtrace).toHaveLength(2)
+    expect(theOnlyRequest(rows).exception).toMatchObject({ class: "NoMethodError" })
+    expect(theOnlyRequest(rows).exception?.backtrace).toHaveLength(2)
   })
 
   test("gives a request that finished without raising no exception rather than an empty one", async () => {
@@ -382,7 +443,7 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.exception).toBeNull()
+    expect(theOnlyRequest(rows).exception).toBeNull()
   })
 
   test("drops the line Rails logs beside a query it already holds, keeping the callsite under it", async () => {
@@ -402,12 +463,12 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline.map(describeEvent)).toEqual([
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual([
       statement,
       "  \u21b3 app/controllers/posts_controller.rb:9",
     ])
     // The count and the timeline are one thing counted and the same thing listed.
-    expect(rows[0]).toMatchObject({ sqlCount: 1, logCount: 1 })
+    expect(theOnlyRequest(rows)).toMatchObject({ sqlCount: 1, logCount: 1 })
   })
 
   test("keeps a line the developer wrote themselves, even when they logged the query into it", async () => {
@@ -425,7 +486,7 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1", "about to run SELECT 1"])
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual(["SELECT 1", "about to run SELECT 1"])
   })
 
   test("keeps a Rails line that quotes a query from further back than the one before it", async () => {
@@ -443,7 +504,7 @@ describe("a request's timeline", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(rows[0]?.timeline.map(describeEvent)).toEqual(["SELECT 1", "SELECT 2", "  Post Load (0.2ms)  SELECT 1"])
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual(["SELECT 1", "SELECT 2", "  Post Load (0.2ms)  SELECT 1"])
   })
 
   test("keeps both lines when the query's SQL was cut, rather than guessing they are one", async () => {
@@ -465,7 +526,7 @@ describe("a request's timeline", () => {
     const { rows } = await theReaderReads(log)
 
     // Duplicated on screen, which is the honest outcome: nothing here can prove they match.
-    expect(rows[0]?.timeline).toHaveLength(2)
+    expect(theOnlyRequest(rows).timeline).toHaveLength(2)
   })
 
   test("keeps the twenty-four queries of the N+1 request, in the order the file has them", async () => {
@@ -484,5 +545,383 @@ describe("a request's timeline", () => {
     expect(authorLoads).toHaveLength(20)
     // Append order put them in `seq` order already: the fold sorted nothing to achieve this.
     expect(order).toEqual([...order].sort((one, other) => one - other))
+  })
+})
+
+/**
+ * The three states the wire never carries: *in-flight*, *Interrupted* and *Partial request*
+ * appear nowhere in an envelope, and the fold concludes each of them from evidence in the
+ * file — never from a clock, and never from a threshold.
+ */
+describe("what the fold concludes about a request", () => {
+  test("holds a request with a start and no finish in flight", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), run.start("req-1", "GET", "/hangs"), run.route("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/hangs")).toMatchObject({ state: "in-flight", status: null, durationMs: null })
+  })
+
+  test("names the controller an in-flight request is stuck in, once its route has arrived", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1", "GET", "/admin/reports/monthly.csv"),
+      run.route("req-1", "ReportsController", "index"),
+      run.log("req-1", "Building monthly report (this may take a while)"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/admin/reports/monthly.csv")).toMatchObject({
+      state: "in-flight",
+      controller: "ReportsController",
+      action: "index",
+    })
+  })
+
+  test("never times an in-flight request out, however long its Run goes on emitting", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const start = run.start("req-1", "GET", "/hangs")
+    await appendToSidecar(
+      log,
+      start,
+      // An hour later on the Run's own monotonic clock, and still nothing about this request.
+      { ...run.log(null, "still here"), at_mono: start.at_mono + 3_600_000_000_000 },
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/hangs").state).toBe("in-flight")
+  })
+
+  test("climbs an in-flight request's elapsed with each of its own events, within its Run's clock", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    // The fixture ticks `at_mono` on 100ms per envelope, so this is two ticks of one clock.
+    await appendToSidecar(log, run.start("req-1", "GET", "/hangs"), run.sql("req-1"), run.log("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    // Measured to the last thing the request said, and joined to the wall clock there, so
+    // the Reader can carry it forward through a silence the file has nothing to say about.
+    expect(row(rows, "/hangs").provenElapsed).toEqual({ ms: 200, atWall: EPOCH + 300 })
+  })
+
+  test("marks a request Interrupted when its own Run ends under it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.header(),
+      run.start("req-1", "GET", "/reaped"),
+      run.route("req-1"),
+      run.end(),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/reaped")).toMatchObject({ state: "interrupted", status: null, durationMs: null })
+  })
+
+  test("freezes an Interrupted request's elapsed at the moment its Run ended", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    // start, route, end: three ticks of the fixture's 100ms clock after the start.
+    await appendToSidecar(log, run.start("req-1", "GET", "/reaped"), run.route("req-1"), run.end())
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/reaped").provenElapsed?.ms).toBe(200)
+  })
+
+  test("concludes Interrupted from the next Run's header alone, with no run_end", async () => {
+    const log = await aLogDirectory()
+    const reaped = aRun("srv-1")
+    const restarted = aRun("srv-2")
+    await appendToSidecar(
+      log,
+      reaped.header(),
+      reaped.start("req-1", "GET", "/killed"),
+      reaped.route("req-1"),
+      // SIGKILL: no at_exit, no run_end. The next boot's header is the whole evidence.
+      restarted.header("server", 48_212),
+      restarted.start("req-2", "GET", "/after-the-restart"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/killed").state).toBe("interrupted")
+    expect(row(rows, "/after-the-restart").state).toBe("in-flight")
+  })
+
+  test("leaves a live request alone when a rake or console Run starts beside it", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const rake = aRun("rake-2")
+    const console = aRun("con-3")
+    await appendToSidecar(
+      log,
+      server.header(),
+      server.start("req-1", "GET", "/still-serving"),
+      rake.header("rake", 91_887),
+      console.header("console", 92_014),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    // Neither says anything about the server: it is still there, still serving this request.
+    expect(row(rows, "/still-serving").state).toBe("in-flight")
+  })
+
+  test("leaves a live request alone when another Run's run_end lands under it", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const rake = aRun("rake-2")
+    await appendToSidecar(log, server.start("req-1", "GET", "/still-serving"), rake.header("rake"), rake.end())
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/still-serving").state).toBe("in-flight")
+  })
+
+  test("takes the finish of a request whose Run only looked ended", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const restarted = aRun("srv-2")
+    await appendToSidecar(
+      log,
+      server.start("req-1", "GET", "/finished-after-all"),
+      restarted.header("server", 48_212),
+      // The Reader inferred an ending; the file then said otherwise, and evidence wins.
+      server.finish("req-1", { status: 200, duration_ms: 12.5 }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/finished-after-all")).toMatchObject({ state: "finished", status: 200, durationMs: 12.5 })
+  })
+
+  test("leaves a finished request finished when its Run ends afterwards", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1", "GET", "/done"), run.finish("req-1"), run.end())
+
+    const { rows } = await theReaderReads(log)
+
+    expect(row(rows, "/done").state).toBe("finished")
+  })
+})
+
+/**
+ * A *Partial request*: the Reader attached mid-flight, so it has the children and not the
+ * parent. Marked for its whole life, because the events emitted before it attached are lost
+ * and their number is unknowable.
+ */
+describe("a request whose start the Reader never saw", () => {
+  test("is a Partial request", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.sql("req-1"), run.log("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({ requestId: "req-1", partial: true, state: "in-flight" })
+  })
+
+  test("is promoted as its finish arrives, and stays Partial through it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.sql("req-1"),
+      run.route("req-1", "ReportsController", "monthly"),
+      run.finish("req-1", { status: 200, duration_ms: 91.4 }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({
+      partial: true,
+      state: "finished",
+      controller: "ReportsController",
+      action: "monthly",
+      status: 200,
+      durationMs: 91.4,
+    })
+  })
+
+  test("stays Partial even if a start turns up for it later", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.sql("req-1"), run.start("req-1", "GET", "/late-start"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({ partial: true, method: "GET", path: "/late-start" })
+  })
+
+  test("leaves a request the Reader saw start alone", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1"), run.sql("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).partial).toBe(false)
+  })
+})
+
+/**
+ * *Run rows*: everything a Run emitted with no owning request, in one row per Run, anchored
+ * where the Run first said anything. No gap threshold splits one, because a threshold is the
+ * timer this project refuses everywhere else.
+ */
+describe("Run rows", () => {
+  test("gives a Run one row holding everything it emitted unattributed", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.header(),
+      run.log(null, "=> Booting Puma"),
+      run.sql(null, "SELECT sqlite_version(*)"),
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1"),
+      // Minutes of quiet would sit here in a real file. Nothing splits the row.
+      run.log(null, "[ActiveJob] [DeliverWebhookJob] Performed"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(runs(rows)).toHaveLength(1)
+    expect(runRow(rows, "srv-1")).toMatchObject({ runId: "srv-1", sqlCount: 1, logCount: 2 })
+    expect(timeline(runRow(rows, "srv-1"))).toEqual([
+      "=> Booting Puma",
+      "SELECT sqlite_version(*)",
+      "[ActiveJob] [DeliverWebhookJob] Performed",
+    ])
+  })
+
+  test("carries what the run_header said about the process", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header("rake", 91_887))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(runRow(rows, "srv-1")).toMatchObject({
+      runKind: "rake",
+      pid: 91_887,
+      railsVersion: "8.0.2",
+      appName: "ExampleApp",
+    })
+  })
+
+  test("anchors the Run row at the append position where its run_header landed", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const rake = aRun("rake-2")
+    await appendToSidecar(
+      log,
+      server.header(),
+      server.start("req-1", "GET", "/first"),
+      rake.header("rake", 91_887),
+      rake.sql(null),
+      server.start("req-2", "GET", "/second"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    // Two Runs writing at once, each row where the file put it — neither slabbed above or
+    // below the other.
+    expect(rows.map((candidate) => (candidate.kind === "run" ? candidate.runId : candidate.path))).toEqual([
+      "srv-1",
+      "/first",
+      "rake-2",
+      "/second",
+    ])
+  })
+
+  test("draws a Run marker where a server Run started", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header("server"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(runRow(rows, "srv-1").marker).toBe(true)
+  })
+
+  test("gives a rake Run and a console Run a row but no marker", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    const console = aRun("con-2")
+    await appendToSidecar(log, rake.header("rake", 91_887), rake.sql(null), console.header("console", 92_014))
+
+    const { rows } = await theReaderReads(log)
+
+    // A marker means "this Run started here". Neither of these ended the Run above it, so a
+    // marker over the rows below would be a claim about traffic it has nothing to do with.
+    expect(runRow(rows, "rake-1")).toMatchObject({ marker: false, sqlCount: 1 })
+    expect(runRow(rows, "con-2").marker).toBe(false)
+  })
+
+  test("gives a Run the Reader attached inside a row, and no marker", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    // No header: the load-on-open window began after this Run booted.
+    await appendToSidecar(log, run.log(null, "[ActiveJob] [SendDigestJob] Performing"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(runRow(rows, "srv-1")).toMatchObject({ marker: false, runKind: null, logCount: 1 })
+  })
+
+  test("gives a Run that emitted nothing unattributed no empty row of its own", async () => {
+    const log = await aLogDirectory()
+    // A forked Puma worker: its own Run, inheriting a boot that already happened, so it
+    // writes no header of its own. A row with nothing in it is a home for nothing.
+    const worker = aRun("srv-1-worker")
+    await appendToSidecar(log, worker.start("req-1"), worker.sql("req-1"), worker.finish("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(runs(rows)).toHaveLength(0)
+  })
+
+  test("drops ActiveRecord's own line beside an unattributed query, as it does inside a request", async () => {
+    const statement = 'SELECT "orders".* FROM "orders" WHERE "orders"."state" = ?'
+    const log = await aLogDirectory()
+    const run = aRun("rake-1")
+    await appendToSidecar(
+      log,
+      run.header("rake", 91_887),
+      run.sql(null, statement),
+      run.log(null, `  Order Load (2.2ms)  ${statement}`, { severity: "debug", source: "rails" }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(timeline(runRow(rows, "rake-1"))).toEqual([statement])
+    expect(runRow(rows, "rake-1")).toMatchObject({ sqlCount: 1, logCount: 0 })
+  })
+
+  test("never doubles a Run row when the same bytes are read twice", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const events = [run.header(), run.log(null, "=> Booting Puma")]
+    await appendToSidecar(log, ...events)
+    const reader = await theReaderReads(log)
+
+    await replaceSidecar(log, ...events, run.log(null, "Listening on http://127.0.0.1:3000"))
+    await reader.caughtUp()
+
+    expect(runs(reader.rows)).toHaveLength(1)
+    expect(runRow(reader.rows, "srv-1").logCount).toBe(2)
   })
 })

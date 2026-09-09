@@ -82,6 +82,15 @@ was reaped, restarted or killed while the request was still in flight. Concluded
 evidence — a `run_end`, or a `run_header` bearing a new `run_id` — never from a timer, since
 in-flight requests are given no timeout, ever. The mirror of a *Partial request*: that one
 missed a start, this one will never get a finish.
+
+Only a header of kind `server` concludes it, and only for the *other* Runs: `rails s` and
+puma-dev each run one process in development, so a second server booting is a restart —
+while a `rake` task, a `rails c` session or a Sidekiq worker boots beside a server that
+keeps serving, and `unknown` is the kind the Initializer declined to classify, which is not
+a thing to conclude a restart from. A forked Puma worker cannot fire it either: it inherits
+a boot that already happened and writes no header of its own. And a `request_finish` that
+arrives afterwards takes the row back, because the inference was that a Run had ended and
+the finish is the file saying outright that it had not.
 _Avoid_: dropped (a *dropped event* is a volume concern and unrelated), abandoned, cut off.
 
 **Dual-homing** — an App log event appears in *two* places at once: inline within its
@@ -120,6 +129,24 @@ are given no timeout, ever, the Reader has no threshold to declare a hang. A cli
 elapsed time is the entire signal, and the human draws the conclusion. In-flight ends
 only in a finish or in *Interrupted*.
 
+The elapsed is *proven* up to the last event the Reader saw for that request — a distance
+within one Run's own `at_mono`, the one clock two events may be subtracted across — and
+carried from there by the browser, because a hanging request emits nothing, which is exactly
+when the number matters. It is carried from where the proof was taken: the `at_wall` that
+last event landed with, plus the time the local clock has counted since. So a request that
+had been hanging for ten minutes when the Reader opened says ten minutes, rather than the
+fraction of it the file happens to cover — the one case the number exists for, and the one an
+anchor taken at load would get wrong.
+
+This is the **one place `at_wall` is subtracted**, and the rule it keeps is the real one:
+never against another `at_wall`. Two of them are two processes' opinions, an NTP step apart
+in either direction, which is why nothing is ever ordered by them. One of them against the
+local clock is a different question — *how long ago was this line written* — asked on the one
+machine that wrote it and is reading it, which is the whole premise of a strictly local tool.
+Display-grade by construction, and exposed only for the stretch since the last event:
+everything the file covers is measured in `at_mono` and immune. A *Partial request* has no
+elapsed until a start turns up for it, having nothing to measure from.
+
 **Sidecar** — `log/rails_log_reader.jsonl`, the append-only file the Initializer writes one
 Event per line to and the Reader tails. The transport between the two halves, and the only
 file the product creates. Rails' generated `.gitignore` already covers it. Never confused
@@ -153,7 +180,9 @@ _Avoid_: late arrival, straggler, orphan.
 **Append order** — the position of a line in the *Sidecar*, and the Reader's global
 ordering key. `seq` restarts at 1 per Run and `at_mono` is a per-process clock, so when
 Runs overlap — clustered Puma workers, a rake burst beside a live server — neither can
-order two Events against each other, and `at_wall` is never sorted. One file opened
+order two Events against each other, and `at_wall` is never sorted — nor ever subtracted
+from another `at_wall`, its one use as a distance being the *In-flight* elapsed's join to the
+local clock. One file opened
 `O_APPEND` with synchronous inline writes makes byte order a real total order across
 every writer. Not observation order: two processes can swap by microseconds, accepted
 rather than buffered away.
@@ -175,11 +204,27 @@ that are not shipped), feed.
 **Run row** — an *Activity table* row holding everything a *Run* emitted with no owning
 request. One per Run, always, anchored at that Run's marker — a `rake` burst and a worker
 process still alive at the end of the day get the same rule, and no gap threshold splits
-either, because a threshold is the timer this project refuses everywhere else. The
+either, because a threshold is the timer this project refuses everywhere else. Opened by the
+Run's `run_header`, or by the first unattributed event of a Run whose header the Reader never
+saw; a Run that emitted nothing unattributed at all — a forked Puma worker, which inherits a
+boot and writes no header — has no row, because there is nothing for one to hold. The
 division of labour with the *Console*: the Console is where you read **when** something
 happened, the Run row is where you read **what**. Groups by *process*, never by job —
 every job a worker ever ran lands in one undifferentiated row, which is precisely why
 this is not the first-class background-job grouping v1 rules out.
+
+**Run marker** — the boundary the *Activity table* draws on a *Run row* where that Run's
+`run_header` landed. It means literally *this Run started here*, and never *everything below
+belongs to it*: a `rake` burst and a live server write into one file, so the rows under a
+marker are as likely to be another Run's. Drawn only for a Run that serves requests — the
+same evidence that makes an *Interrupted request*, since a restart is exactly the boundary a
+marker is for — so a `rake` or `rails c` Run gets a Run row without one, and so does a Run
+the Reader attached inside, because a boundary nobody witnessed is not one to draw. Because
+the marker is the only thing the table says about which process wrote what, no row carries a
+Run tag of its own. Drawn only on a row the header itself opened: where a Run's row was
+already open — the Reader having seen that Run say something before its header reached it —
+the boundary belongs above rows the marker would then sit below, so none is drawn.
+_Avoid_: separator, divider, restart banner.
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
 row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded — the

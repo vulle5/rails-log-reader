@@ -36,7 +36,12 @@ type EventEnvelope<T extends EventType, Payload> = {
   seq: number
   /** CLOCK_MONOTONIC nanoseconds. Duration and true placement; boot-relative, so unshowable. */
   at_mono: number
-  /** Epoch milliseconds. Display only — never sorted, never subtracted. */
+  /**
+   * Epoch milliseconds. Never sorted, and never subtracted from another `at_wall` — two of
+   * them are two processes' opinions, an NTP step apart in either direction. Read for
+   * display, and in one place as a distance from the *local* clock: how long ago a line was
+   * written, which is what carries an in-flight request's elapsed through a silence.
+   */
   at_wall: number
   /** `null` means unattributed: its Run owns it. */
   request_id: string | null
