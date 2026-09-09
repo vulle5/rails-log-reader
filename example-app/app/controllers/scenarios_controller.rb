@@ -4,8 +4,33 @@
 # why each one answers in plain text rather than a view. Nothing here excludes this
 # controller's own traffic from the Sidecar: an exclusion option would be a product feature
 # invented to tidy a test double, and the Initializer does not know a Scenario exists.
+#
+# Numbered 1–7, then 9: Scenario 8, a rake-task query burst, has no HTTP endpoint for a
+# button or a `curl` line to hit, and belongs to a different issue.
 class ScenariosController < ApplicationController
+  # One row per button on the index page. `count` is how many times the page's own JS fires
+  # `path` at once — 1 for everything but the two Scenarios that are about concurrency itself.
+  Scenario = Data.define(:path, :label, :description, :count)
+
   def index
+    @scenarios = [
+      Scenario.new(path: scenario_parallel_path, count: 4, label: "1 — Parallel requests",
+        description: "Four requests at once, each running a couple of queries, so their SQL interleaves."),
+      Scenario.new(path: scenario_n_plus_one_path, count: 1, label: "2 — N+1",
+        description: "One query for fifty comments, then one more per comment for its author."),
+      Scenario.new(path: scenario_slow_query_path, count: 1, label: "3 — Slow query",
+        description: "A recursive CTE, genuinely slow inside SQLite. No Ruby sleep involved."),
+      Scenario.new(path: scenario_hang_path, count: 1, label: "4 — Hang",
+        description: "Never finishes. Watch it climb in the Reader; reload this tab to give up on it."),
+      Scenario.new(path: scenario_error_path, count: 1, label: "5 — 500 error",
+        description: "An unhandled exception with a real backtrace."),
+      Scenario.new(path: scenario_dual_homing_path, count: 1, label: "6 — Dual-homed log line",
+        description: "A Rails.logger call sandwiched between two queries."),
+      Scenario.new(path: scenario_raw_sql_path, count: 1, label: "7 — Raw SQL",
+        description: "A bare connection.execute: no model, no binds, a nil name."),
+      Scenario.new(path: scenario_flood_path, count: 20, label: "9 — Request flood",
+        description: "The same cheap query, fired about twenty times at once.")
+    ]
   end
 
   # Scenario 1 — parallel in-flight requests with interleaving queries. The parallelism is
@@ -85,8 +110,13 @@ class ScenariosController < ApplicationController
   end
 
   # Scenario 9 — a request flood at ~20 concurrent. Deliberately the cheapest action here —
-  # one query, nothing eager loaded — because this Scenario is about volume, not depth: the
-  # page's button fires it around twenty times at once.
+  # one query, nothing eager loaded — because this Scenario is about volume, not depth. Only
+  # 8 of the 20 requests the page fires are ever truly mid-flight at once: `config/puma.rb`
+  # fixes the pool at `threads 8, 8`, on purpose, for reasons that have nothing to do with
+  # this Scenario, and it is not this ticket's place to widen it. Each request here is cheap
+  # enough that the other 12 drain from the queue in milliseconds, so the Activity table
+  # still sees the flood — as a burst rather than twenty requests genuinely overlapping.
+  # `WEB_CONCURRENCY=2 bin/dev` (see the README) is how to watch a wider one.
   def flood
     render plain: "posts=#{Post.count}"
   end

@@ -12,54 +12,14 @@
 </p>
 
 <ul class="scenarios">
-  <li>
-    <button type="button" data-scenario="<%= scenario_parallel_path %>" data-count="4">
-      1 — Parallel requests
-    </button>
-    <p class="meta">Four requests at once, each running a couple of queries, so their SQL interleaves.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_n_plus_one_path %>">
-      2 — N+1
-    </button>
-    <p class="meta">One query for fifty comments, then one more per comment for its author.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_slow_query_path %>">
-      3 — Slow query
-    </button>
-    <p class="meta">A recursive CTE, genuinely slow inside SQLite. No Ruby <code>sleep</code> involved.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_hang_path %>">
-      4 — Hang
-    </button>
-    <p class="meta">Never finishes. Watch it climb in the Reader; reload this tab to give up on it.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_error_path %>">
-      5 — 500 error
-    </button>
-    <p class="meta">An unhandled exception with a real backtrace.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_dual_homing_path %>">
-      6 — Dual-homed log line
-    </button>
-    <p class="meta">A <code>Rails.logger</code> call sandwiched between two queries.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_raw_sql_path %>">
-      7 — Raw SQL
-    </button>
-    <p class="meta">A bare <code>connection.execute</code>: no model, no binds, a <code>nil</code> name.</p>
-  </li>
-  <li>
-    <button type="button" data-scenario="<%= scenario_flood_path %>" data-count="20">
-      9 — Request flood
-    </button>
-    <p class="meta">The same cheap query, fired about twenty times at once.</p>
-  </li>
+  <% @scenarios.each do |scenario| %>
+    <li>
+      <button type="button" data-scenario="<%= scenario.path %>" data-count="<%= scenario.count %>">
+        <%= scenario.label %>
+      </button>
+      <p class="meta"><%= scenario.description %></p>
+    </li>
+  <% end %>
 </ul>
 
 <p id="scenario-output" role="status"></p>

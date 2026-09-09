@@ -105,7 +105,10 @@ curl -s http://localhost:3000/scenarios/dual_homing
 # 7 — A raw connection.execute: no model, no binds, a nil name.
 curl -s http://localhost:3000/scenarios/raw_sql
 
-# 9 — A request flood at ~20 concurrent.
+# 9 — A request flood at ~20 concurrent. Only 8 are ever truly mid-flight at once — Puma's
+# pool above is fixed at `threads 8, 8` — but each is cheap enough that the rest drain from
+# the queue in milliseconds, so the Activity table still sees it as a burst. For a wider one,
+# `WEB_CONCURRENCY=2 bin/dev` first.
 for i in $(seq 20); do curl -s http://localhost:3000/scenarios/flood & done; wait
 ```
 
