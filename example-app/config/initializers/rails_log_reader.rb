@@ -657,7 +657,7 @@ module RailsLogReader
       end
 
       # `byte_size` below, plus one check `String` alone needs: BINARY-encoded or not
-      # `valid_encoding?` is not "large", it is "cannot reach JSON.generate at all", so it is
+      # `valid_encoding?` is not "large", it is "may not reach JSON.generate at all", so it is
       # caught here rather than left for `shrink_to_fit` to discover as an oversized field
       # that never shrinks. Returns the value alongside its size, same as the field it sits
       # in eventually needs both — and returns the very same object when there is nothing to
@@ -727,15 +727,30 @@ module RailsLogReader
       end
 
       # Two different strings, two different honest answers — not one rule wearing an
-      # exception. BINARY is opaque by definition: a database blob, a file's raw bytes, and
-      # there is no readable part to salvage, so it goes as its size, which is
-      # development.log's own answer for a bind (#20) and now every other field's too. A
-      # string merely tagged UTF-8 that picked up a handful of bad bytes — a gem's exception
-      # message, a query string ActionDispatch never validated — is not opaque, and throwing
-      # the whole thing away would lose a log line that was otherwise perfectly legible.
-      # `scrub("")` is `cut_string`'s own answer to that problem already, a few lines down.
+      # exception. A string merely tagged UTF-8 that picked up a handful of bad bytes — a
+      # gem's exception message, a query string ActionDispatch never validated — is not
+      # opaque, and throwing the whole thing away would lose a log line that was otherwise
+      # perfectly legible. `scrub("")` is `cut_string`'s own answer to that problem already,
+      # a few lines down.
+      #
+      # BINARY is not by itself that other case: it is Ruby's "nobody said what this is"
+      # tag, and Puma hands out request_method under it even though every method is plain
+      # ASCII (`rb_str_new` with no encoding, right beside header values the same C
+      # extension does tag UTF-8) — a mislabel, not a blob. Re-reading the bytes as UTF-8 is
+      # how to tell that from an actual blob apart: valid, and it was text all along, so it
+      # is re-tagged and passed straight through — `JSON.generate` will read this string's
+      # encoding, not what it used to be tagged, and re-tagging here rather than trusting
+      # its own BINARY-tolerant fallback is what keeps this file working the same on the
+      # json gem's next major version, which is dropping that fallback. Invalid, and there
+      # is no readable part to salvage, so it goes as its size, which is development.log's
+      # own answer for a bind (#20) and now every other field's too.
       def scrub_utf8(string)
-        return "<#{string.bytesize} bytes of binary data>" if string.encoding == Encoding::BINARY
+        if string.encoding == Encoding::BINARY
+          retagged = string.dup.force_encoding(Encoding::UTF_8)
+          return retagged if retagged.valid_encoding?
+
+          return "<#{string.bytesize} bytes of binary data>"
+        end
 
         string.scrub("")
       end

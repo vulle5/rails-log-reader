@@ -102,4 +102,23 @@ class RequestTest < ActiveSupport::TestCase
       "readable text keeps what can be read, same as cut_string's own scrub"
     assert run.events_of("request_finish").sole, "one bad byte disabled the Run for the finish after it"
   end
+
+  # Puma's own C extension hands `request.request_method` over BINARY-tagged
+  # (`rb_str_new` with no encoding, right beside header values the same extension does tag
+  # UTF-8) even though every HTTP method is plain ASCII — a mislabel, not a blob. #33's scrub
+  # used to treat the tag alone as proof of opaque binary, so every method on a real,
+  # Puma-served request read back as `<3 bytes of binary data>`. Session's Integration
+  # request builds its own env in Ruby rather than through Puma's parser, so this drives the
+  # middleware with a hand-built env carrying the same tag Puma's actually would.
+  test "a BINARY-tagged request method that is plain ASCII is not mistaken for opaque binary" do
+    run = DevelopmentRun.boot(script: <<~'RUBY')
+      require "rack/mock_request"
+      env = Rack::MockRequest.env_for("/posts")
+      env["REQUEST_METHOD"] = "GET".dup.force_encoding(Encoding::BINARY)
+      RailsLogReader::Middleware.new(->(_env) { [ 200, {}, [ "" ] ] }).call(env)
+    RUBY
+
+    assert run.booted?, run.output
+    assert_equal "GET", run.events_of("request_start").sole["payload"]["method"]
+  end
 end
