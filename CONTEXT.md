@@ -289,13 +289,20 @@ chip are not, and a Run boundary is not — a restart may not yank a reader away
 were reading. One rule and no second, hidden pause state, which is a promise about what the
 Reader does *not* do rather than a feature it has.
 
+*Hover grouping*'s jump is the one place a column is moved for you, and it is not an exception
+to the rule but the plainest case of it: the jump scrolls the *Activity table* to the row, and
+where the port ends up is read like any other scroll — so landing on a row above the fold
+pauses the table exactly as scrolling to it by hand would. That is the click's doing and not
+the selection's, and it is what you wanted: a table that snapped back to the bottom after
+taking you somewhere would not have taken you anywhere.
+
 A paused column counts what has arrived below and offers the count as a floating "↓ N new"
 pill, which resumes on click. The count is the point of the pill — it is what says when to
 stop reading and look — so it counts what the column is *showing*: a line a level chip is
 hiding is not something scrolling down would reveal. A chip going off or on is not arrivals at
-all, the list having been re-derived rather than appended to, so it adds nothing and drops
-nothing already counted. With nothing new below there is no pill: "0 new" would send a reader
-to look at nothing, over the lines they scrolled up to read.
+all, the list having been re-derived rather than appended to, so nothing is counted for it and
+what was already counted stands. With nothing new below there is no pill: "0 new" would send
+a reader to look at nothing, over the lines they scrolled up to read.
 
 All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a

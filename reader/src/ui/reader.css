@@ -24,6 +24,11 @@
 
   --warn: #9a6700;
   --error: #cf222e;
+
+  /* The one thing in the Reader that floats over its own column, and the only place a shadow
+     is what says so. Darker in the dark theme, where a light pill on a dark column needs more
+     under it to lift, not less. */
+  --shadow: rgb(0 0 0 / 18%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +52,8 @@
 
     --warn: #e3b341;
     --error: #ff7b72;
+
+    --shadow: rgb(0 0 0 / 45%);
   }
 }
 
@@ -250,7 +257,7 @@ body {
   border: none;
   border-radius: 999px;
   background: var(--accent);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+  box-shadow: 0 2px 8px var(--shadow);
   color: var(--bg);
   font-family: var(--ui);
   font-size: 11px;

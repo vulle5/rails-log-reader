@@ -9,7 +9,7 @@ import { ActivityTable, rowSelector } from "./ActivityTable"
 import { useAutoScroll, type ColumnAutoScroll } from "./auto-scroll"
 import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
 import { ConsoleRail } from "./ConsoleRail"
-import { DetailColumn } from "./DetailColumn"
+import { detailItems, DetailColumn } from "./DetailColumn"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
@@ -95,19 +95,19 @@ export function Reader({
   const showingLines = linesShown(lines, filter)
 
   // The three auto-scrolls. Each is handed how much its column is rendering and what it is
-  // rendering it *of* — a filter, a tab, a Selection — and nothing else: there is no event
-  // and no state anywhere else in the Reader that may pause or resume one of them.
+  // listing — a Console filter, a row-kind tab, a Selection — and nothing else: there is no
+  // event and no state anywhere else in the Reader that may pause or resume one of them.
   //
-  // Only the Detail column refollows when what it is showing changes, because only there is
-  // that a different thing entirely: another row's timeline, which opens at its newest
-  // activity rather than inheriting the last one's scroll position. A tab or a chip is the
-  // same stream thinned, and a reader who scrolled up in it is still reading where they were.
-  const consoleScroll = useAutoScroll({ items: showingLines.length, showing: consoleFilterKey(filter) })
-  const activityScroll = useAutoScroll({ items: showingRows.length, showing: showingKind })
+  // Only the Detail column refollows on a new listing, because only there is that a different
+  // thing entirely: another row's timeline, which opens at its newest activity rather than
+  // inheriting the last one's scroll position. A tab or a chip is the same stream thinned, and
+  // a reader who scrolled up in it is still reading where they were.
+  const consoleScroll = useAutoScroll({ items: showingLines.length, listing: consoleFilterKey(filter) })
+  const activityScroll = useAutoScroll({ items: showingRows.length, listing: showingKind })
   const detailScroll = useAutoScroll({
-    items: showing === null ? 0 : showing.timeline.length + (showing.kind === "request" ? showing.trailing.length : 0),
-    showing: selected ?? "",
-    refollowsWhenShowingChanges: true,
+    items: detailItems(showing),
+    listing: selected ?? "",
+    refollowsOnNewListing: true,
   })
 
   // A jump is asked for rather than done on the spot: the same click can clear a tab filter,

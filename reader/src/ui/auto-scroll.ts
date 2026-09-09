@@ -80,50 +80,58 @@ export type ColumnAutoScroll = AutoScroll & {
   resume: () => void
 }
 
-type Showing = {
+type AutoScrollOptions = {
   /**
    * How many things the column is rendering. Growth is what "new" means, so this is counted
    * over what is *rendered* rather than what was folded: a line a level chip is hiding is
    * not something the reader would see by scrolling down, and a pill that counted it would
    * be sending them to look at nothing.
+   *
+   * Growth of a length, which holds for as long as a column only ever appends. #27's *Memory
+   * bound* is where that stops being true — a ring buffer at its cap evicts a row for every
+   * row it takes — and it will have to hand this hook arrivals somebody counted rather than a
+   * length to subtract.
    */
   items: number
   /**
-   * What it is showing them *of*: a Console filter, a row-kind tab, a selected row. When this
-   * changes the list was re-derived rather than appended to, so the difference in `items` is
-   * not arrivals and is not counted — a chip revealing fifty old lines is not fifty new ones.
-   * The count already accumulated stands: how much arrived while you were away is a fact
-   * about arrivals, and no filter changes it.
+   * What the column is listing: a Console filter, a row-kind tab, a selected row. When this
+   * changes the list was re-derived rather than appended to, so that render's difference in
+   * `items` is not arrivals and is not counted — a chip revealing fifty old lines is not fifty
+   * new ones. What was already counted stands, because how much arrived while you were away is
+   * a fact about arrivals and no filter changes it. The seam is a render that does both at
+   * once, which drops that one batch from the count: it takes a chip clicked in the very
+   * commit a batch lands in, and the count is a prompt to go and look rather than a ledger.
    */
-  showing: string
+  listing: string
   /**
-   * Whether a change of `showing` also puts the column back to following. True for the Detail
-   * column alone, where a change of `showing` is a change of *Selection* — a different row's
-   * timeline, which opens at its newest activity rather than inheriting the last one's scroll
-   * position. The other two are showing the same stream, thinned, and a reader who scrolled
-   * up in it is still reading where they were.
+   * Whether a new `listing` also puts the column back to following. True for the Detail column
+   * alone, where a new listing is a new *Selection* — a different row's timeline, which opens
+   * at its newest activity rather than inheriting the last one's scroll position. The other
+   * two are listing the same stream, thinned, and a reader who scrolled up in it is still
+   * reading where they were.
    */
-  refollowsWhenShowingChanges?: boolean
+  refollowsOnNewListing?: boolean
 }
 
 export function useAutoScroll({
   items,
-  showing,
-  refollowsWhenShowingChanges = false,
-}: Showing): ColumnAutoScroll {
+  listing,
+  refollowsOnNewListing = false,
+}: AutoScrollOptions): ColumnAutoScroll {
   const port = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<AutoScroll>(FOLLOWING)
-  const rendered = useRef({ items, showing })
+  const rendered = useRef({ items, listing })
 
   // A layout effect, so the port is put back on the bottom in the same frame the thing that
   // pushed it off was added: after the DOM has the new rows and before anything is painted,
   // which is what makes following look like the column never moved at all.
   useLayoutEffect(() => {
     const previous = rendered.current
-    rendered.current = { items, showing }
+    rendered.current = { items, listing }
+    const relisted = listing !== previous.listing
 
-    if (showing !== previous.showing) {
-      if (refollowsWhenShowingChanges) setState(FOLLOWING)
+    if (relisted) {
+      if (refollowsOnNewListing) setState(FOLLOWING)
     } else if (!state.following) {
       setState((current) => arrived(current, items - previous.items))
     }
@@ -132,10 +140,8 @@ export function useAutoScroll({
     // following, and the one that was just handed a new Selection is about to be. Either way
     // the bottom is where it belongs, and the render that state change causes changes nothing
     // about that.
-    if (state.following || (showing !== previous.showing && refollowsWhenShowingChanges)) {
-      stickToBottom(port.current)
-    }
-  }, [items, showing, refollowsWhenShowingChanges, state.following])
+    if (state.following || (relisted && refollowsOnNewListing)) stickToBottom(port.current)
+  }, [items, listing, refollowsOnNewListing, state.following])
 
   const onScroll = useCallback(() => {
     const measuring = port.current

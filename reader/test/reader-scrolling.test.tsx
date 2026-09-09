@@ -5,6 +5,7 @@ GlobalRegistrator.register()
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
+import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
 import type { Envelope } from "../src/shared/wire"
 
 const { act } = await import("react")
@@ -149,8 +150,12 @@ function scrollport(container: HTMLElement, name: string) {
   return port as HTMLElement
 }
 
-/** Where every column is asked to be: pinned to the bottom of what it holds. */
-function atBottom(container: HTMLElement, name: string) {
+/**
+ * Where every column is asked to be: pinned to the bottom of what it holds. Exact, unlike
+ * `atBottom`'s `BOTTOM_SLACK` — the slack is there for a browser's fractional layout, and a
+ * fake one that needed it would be a fake that had stopped standing in for anything.
+ */
+function pinnedToBottom(container: HTMLElement, name: string) {
   const port = scrollport(container, name)
   return port.scrollTop === bottomOf(port)
 }
@@ -166,6 +171,14 @@ async function scrollBackToTheBottom(container: HTMLElement, name: string) {
   const port = scrollport(container, name)
   port.scrollTop = bottomOf(port)
   await act(async () => port.dispatchEvent(new Event("scroll")))
+}
+
+function tab(container: HTMLElement, named: string) {
+  const found = [...container.querySelectorAll("[role='tab']")].find((each) =>
+    each.textContent?.startsWith(named),
+  )
+  if (found === undefined) throw new Error(`no ${named} tab`)
+  return found
 }
 
 function pill(container: HTMLElement, name: string) {
@@ -191,7 +204,18 @@ describe("opening the Reader", () => {
     const { container } = await openTheReader(...HISTORY)
     await selectRow(container, HANGS)
 
-    for (const name of COLUMNS) expect([name, atBottom(container, name)]).toEqual([name, true])
+    for (const name of COLUMNS) expect([name, pinnedToBottom(container, name)]).toEqual([name, true])
+  })
+
+  test("pins them to the bottom of a busy fold too, where every column overflows several times over", async () => {
+    // The hand-written history above is small enough to reason about a count in; this is the
+    // volume the columns are actually read at — three Runs, 59 rows and a Console of hundreds
+    // — and the opening position is the one thing about it that must not depend on how much
+    // there is.
+    const { container } = await openTheReader(...DENSE_TRAFFIC)
+    await selectRow(container, DENSE_HANG.requestId)
+
+    for (const name of COLUMNS) expect([name, pinnedToBottom(container, name)]).toEqual([name, true])
   })
 
   test("shows no pill anywhere, because nothing is paused and nothing has been missed", async () => {
@@ -210,8 +234,8 @@ describe("a following column", () => {
     await arrive(...aRequest("r4", "/late", 2))
 
     expect(console.scrollTop).toBeGreaterThan(wasAt)
-    expect(atBottom(container, "Console")).toBe(true)
-    expect(atBottom(container, "Activity table")).toBe(true)
+    expect(pinnedToBottom(container, "Console")).toBe(true)
+    expect(pinnedToBottom(container, "Activity table")).toBe(true)
   })
 })
 
@@ -222,10 +246,10 @@ describe("scrolling up", () => {
 
     await arrive(...aRequest("r4", "/late", 2))
 
-    expect(atBottom(container, "Console")).toBe(false)
+    expect(pinnedToBottom(container, "Console")).toBe(false)
     // The whole of the issue: the Activity table follows new traffic while the Console is
     // being read back through.
-    expect(atBottom(container, "Activity table")).toBe(true)
+    expect(pinnedToBottom(container, "Activity table")).toBe(true)
     expect(pill(container, "Activity table")).toBeNull()
   })
 
@@ -282,7 +306,7 @@ describe("resuming", () => {
     expect(pill(container, "Console")).toBeNull()
     // And it is following again: the next thing to arrive is shown without being asked for.
     await arrive(run.log(null, "job two"))
-    expect(atBottom(container, "Console")).toBe(true)
+    expect(pinnedToBottom(container, "Console")).toBe(true)
   })
 
   test("happens on the pill, which takes the column to the bottom and drops the count", async () => {
@@ -294,7 +318,7 @@ describe("resuming", () => {
     if (clicked === null) throw new Error("the paused Console has no pill to click")
     await click(clicked)
 
-    expect(atBottom(container, "Console")).toBe(true)
+    expect(pinnedToBottom(container, "Console")).toBe(true)
     expect(pill(container, "Console")).toBeNull()
   })
 })
@@ -306,7 +330,7 @@ describe("what may never pause a column", () => {
     await selectRow(container, "r1")
 
     await arrive(...aRequest("r4", "/late", 2))
-    expect(atBottom(container, "Activity table")).toBe(true)
+    expect(pinnedToBottom(container, "Activity table")).toBe(true)
     expect(pill(container, "Activity table")).toBeNull()
   })
 })
@@ -319,8 +343,21 @@ describe("what may never resume a column", () => {
     const restarted = aRun("srv-26-restarted")
     await arrive(restarted.header(), restarted.log(null, "boot: environment loaded"))
 
-    expect(atBottom(container, "Activity table")).toBe(false)
-    expect(atBottom(container, "Console")).toBe(true)
+    expect(pinnedToBottom(container, "Activity table")).toBe(false)
+    expect(pinnedToBottom(container, "Console")).toBe(true)
+  })
+
+  test("a row-kind tab, which re-derives what the Activity table is listing rather than adding to it", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+    await arrive(...aRequest("r4", "/late", 2))
+
+    await click(tab(container, "Requests"))
+
+    expect(pinnedToBottom(container, "Activity table")).toBe(false)
+    // The Run row went with the tab, and a row leaving is not a row arriving: the count is
+    // what came in below while the reader was away, and it stands.
+    expect(pill(container, "Activity table")?.textContent).toContain("1 new")
   })
 
   test("a level chip, which re-derives what the Console is showing rather than adding to it", async () => {
@@ -334,7 +371,7 @@ describe("what may never resume a column", () => {
     if (rails === null) throw new Error("the Console has no source chip")
     await click(rails)
 
-    expect(atBottom(container, "Console")).toBe(false)
+    expect(pinnedToBottom(container, "Console")).toBe(false)
     expect(pill(container, "Console")?.textContent).toContain("1 new")
   })
 })
@@ -346,7 +383,7 @@ describe("the Detail column", () => {
 
     await arrive(run.log(HANGS, "still aggregating"))
 
-    expect(atBottom(container, "Detail column")).toBe(true)
+    expect(pinnedToBottom(container, "Detail column")).toBe(true)
   })
 
   test("counts them while it is paused, and never the other columns' traffic", async () => {
@@ -367,7 +404,7 @@ describe("the Detail column", () => {
 
     await selectRow(container, "r1")
 
-    expect(atBottom(container, "Detail column")).toBe(true)
+    expect(pinnedToBottom(container, "Detail column")).toBe(true)
     expect(pill(container, "Detail column")).toBeNull()
   })
 
@@ -376,7 +413,7 @@ describe("the Detail column", () => {
     await scrollUp(container, "Console")
     await selectRow(container, HANGS)
 
-    expect(atBottom(container, "Console")).toBe(false)
-    expect(atBottom(container, "Activity table")).toBe(true)
+    expect(pinnedToBottom(container, "Console")).toBe(false)
+    expect(pinnedToBottom(container, "Activity table")).toBe(true)
   })
 })
