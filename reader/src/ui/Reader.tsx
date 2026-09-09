@@ -6,12 +6,12 @@ import type { Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./ActivityTable"
+import { ConsoleFilters, linesShown, useConsoleFilter } from "./ConsoleFilters"
 import { ConsoleRail } from "./ConsoleRail"
 import { DetailColumn } from "./DetailColumn"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
-import { LevelChips, linesOfLevel, useHiddenLevels } from "./LevelChips"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
 
 /**
@@ -70,7 +70,7 @@ export function Reader({
   // jumping to, and "take me there" is a promise neither a filter nor a scroll position may
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
-  const { hidden, toggle } = useHiddenLevels()
+  const { filter, toggleLevel, toggleRails } = useConsoleFilter()
 
   // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
   // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
@@ -134,7 +134,7 @@ export function Reader({
   }
 
   const showingRows = rowsOfKind(rows, showingKind)
-  const showingLines = linesOfLevel(lines, hidden)
+  const showingLines = linesShown(lines, filter)
 
   return (
     <div className="reader-shell">
@@ -148,7 +148,9 @@ export function Reader({
         <Column
           place="console"
           name="Console"
-          controls={<LevelChips hidden={hidden} onToggle={toggle} />}
+          controls={
+            <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+          }
         >
           <ConsoleRail
             lines={showingLines}

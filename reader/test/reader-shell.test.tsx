@@ -75,6 +75,17 @@ describe("opening the Reader", () => {
     expect(column(container, "Console").querySelectorAll("[aria-label='Filter by level'] button")).toHaveLength(6)
   })
 
+  test("opens with Rails' own lines off, and says so on the chip rather than silently", async () => {
+    const container = await openTheReader()
+    const rails = column(container, "Console").querySelector("[aria-label='Filter by source'] button")
+
+    // The Console is thinned from the first paint, which is a thing it has to admit to: a
+    // rail quietly not showing what it holds is indistinguishable from a rail that is broken.
+    expect(rails?.textContent).toBe("rails")
+    expect(rails?.getAttribute("aria-pressed")).toBe("false")
+    expect(rails?.className).toContain("chip-off")
+  })
+
   test("heads the Activity table with its columns before there is a single row to put under them", async () => {
     const container = await openTheReader()
     const table = body(column(container, "Activity table")).querySelector("table.activity")

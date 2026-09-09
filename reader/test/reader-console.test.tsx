@@ -103,12 +103,17 @@ async function click(element: Element) {
   })
 }
 
-function chip(container: HTMLElement, level: string) {
-  const found = [...container.querySelectorAll("[role='group'][aria-label='Filter by level'] button")].find(
-    (candidate) => candidate.textContent === level,
+function chip(container: HTMLElement, named: string, group = "Filter by level") {
+  const found = [...container.querySelectorAll(`[role='group'][aria-label='${group}'] button`)].find(
+    (candidate) => candidate.textContent === named,
   )
-  if (found === undefined) throw new Error(`no ${level} chip`)
+  if (found === undefined) throw new Error(`no ${named} chip in ${group}`)
   return found
+}
+
+/** Rails' own lines start hidden, so a test about them has to ask for them first. */
+async function showRails(container: HTMLElement) {
+  await click(chip(container, "rails", "Filter by source"))
 }
 
 function tab(container: HTMLElement, name: string) {
@@ -141,6 +146,13 @@ describe("the Console rail", () => {
   test("contains no SQL at all, which is the whole reason a logger call is findable here", async () => {
     const container = await theReader(...DENSE_TRAFFIC)
 
+    // What the developer wrote, and nothing Rails did: 93 of this stream's 159 App log
+    // events came from the app itself.
+    expect(lines(container)).toHaveLength(93)
+    expect(container.querySelectorAll('[aria-label="Console"] .sql')).toHaveLength(0)
+
+    await showRails(container)
+
     expect(lines(container)).toHaveLength(159)
     expect(container.querySelectorAll('[aria-label="Console"] .sql')).toHaveLength(0)
   })
@@ -159,12 +171,13 @@ describe("the Console rail", () => {
     expect(lineSaying(container, "a debug line").className).toContain("log-debug")
   })
 
-  test("keeps Rails' own lines and labels them, rather than dropping them", async () => {
+  test("labels Rails' own lines rather than dropping them, once they are asked for", async () => {
     const run = aRun("srv-1")
     const container = await theReader(
       run.log("req-1", "Started GET \"/posts/12\"", { source: "rails" }),
       run.log("req-1", "Feed cache MISS", { source: "app" }),
     )
+    await showRails(container)
 
     const rails = lineSaying(container, "Started GET")
     expect(rails.querySelector(".console-source")?.textContent).toBe("rails")
@@ -224,6 +237,75 @@ describe("the level chips", () => {
 
     const second = await theReaderWithEveryLevel()
     expect(messages(second)).toEqual(["an info line", "a warning"])
+  })
+})
+
+/**
+ * The other axis the Console is thinned on, and the one that starts thinned: Rails' own
+ * lines are most of a real dev app's log, and the Console exists so the handful you wrote is
+ * findable among them.
+ */
+describe("the rails chip", () => {
+  async function theReaderWithBothSources() {
+    const run = aRun("srv-1")
+    return theReader(
+      run.log(null, "=> Booting Puma", { source: "rails" }),
+      run.log("req-1", "Feed cache MISS", { source: "app" }),
+      run.log("req-1", "Started GET \"/posts/12\"", { source: "rails" }),
+      run.log("req-1", "Signed out user 4021", { source: "app" }),
+    )
+  }
+
+  test("hides Rails' own lines on open, so what is left is what you wrote", async () => {
+    const container = await theReaderWithBothSources()
+
+    expect(messages(container)).toEqual(["Feed cache MISS", "Signed out user 4021"])
+    expect(chip(container, "rails", "Filter by source").getAttribute("aria-pressed")).toBe("false")
+  })
+
+  test("brings them back, in append order among the app's own, when it is turned on", async () => {
+    const container = await theReaderWithBothSources()
+
+    await showRails(container)
+
+    expect(messages(container)).toEqual([
+      "=> Booting Puma",
+      "Feed cache MISS",
+      'Started GET "/posts/12"',
+      "Signed out user 4021",
+    ])
+  })
+
+  test("thins the rail and never the fold — the detail column still holds what it hides", async () => {
+    // Hidden is not dropped: the *Detail column* renders the request's own timeline off the
+    // Activity fold, which never had a Console chip to answer to.
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.log("req-1", "Started GET \"/posts/12\"", { source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    expect(lines(container)).toHaveLength(0)
+
+    const row = container.querySelector("tbody tr")
+    await click(row!)
+
+    expect(container.querySelector(".detail .log-message")?.textContent).toBe('Started GET "/posts/12"')
+  })
+
+  test("persists the choice, like the level chips beside it", async () => {
+    const first = await theReaderWithBothSources()
+    await showRails(first)
+
+    act(() => {
+      for (const root of mounted.splice(0)) root.unmount()
+    })
+    document.body.innerHTML = ""
+
+    const second = await theReaderWithBothSources()
+    expect(messages(second)).toHaveLength(4)
+    expect(chip(second, "rails", "Filter by source").getAttribute("aria-pressed")).toBe("true")
   })
 })
 

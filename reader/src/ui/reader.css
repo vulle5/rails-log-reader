@@ -595,17 +595,29 @@ body {
   color: var(--error);
 }
 
-/* The Console's only thinning, and every one of them on until somebody says otherwise: a
-   floor above `debug` would hide the developer's own calls, which is the exact failure the
-   Console is here to prevent. */
-.level-chips {
+/* The Console's two thinnings, in two groups: a level and a source are different questions
+   about a line, and one row of seven chips would invite `warn` and `rails` to be compared.
+   The separator between them is what says they are two. */
+.console-filters {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
   flex-wrap: wrap;
   gap: 2px;
 }
 
-.level-chip {
+.chips + .chips {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.chip {
   padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -619,25 +631,27 @@ body {
 
 /* Off, and legibly so: an outline with nothing in it, rather than a chip that has merely
    gone quiet — the difference between "no warnings" and "warnings hidden" is the one thing
-   this control must never blur. */
-.level-chip-off {
+   this control must never blur. It is the same mark whichever axis is off, because "hidden"
+   is the same fact about the rail either way — and `rails` wears it on open, which is how
+   the Console says out loud that it is not showing everything it holds. */
+.chip-off {
   background: none;
   color: var(--fg-faint);
   text-decoration: line-through;
 }
 
-.level-chip-warn {
+.chip-level-warn {
   color: var(--warn);
 }
 
-.level-chip-error,
-.level-chip-fatal {
+.chip-level-error,
+.chip-level-fatal {
   color: var(--error);
 }
 
-.level-chip-off.level-chip-warn,
-.level-chip-off.level-chip-error,
-.level-chip-off.level-chip-fatal {
+.chip-off.chip-level-warn,
+.chip-off.chip-level-error,
+.chip-off.chip-level-fatal {
   color: var(--fg-faint);
 }
 
