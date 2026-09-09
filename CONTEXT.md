@@ -275,6 +275,44 @@ before a busy dev app runs out of requests, dimming makes everything else unread
 exactly when you are hovering constantly, and markers tell you *that* something is
 elsewhere without letting you read the connection to it.
 
+**Auto-scroll** — a column following new activity: stuck to the bottom, so whatever arrives
+is on screen the moment it does. There are three, one per column, and they share the rule and
+nothing else — scrolling the *Console* back to find a boot line says nothing about whether the
+*Activity table* should keep following new traffic, and pinning a hanging request in the
+*Detail column* says nothing about either.
+
+**Scrolling up is the only gesture that pauses one**, and reaching the bottom again is the
+only thing that resumes it — silently, because that is the gesture the developer already
+expects. Everything else is deliberately neither: *Selection* is not (you had to scroll up to
+click a moving row anyway, and that scroll has already paused it), a tab filter and a level
+chip are not, and a Run boundary is not — a restart may not yank a reader away from what they
+were reading. One rule and no second, hidden pause state, which is a promise about what the
+Reader does *not* do rather than a feature it has.
+
+*Hover grouping*'s jump is the one place a column is moved for you, and it is not an exception
+to the rule but the plainest case of it: the jump scrolls the *Activity table* to the row, and
+where the port ends up is read like any other scroll — so landing on a row above the fold
+pauses the table exactly as scrolling to it by hand would. That is the click's doing and not
+the selection's, and it is what you wanted: a table that snapped back to the bottom after
+taking you somewhere would not have taken you anywhere.
+
+A paused column counts what has arrived below and offers the count as a floating "↓ N new"
+pill, which resumes on click. The count is the point of the pill — it is what says when to
+stop reading and look — so it counts what the column is *showing*: a line a level chip is
+hiding is not something scrolling down would reveal. A chip going off or on is not arrivals at
+all, the list having been re-derived rather than appended to, so nothing is counted for it and
+what was already counted stands. Neither is chased further than that: a count that stayed
+exact across a narrowing list would need a second record of what the reader has already been
+shown, which is a second source of truth about the same question — and the number is a prompt
+to go and look, not a ledger. With nothing new below there is no pill: "0 new" would send
+a reader to look at nothing, over the lines they scrolled up to read.
+
+All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
+starts following again on its own, whenever *Selection* changes — another row's timeline is a
+different thing to be at the bottom of, rather than the same stream thinned.
+_Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
+is the control).
+
 ## Standing constraints
 
 1. **`log/development.log` stays pristine.** A collaborator running `tail -f` must see

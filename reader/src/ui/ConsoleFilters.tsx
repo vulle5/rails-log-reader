@@ -38,6 +38,18 @@ export type ConsoleFilter = {
 
 export const CONSOLE_FILTER_ON_OPEN: ConsoleFilter = { hiddenLevels: new Set(), showingRails: false }
 
+/**
+ * What the chips currently say, as one string — the same string `remember` writes, because
+ * one encoding with two readers is one fewer thing to keep in step.
+ *
+ * The second reader is the Console's *auto-scroll*, and it wants one thing only: a chip going
+ * off or on re-derives the whole rail rather than appending to it, so the lines that appear
+ * are old ones and counting them as arrivals would be the pill saying something false.
+ */
+export function consoleFilterKey(filter: ConsoleFilter) {
+  return JSON.stringify(stored(filter))
+}
+
 export function linesShown(lines: readonly ConsoleLine[], filter: ConsoleFilter) {
   return lines.filter((line) => {
     const { severity, source } = line.event.payload
@@ -173,12 +185,17 @@ function recall(): ConsoleFilter {
   }
 }
 
+/**
+ * The remembered shape, sorted — so one filter is one string whatever order the chips were
+ * clicked in, which is what lets `consoleFilterKey` be an identity rather than a history.
+ */
+function stored(filter: ConsoleFilter) {
+  return { levelsOff: [...filter.hiddenLevels].sort(), rails: filter.showingRails }
+}
+
 function remember(filter: ConsoleFilter) {
   try {
-    localStorage.setItem(
-      REMEMBERED,
-      JSON.stringify({ levelsOff: [...filter.hiddenLevels], rails: filter.showingRails }),
-    )
+    localStorage.setItem(REMEMBERED, consoleFilterKey(filter))
   } catch {
     // Nothing to do and nothing to say: the chips still work for this session.
   }

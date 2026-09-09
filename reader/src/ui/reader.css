@@ -24,6 +24,11 @@
 
   --warn: #9a6700;
   --error: #cf222e;
+
+  /* The one thing in the Reader that floats over its own column, and the only place a shadow
+     is what says so. Darker in the dark theme, where a light pill on a dark column needs more
+     under it to lift, not less. */
+  --shadow: rgb(0 0 0 / 18%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +52,8 @@
 
     --warn: #e3b341;
     --error: #ff7b72;
+
+    --shadow: rgb(0 0 0 / 45%);
   }
 }
 
@@ -182,6 +189,7 @@ body {
    minimum size is its content, so without this a column would overflow the track the line
    above just constrained, and hand the overflow back to the page. */
 .column {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -227,6 +235,38 @@ body {
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
+}
+
+/* A paused column's "N new" pill: floating over the column rather than sitting in it, and
+   positioned against the column and not its scrollport, so it stays put while the rows it is
+   counting move underneath. It has to be reachable without scrolling — scrolling to the
+   bottom is the very thing it is offering to do — and it may not push the rows around when
+   it appears, since it appears while they are being read.
+
+   Centred at the foot of the column, which is where the new rows are and which way the arrow
+   points. It is a `button` because it is one: unlike a row or a Console line, this is a
+   single control with one action, so it costs nothing to be keyboard-reachable and it would
+   be strange not to be. */
+.new-pill {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 2;
+  padding: 3px 10px;
+  transform: translateX(-50%);
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 2px 8px var(--shadow);
+  color: var(--bg);
+  font-family: var(--ui);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.new-pill:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--fg));
 }
 
 .placeholder {

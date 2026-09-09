@@ -18,6 +18,17 @@ import { tokenizeSql } from "./sql-highlight"
  * placeholder is what pins it — so selecting a row changes what this holds and nothing
  * about the layout around it.
  */
+/**
+ * How much this column is rendering, which is what its *auto-scroll* counts arrivals by. Here
+ * rather than where the hook is called, because it is a fact about what this file draws: a Run
+ * row has no trailing section to add, and a column that stopped rendering one would otherwise
+ * leave the pill quietly counting things nobody can scroll to.
+ */
+export function detailItems(row: ActivityRow | null) {
+  if (row === null) return 0
+  return row.timeline.length + (row.kind === "request" ? row.trailing.length : 0)
+}
+
 export function DetailColumn({ row }: { row: ActivityRow | null }) {
   if (row === null) {
     return (
