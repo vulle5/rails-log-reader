@@ -50,20 +50,27 @@ const COLUMNS = [
   ["total", "Total"],
 ] as const
 
+/** How the Console finds a row to draw to and to scroll to. Written here, because this is what writes it. */
+export function rowSelector(id: string) {
+  return `[data-row=${CSS.escape(id)}]`
+}
+
 type ActivityTableProps = {
   rows: readonly ActivityRow[]
   /** The `id` of the row the detail column is showing, if any. */
   selected: string | null
   /**
-   * The `id` of the row at the far end of *Hover grouping*'s rule — the Console line under
-   * the pointer, or the one pinned by a click. Distinct from `selected`, and deliberately:
-   * hovering draws the connection without moving anything, selection included.
+   * The far ends of *Hover grouping*: the row of the pinned Console group, and the row of the
+   * one under the pointer. Both are distinct from `selected`, and deliberately — hovering
+   * draws the connection without moving anything, selection included — and distinct from each
+   * other, because a pin a passing hover could put out would not be a pin.
    */
+  pinned: string | null
   lit: string | null
   onSelect: (id: string) => void
 }
 
-export function ActivityTable({ rows, selected, lit, onSelect }: ActivityTableProps) {
+export function ActivityTable({ rows, selected, pinned, lit, onSelect }: ActivityTableProps) {
   return (
     <table className="activity" role="grid">
       <thead>
@@ -82,6 +89,7 @@ export function ActivityTable({ rows, selected, lit, onSelect }: ActivityTablePr
               key={row.id}
               row={row}
               selected={row.id === selected}
+              pinned={row.id === pinned}
               lit={row.id === lit}
               onSelect={() => onSelect(row.id)}
             />
@@ -90,6 +98,7 @@ export function ActivityTable({ rows, selected, lit, onSelect }: ActivityTablePr
               key={row.id}
               row={row}
               selected={row.id === selected}
+              pinned={row.id === pinned}
               lit={row.id === lit}
               onSelect={() => onSelect(row.id)}
             />
@@ -100,12 +109,12 @@ export function ActivityTable({ rows, selected, lit, onSelect }: ActivityTablePr
   )
 }
 
-type RowProps<T> = { row: T; selected: boolean; lit: boolean; onSelect: () => void }
+type RowProps<T> = { row: T; selected: boolean; pinned: boolean; lit: boolean; onSelect: () => void }
 
-function RequestRow({ row, selected, lit, onSelect }: RowProps<Request>) {
+function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>) {
   return (
     <tr
-      className={rowClassName(["activity-row", `activity-row-${row.state}`], selected, lit)}
+      className={rowClassName(["activity-row", `activity-row-${row.state}`], selected, pinned, lit)}
       // What the Console finds a row by, and what it scrolls to: the fold's own `id`, which
       // is the same string a Console line names its owner with.
       data-row={row.id}
@@ -151,12 +160,13 @@ function RequestRow({ row, selected, lit, onSelect }: RowProps<Request>) {
  * That is also why no row anywhere carries a Run tag — the marker is the only thing the
  * table says about which process wrote what, and it says it in one place.
  */
-function RunRow({ row, selected, lit, onSelect }: RowProps<Run>) {
+function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
   return (
     <tr
       className={rowClassName(
         ["activity-row", "activity-row-run", row.marker ? "activity-row-marker" : ""],
         selected,
+        pinned,
         lit,
       )}
       data-row={row.id}
@@ -183,8 +193,13 @@ function RunRow({ row, selected, lit, onSelect }: RowProps<Run>) {
   )
 }
 
-function rowClassName(classes: readonly string[], selected: boolean, lit: boolean) {
-  return [...classes, selected ? "activity-row-selected" : "", lit ? "activity-row-lit" : ""]
+function rowClassName(classes: readonly string[], selected: boolean, pinned: boolean, lit: boolean) {
+  return [
+    ...classes,
+    selected ? "activity-row-selected" : "",
+    pinned ? "activity-row-pinned" : "",
+    lit ? "activity-row-lit" : "",
+  ]
     .filter((each) => each !== "")
     .join(" ")
 }

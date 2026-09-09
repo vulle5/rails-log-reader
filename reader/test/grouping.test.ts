@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { OFF_SCREEN_CAPTION, rulePath, ruleBetween, type Box } from "../src/ui/grouping"
+import { NOT_SHOWN_CAPTION, OFF_SCREEN_CAPTION, captionFor, rulePath, ruleBetween, type Box } from "../src/ui/grouping"
 
 /**
  * *Hover grouping*'s one arithmetic decision, taken apart from the DOM that measures it:
@@ -10,6 +10,10 @@ import { OFF_SCREEN_CAPTION, rulePath, ruleBetween, type Box } from "../src/ui/g
  * A seam of its own because the answer is the whole feature. At real volume the row usually
  * *is* off screen, which is the case the Console exists for, and it is the one a test in a
  * browserless DOM could otherwise never reach: every rectangle happy-dom measures is zero.
+ *
+ * The two ways of *not* reaching a row are kept apart here, because they are two different
+ * facts about where it is — scrolled past, or not in the table at all — and one caption for
+ * both would be saying something false about half of them.
  */
 
 function box(top: number, bottom: number, left = 0, right = 0): Box {
@@ -35,7 +39,7 @@ describe("the gutter rule", () => {
   test("ends in a stub when the row is below the fold, and never scrolls to fetch it", () => {
     const rule = ruleBetween(READER, box(200, 220, 100, 422), box(720, 744, 440, 1100), PORT)
 
-    expect(rule.kind).toBe("stub")
+    expect(rule.kind).toBe("off-screen")
     // Horizontal, level with the line it came from: the rule is not pointing anywhere, it
     // is saying there is nowhere on screen to point.
     expect(rule.to.y).toBe(rule.from.y)
@@ -45,23 +49,30 @@ describe("the gutter rule", () => {
   test("ends in a stub when the row is scrolled off the top, or under the sticky heading", () => {
     const rule = ruleBetween(READER, box(200, 220, 100, 422), box(60, 84, 440, 1100), PORT)
 
-    expect(rule.kind).toBe("stub")
+    expect(rule.kind).toBe("off-screen")
   })
 
   test("ends in a stub for a row only half on screen, because half a row is not somewhere to land", () => {
     const rule = ruleBetween(READER, box(200, 220, 100, 422), box(688, 712, 440, 1100), PORT)
 
-    expect(rule.kind).toBe("stub")
+    expect(rule.kind).toBe("off-screen")
   })
 
-  test("ends in a stub when there is no row on screen at all — a tab filter is hiding it", () => {
+  test("says a row that is not rendered at all is filtered out, and never that it is off screen", () => {
+    // A tab filter is hiding it. Calling that "off screen" would be the Reader asserting
+    // something false about where the row is, which is the one thing it may never do — and
+    // the click resolves the two cases differently, clearing the filter before it jumps.
     const rule = ruleBetween(READER, box(200, 220, 100, 422), null, PORT)
 
-    expect(rule.kind).toBe("stub")
+    expect(rule.kind).toBe("not-shown")
+    expect(captionFor(rule.kind)).toBe(NOT_SHOWN_CAPTION)
   })
 
-  test("captions the stub with what it means and what to do about it", () => {
+  test("captions each stub with what it means and what to do about it", () => {
     expect(OFF_SCREEN_CAPTION).toBe("row is off screen — click to jump")
+    expect(captionFor("off-screen")).toBe(OFF_SCREEN_CAPTION)
+    expect(NOT_SHOWN_CAPTION).not.toBe(OFF_SCREEN_CAPTION)
+    expect(NOT_SHOWN_CAPTION).toContain("click to jump")
   })
 })
 

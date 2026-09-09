@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
-import { OFF_SCREEN_CAPTION } from "../src/ui/grouping"
+import { NOT_SHOWN_CAPTION } from "../src/ui/grouping"
 
 const { act } = await import("react")
 const { createRoot } = await import("react-dom/client")
@@ -336,16 +336,18 @@ describe("hovering a Console line", () => {
     expect(container.querySelector(".placeholder")).not.toBeNull()
   })
 
-  test("ends the rule in a captioned stub when the row is not on screen, rather than connecting", async () => {
+  test("ends the rule in a captioned stub when the row is not in the table, rather than connecting", async () => {
     const container = await theReaderWithAGroup()
 
-    // A tab filter hiding the row is the reachable half of "off screen" in a DOM with no
-    // layout, and the same case for the reader: the row is not somewhere the eye can land.
+    // The row a tab filter is hiding is not somewhere the eye can land either — and the stub
+    // says which of the two reasons it is, because "off screen" would be false about a row
+    // that is not rendered at all. `grouping.test.ts` has the scrolled-past half, which a DOM
+    // with no layout cannot reach.
     await click(tab(container, "Runs"))
     await hover(lineSaying(container, "Feed cache MISS"))
 
-    expect(rule(container)?.getAttribute("class")).toContain("grouping-rule-stub")
-    expect(container.querySelector(".grouping-caption")?.textContent).toBe(OFF_SCREEN_CAPTION)
+    expect(rule(container)?.getAttribute("class")).toContain("grouping-rule-not-shown")
+    expect(container.querySelector(".grouping-caption")?.textContent).toBe(NOT_SHOWN_CAPTION)
     expect(jumps).toEqual([])
   })
 })
@@ -369,9 +371,31 @@ describe("pinning a Console line", () => {
     await click(line)
     await unhover(line)
 
-    expect(line.className).toContain("console-line-lit")
-    expect(container.querySelector("tbody tr.activity-row-lit .cell-path")?.textContent).toBe("/api/v1/feed")
+    expect(line.className).toContain("console-line-pinned")
+    expect(container.querySelector("tbody tr.activity-row-pinned .cell-path")?.textContent).toBe("/api/v1/feed")
     expect(rule(container)).not.toBeNull()
+  })
+
+  test("keeps the pinned group lit while the pointer sweeps other lines, which is what a pin is for", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/api/v1/feed"),
+      run.log("req-1", "Feed cache MISS"),
+      run.start("req-2", "GET", "/api/v1/me"),
+      run.log("req-2", "Authenticated user 4021"),
+    )
+    const pinnedLine = lineSaying(container, "Feed cache MISS")
+
+    await click(pinnedLine)
+    // Moving the mouse is exactly what happens next, and in a busy rail moving it means
+    // crossing other lines. A pin a passing hover could put out would not be a pin.
+    await hover(lineSaying(container, "Authenticated user 4021"))
+
+    expect(pinnedLine.className).toContain("console-line-pinned")
+    expect(container.querySelector("tbody tr.activity-row-pinned .cell-path")?.textContent).toBe("/api/v1/feed")
+    // ...and the line being swept over lights on its own, without taking the pin's mark.
+    expect(lineSaying(container, "Authenticated user 4021").className).toContain("console-line-lit")
+    expect(container.querySelector("tbody tr.activity-row-lit .cell-path")?.textContent).toBe("/api/v1/me")
   })
 
   test("jumps the Activity table to the row", async () => {
@@ -406,8 +430,8 @@ describe("pinning a Console line", () => {
     await click(lineSaying(container, "Feed cache MISS"))
     await click(lineSaying(container, "Authenticated user 4021"))
 
-    expect(lineSaying(container, "Feed cache MISS").className).not.toContain("console-line-lit")
-    expect(container.querySelector("tbody tr.activity-row-lit .cell-path")?.textContent).toBe("/api/v1/me")
+    expect(lineSaying(container, "Feed cache MISS").className).not.toContain("console-line-pinned")
+    expect(container.querySelector("tbody tr.activity-row-pinned .cell-path")?.textContent).toBe("/api/v1/me")
   })
 
   test("keeps the pin off the Activity table's own clicks, which say nothing about the Console", async () => {
@@ -417,7 +441,7 @@ describe("pinning a Console line", () => {
     const row = container.querySelector("tbody tr.activity-row-run")
     await click(row!)
 
-    expect(container.querySelector(".console-line-lit")).toBeNull()
+    expect(container.querySelector(".console-line-pinned")).toBeNull()
     expect(rule(container)).toBeNull()
   })
 })

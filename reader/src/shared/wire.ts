@@ -119,7 +119,13 @@ export type SqlPayload = {
   binds: BindValue[]
 }
 
-export type Severity = "debug" | "info" | "warn" | "error" | "fatal" | "unknown"
+/**
+ * Every level `Rails.logger` can be called at, quietest first — a tuple rather than a union
+ * spelled twice, so the Console's chips are these and cannot drift out of step with them.
+ */
+export const SEVERITIES = ["debug", "info", "warn", "error", "fatal", "unknown"] as const
+
+export type Severity = (typeof SEVERITIES)[number]
 
 export type AppLogPayload = {
   severity: Severity

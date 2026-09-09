@@ -512,7 +512,7 @@ body {
 }
 
 /* One line each, cut rather than wrapped: the rail is swept rather than read, a uniform
-   rhythm is what makes that possible at 159 lines, and it gives the gutter rule one
+   rhythm is what makes that possible in a busy one, and it gives the gutter rule one
    unambiguous height to point at. The whole message is a `title` away and a click away. */
 .console-line {
   display: flex;
@@ -534,7 +534,15 @@ body {
    you do constantly, and it made everything else unreadable exactly then. */
 .console-line-lit,
 .console-line-lit:hover {
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+}
+
+/* The pinned group, marked harder and declared last so it survives a hover passing over it —
+   which is the whole reason a pin exists. Sweeping the rail after clicking is what happens
+   next, and the group you just fixed in place has to still be there when you stop. */
+.console-line-pinned,
+.console-line-pinned:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
@@ -656,13 +664,12 @@ body {
   stroke-width: 1.5;
 }
 
-/* A stub is a rule that stopped, so it has to look stopped rather than aimed. */
-.grouping-rule-stub {
+/* A stub is a rule that stopped, so it has to look stopped rather than aimed. Both ways of
+   failing to reach a row are drawn alike — what differs between them is what the caption
+   says, because they are two different facts about where the row is. */
+.grouping-rule-off-screen,
+.grouping-rule-not-shown {
   stroke-dasharray: 3 3;
-}
-
-.grouping-landing {
-  fill: var(--accent);
 }
 
 /* What the stub means, said rather than left to the shape of a line going nowhere. */
@@ -679,13 +686,17 @@ body {
   white-space: nowrap;
 }
 
-/* The far end of the lit group. The row keeps whatever else it was saying about itself —
-   in flight, Interrupted, selected — and gains an accent edge on top of it. */
+/* The far end of the group, hovered and pinned. The row keeps whatever else it was saying
+   about itself — in flight, Interrupted, selected — and gains an accent tint on top of it. */
 .activity-row-lit td {
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
 }
 
-.activity-row-lit td:first-child {
+.activity-row-pinned td {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+
+.activity-row-pinned td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 

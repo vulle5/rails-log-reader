@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react"
 
 import type { ConsoleLine } from "../shared/console"
-import type { Severity } from "../shared/wire"
+import { SEVERITIES, type Severity } from "../shared/wire"
 
 /**
  * The Console's only thinning: one chip per level, every one of them on.
@@ -16,9 +16,6 @@ import type { Severity } from "../shared/wire"
  * has never heard of is then shown by whatever it is upgraded into, rather than silently
  * missing from a list written before it existed.
  */
-
-/** Every level the wire can carry, quietest first. Fixed, so the chips never move. */
-const LEVELS: readonly Severity[] = ["debug", "info", "warn", "error", "fatal", "unknown"]
 
 const REMEMBERED = "rails-log-reader.console-levels-off"
 
@@ -55,7 +52,7 @@ type LevelChipsProps = {
 export function LevelChips({ hidden, onToggle }: LevelChipsProps) {
   return (
     <div className="level-chips" role="group" aria-label="Filter by level">
-      {LEVELS.map((level) => {
+      {SEVERITIES.map((level) => {
         const showing = !hidden.has(level)
         return (
           <button
@@ -86,7 +83,7 @@ function recall(): ReadonlySet<Severity> {
 
     const levels: unknown = JSON.parse(remembered)
     if (!Array.isArray(levels)) return new Set()
-    return new Set(levels.filter((level): level is Severity => LEVELS.includes(level as Severity)))
+    return new Set(levels.filter((level): level is Severity => SEVERITIES.includes(level as Severity)))
   } catch {
     return new Set()
   }

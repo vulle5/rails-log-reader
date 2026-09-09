@@ -1,6 +1,8 @@
 import { useLayoutEffect, useState, type RefObject } from "react"
 
-import { OFF_SCREEN_CAPTION, ruleBetween, rulePath, type Box, type GroupingRule } from "./grouping"
+import { rowSelector } from "./ActivityTable"
+import { lineSelector } from "./ConsoleRail"
+import { captionFor, ruleBetween, rulePath, type Box, type GroupingRule } from "./grouping"
 
 /**
  * *Hover grouping*'s DOM half: measure the two ends, hand them to `grouping.ts`, draw what it
@@ -12,7 +14,7 @@ import { OFF_SCREEN_CAPTION, ruleBetween, rulePath, type Box, type GroupingRule 
  * so the line under the pointer stays under the pointer and the rule cannot come between the
  * hover and the click that follows it.
  *
- * Measurement is redone on either column's scroll and on a resize, and whenever `version`
+ * Measurement is redone on either column's scroll and on a resize, and whenever `layoutKey`
  * changes — the caller's word for "something moved that is not which two ends these are": a
  * tab filter switching, a level chip going off, rows arriving.
  */
@@ -24,10 +26,11 @@ type HoverGroupingProps = {
   line: string | null
   /** The `id` of the Activity table row it is drawn to. */
   row: string | null
-  version: string
+  /** Changes whenever the layout could have moved an end without changing which ends they are. */
+  layoutKey: string
 }
 
-export function HoverGrouping({ reader, line, row, version }: HoverGroupingProps) {
+export function HoverGrouping({ reader, line, row, layoutKey }: HoverGroupingProps) {
   const [rule, setRule] = useState<GroupingRule | null>(null)
 
   useLayoutEffect(() => {
@@ -50,7 +53,7 @@ export function HoverGrouping({ reader, line, row, version }: HoverGroupingProps
       for (const port of ports) port.removeEventListener("scroll", measure)
       window.removeEventListener("resize", measure)
     }
-  }, [reader, line, row, version])
+  }, [reader, line, row, layoutKey])
 
   if (rule === null) return null
 
@@ -58,13 +61,12 @@ export function HoverGrouping({ reader, line, row, version }: HoverGroupingProps
     <div className="grouping">
       <svg className="grouping-canvas" aria-hidden="true">
         <path className={`grouping-rule grouping-rule-${rule.kind}`} d={rulePath(rule)} />
-        {rule.kind === "connected" && <circle className="grouping-landing" cx={rule.to.x} cy={rule.to.y} r={3} />}
       </svg>
       {/* Where the stub stops, saying what the stub means. Not left to the shape of a line
           that goes nowhere: "it stopped" and "there is nothing to stop at" look identical. */}
-      {rule.kind === "stub" && (
+      {rule.kind !== "connected" && (
         <p className="grouping-caption" style={{ left: `${rule.to.x}px`, top: `${rule.to.y}px` }}>
-          {OFF_SCREEN_CAPTION}
+          {captionFor(rule.kind)}
         </p>
       )}
     </div>
@@ -72,15 +74,20 @@ export function HoverGrouping({ reader, line, row, version }: HoverGroupingProps
 }
 
 function measureRule(host: HTMLElement, line: string, row: string | null): GroupingRule | null {
-  const from = host.querySelector(byData("line", line))
+  const from = host.querySelector(lineSelector(line))
   const port = host.querySelector(".column-activity .column-body")
   if (from === null || port === null) return null
 
-  // `null` is a row that is not rendered at all — hidden by a tab filter, or evicted under
-  // the *Memory bound* — which is the same answer to the reader as one below the fold.
-  const to = row === null ? null : host.querySelector(byData("row", row))
+  // `null` is a row that is not rendered at all — hidden by a tab filter — which is a
+  // different fact from one scrolled past, and `ruleBetween` captions the two apart.
+  const to = row === null ? null : host.querySelector(rowSelector(row))
 
-  return ruleBetween(host.getBoundingClientRect(), from.getBoundingClientRect(), to?.getBoundingClientRect() ?? null, visibleBand(port))
+  return ruleBetween(
+    host.getBoundingClientRect(),
+    from.getBoundingClientRect(),
+    to?.getBoundingClientRect() ?? null,
+    visibleBand(port),
+  )
 }
 
 /**
@@ -92,13 +99,4 @@ function visibleBand(port: Element): Box {
   const box = port.getBoundingClientRect()
   const sticky = port.querySelector("thead")?.getBoundingClientRect().height ?? 0
   return { top: box.top + sticky, bottom: box.bottom, left: box.left, right: box.right }
-}
-
-/**
- * Ids are the Reader's own — `run srv-1 41`, `request a1b2c3d4` — so they carry spaces and
- * whatever a Rails app put in a `request_id`. `CSS.escape` makes one into an identifier the
- * selector can hold unquoted, which is the escaping that actually exists for this.
- */
-function byData(attribute: string, value: string) {
-  return `[data-${attribute}=${CSS.escape(value)}]`
 }

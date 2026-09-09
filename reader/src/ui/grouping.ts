@@ -4,14 +4,14 @@
  *
  * Everything here is arithmetic over rectangles somebody else measured, which is what makes
  * the one decision that matters testable. The rule assumes both ends are on screen, and at
- * real volume — 59 rows, 159 Console lines — the row usually is not. That case is not a
- * degradation to apologise for: it is the volume the Console exists for, so it is written
- * down as a kind of rule rather than as a rule that failed.
+ * real volume the row usually is not. That case is not a degradation to apologise for: it is
+ * the volume the Console exists for, so it is written down as a kind of rule rather than as
+ * a rule that failed.
  *
  * What the rule deliberately does *not* do is go and find the row. Hovering never scrolls
  * the Activity table — a table that moved under the pointer would be unusable at exactly the
- * moment you are sweeping the Console — so an off-screen row is said out loud and the click
- * is what resolves it.
+ * moment you are sweeping the Console — so a row it cannot reach is said out loud and the
+ * click is what resolves it.
  */
 
 /** The parts of a `DOMRect` this file reads. Viewport coordinates, as the DOM hands them over. */
@@ -20,14 +20,33 @@ export type Box = { top: number; bottom: number; left: number; right: number }
 /** A point in the Reader's own frame: the box the rule is drawn over. */
 export type Point = { x: number; y: number }
 
+/**
+ * `connected` reaches the row. The other two are the two different reasons it cannot, and
+ * they are kept apart because they are two different facts about where the row *is*: one is
+ * scrolled past, the other is not in the table at all. One caption for both would be saying
+ * something false about half of them, which is the one thing a log reader may never do.
+ */
+export type RuleKind = "connected" | "off-screen" | "not-shown"
+
 export type GroupingRule = {
-  /** `connected` reaches the row; `stub` says there is nowhere on screen to reach. */
-  kind: "connected" | "stub"
+  kind: RuleKind
   from: Point
   to: Point
 }
 
+/** The row is rendered, and scrolled out of the band the reader can see. */
 export const OFF_SCREEN_CAPTION = "row is off screen — click to jump"
+
+/**
+ * The row is not rendered: a tab filter is hiding it, which the click clears on its way
+ * there. #27's *Memory bound* will add a second way to be missing — an evicted row, which a
+ * click cannot take you to — and that one needs its own answer rather than this caption.
+ */
+export const NOT_SHOWN_CAPTION = "row is filtered out — click to jump"
+
+export function captionFor(kind: RuleKind) {
+  return kind === "off-screen" ? OFF_SCREEN_CAPTION : NOT_SHOWN_CAPTION
+}
 
 /**
  * How far a stub travels into the gutter. Short enough to read as unfinished rather than as
@@ -49,10 +68,10 @@ const ELBOW = 0.5
  */
 export function ruleBetween(reader: Box, line: Box, row: Box | null, port: Box): GroupingRule {
   const from = { x: line.right - reader.left, y: middle(line) - reader.top }
+  const stub = { x: from.x + STUB, y: from.y }
 
-  if (row === null || row.top < port.top || row.bottom > port.bottom) {
-    return { kind: "stub", from, to: { x: from.x + STUB, y: from.y } }
-  }
+  if (row === null) return { kind: "not-shown", from, to: stub }
+  if (row.top < port.top || row.bottom > port.bottom) return { kind: "off-screen", from, to: stub }
 
   return { kind: "connected", from, to: { x: row.left - reader.left, y: middle(row) - reader.top } }
 }
@@ -64,7 +83,7 @@ export function ruleBetween(reader: Box, line: Box, row: Box | null, port: Box):
  */
 export function rulePath(rule: GroupingRule) {
   const { from, to } = rule
-  if (rule.kind === "stub") return `M ${round(from.x)} ${round(from.y)} H ${round(to.x)}`
+  if (rule.kind !== "connected") return `M ${round(from.x)} ${round(from.y)} H ${round(to.x)}`
 
   const elbow = from.x + (to.x - from.x) * ELBOW
   return `M ${round(from.x)} ${round(from.y)} H ${round(elbow)} V ${round(to.y)} H ${round(to.x)}`

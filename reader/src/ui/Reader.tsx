@@ -5,7 +5,7 @@ import type { ConsoleLine } from "../shared/console"
 import type { Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
-import { ActivityTable } from "./ActivityTable"
+import { ActivityTable, rowSelector } from "./ActivityTable"
 import { ConsoleRail } from "./ConsoleRail"
 import { DetailColumn } from "./DetailColumn"
 import { HoverGrouping } from "./HoverGrouping"
@@ -74,11 +74,15 @@ export function Reader({
 
   // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
   // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
-  // it. Hover wins while it lasts: you are pointing at something, and one group is lit at a
+  // it, and the pinned group stays lit through every line the pointer crosses afterwards. A
+  // pin a passing hover could put out would not be a pin.
+  //
+  // The *rule*, unlike the lighting, is one line's: it is drawn from whichever line the eye
+  // is on, which is the hovered one while there is one and the pinned one the rest of the
   // time.
   const [hovered, setHovered] = useState<ConsoleLine | null>(null)
   const [pinned, setPinned] = useState<ConsoleLine | null>(null)
-  const grouped = hovered ?? pinned
+  const drawnFrom = hovered ?? pinned
 
   // A jump is asked for rather than done on the spot: the same click can clear a tab filter,
   // and the row it is jumping to does not exist in the DOM until that render has happened.
@@ -89,7 +93,7 @@ export function Reader({
   useLayoutEffect(() => {
     if (jumpTo === null) return
 
-    reader.current?.querySelector(`[data-row=${CSS.escape(jumpTo.row)}]`)?.scrollIntoView({ block: "center" })
+    reader.current?.querySelector(rowSelector(jumpTo.row))?.scrollIntoView({ block: "center" })
     setJumpTo(null)
   }, [jumpTo])
 
@@ -148,7 +152,8 @@ export function Reader({
         >
           <ConsoleRail
             lines={showingLines}
-            lit={grouped?.owner ?? null}
+            pinned={pinned?.owner ?? null}
+            hovered={hovered?.owner ?? null}
             onHover={setHovered}
             onPick={pick}
           />
@@ -161,7 +166,8 @@ export function Reader({
           <ActivityTable
             rows={showingRows}
             selected={selected}
-            lit={grouped?.owner ?? null}
+            pinned={pinned?.owner ?? null}
+            lit={hovered?.owner ?? null}
             onSelect={selectRow}
           />
         </Column>
@@ -169,13 +175,13 @@ export function Reader({
           <DetailColumn row={showing} />
         </Column>
         {/* Over all three, because the rule belongs to none of them: it leaves the Console's
-            gutter and lands on a row in the table beside it. `version` is everything that
+            gutter and lands on a row in the table beside it. `layoutKey` is everything that
             could have moved an end without changing which two ends they are. */}
         <HoverGrouping
           reader={reader}
-          line={grouped?.id ?? null}
-          row={grouped?.owner ?? null}
-          version={`${showingKind} ${showingRows.length} ${showingLines.length}`}
+          line={drawnFrom?.id ?? null}
+          row={drawnFrom?.owner ?? null}
+          layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
         />
       </div>
     </div>
