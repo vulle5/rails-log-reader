@@ -1,4 +1,4 @@
-import type { AppLogEvent, Envelope, RequestException, RunKind, SqlEvent } from "./wire"
+import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RunKind, type SqlEvent } from "./wire"
 
 /**
  * The fold: Sidecar envelopes in append order become Activity table rows.
@@ -173,6 +173,19 @@ export type RunRow = {
  */
 export type ActivityRow = RequestRow | RunRow
 
+/**
+ * What a row is called. Written here and read by the *Console*, which has to name the row
+ * one of its lines selects without holding that row: two spellings of one id would be a
+ * click that selected nothing, and the failure would be silent.
+ */
+export function requestRowId(requestId: string) {
+  return `request ${requestId}`
+}
+
+export function runRowId(runId: string) {
+  return `run ${runId}`
+}
+
 export type ActivityTable = {
   /** The same array throughout, mutated in place: rows are appended and never reordered. */
   readonly rows: readonly ActivityRow[]
@@ -199,7 +212,7 @@ export function activityTable(): ActivityTable {
    * a second restart out of a boundary the fold has already crossed.
    */
   function alreadyFolded(envelope: Envelope) {
-    const identity = `${envelope.run_id} ${envelope.seq}`
+    const identity = eventIdentity(envelope)
     if (folded.has(identity)) return true
     folded.add(identity)
     return false
@@ -212,7 +225,7 @@ export function activityTable(): ActivityTable {
     const folding: Folding = {
       row: {
         kind: "request",
-        id: `request ${requestId}`,
+        id: requestRowId(requestId),
         requestId,
         runId: envelope.run_id,
         state: "in-flight",
@@ -251,7 +264,7 @@ export function activityTable(): ActivityTable {
     const running: Running = {
       row: {
         kind: "run",
-        id: `run ${envelope.run_id}`,
+        id: runRowId(envelope.run_id),
         runId: envelope.run_id,
         runKind: null,
         pid: null,

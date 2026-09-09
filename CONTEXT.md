@@ -118,9 +118,25 @@ not, in *append order*. Rendered as the **Console rail**, the leftmost of the Re
 three columns. **App log events only** — never SQL, attributed or not. The Console exists
 so that a `Rails.logger` call you wrote is findable and one click from the request that
 ran it; queries outnumber log lines and would bury it. Every line is clickable and sets
-*Selection*. Volume is a **level** problem, never an attribution one: all levels show by
-default, thinned by persisted per-level chips, because a floor above `debug` would hide
-the developer's own calls — the exact failure the Console is here to prevent.
+*Selection*.
+
+Volume is a **level** and **source** problem, never an attribution one, and the two chip
+groups that thin it start from opposite ends because the failure they prevent is the same
+one arriving from two directions. All levels show by default: a floor above `debug` would
+hide the developer's own calls. Rails' own lines are hidden by default: in a real dev app
+they *are* the log — `Started GET`, `Processing by`, `Rendering`, `Completed 200 OK`, and
+an *Echo* under every query — so a rail that opens on them buries the handful you wrote
+just as surely. Both settings persist, and both are remembered as what is *off*, so a
+level the Reader has not met yet arrives shown.
+
+Hidden is never dropped, which is what keeps this a filter rather than the decision the
+*App log event* entry refuses. The fold holds every line whatever the chips say, the
+*Detail column* renders Rails' own inline with the request's queries regardless, and one
+chip brings them back into the rail. `Started GET` is still all a request that died before
+reaching a controller ever says about itself — it is one click away rather than in the way.
+The rail says so rather than thinning quietly: the `rails` chip wears the struck-through
+"off" mark from the first paint, because a Console silently not showing what it holds is
+indistinguishable from a broken one.
 
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single

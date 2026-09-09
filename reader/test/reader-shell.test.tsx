@@ -62,7 +62,28 @@ describe("opening the Reader", () => {
   test("shows the Console empty, because nothing is captured yet", async () => {
     const container = await openTheReader()
 
-    expect(body(column(container, "Console")).children).toHaveLength(0)
+    // The rail itself is present with no lines in it, for the reason the Activity table is
+    // present with no rows: the first line of the session must not be what introduces the
+    // column's contents and pushes the layout around.
+    expect(body(column(container, "Console")).querySelector(".console-lines")).not.toBeNull()
+    expect(container.querySelectorAll(".console-line")).toHaveLength(0)
+  })
+
+  test("offers every level chip before there is a single line to thin", async () => {
+    const container = await openTheReader()
+
+    expect(column(container, "Console").querySelectorAll("[aria-label='Filter by level'] button")).toHaveLength(6)
+  })
+
+  test("opens with Rails' own lines off, and says so on the chip rather than silently", async () => {
+    const container = await openTheReader()
+    const rails = column(container, "Console").querySelector("[aria-label='Filter by source'] button")
+
+    // The Console is thinned from the first paint, which is a thing it has to admit to: a
+    // rail quietly not showing what it holds is indistinguishable from a rail that is broken.
+    expect(rails?.textContent).toBe("rails")
+    expect(rails?.getAttribute("aria-pressed")).toBe("false")
+    expect(rails?.className).toContain("chip-off")
   })
 
   test("heads the Activity table with its columns before there is a single row to put under them", async () => {

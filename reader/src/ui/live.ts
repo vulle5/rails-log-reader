@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { activityTable, type ActivityRow } from "../shared/activity"
+import { consoleStream, type ConsoleLine } from "../shared/console"
 import type { Envelope } from "../shared/wire"
 
 /**
@@ -13,6 +14,8 @@ import type { Envelope } from "../shared/wire"
  */
 export type WireStatus = {
   rows: readonly ActivityRow[]
+  /** The *Console*'s own fold of the same envelopes: every App log event, in append order. */
+  lines: readonly ConsoleLine[]
   liveWireVersion: number | null
   liveRunId: string | null
 }
@@ -22,19 +25,31 @@ export type WireStatus = {
  * nothing else, so this is where the Reader's model actually lives.
  *
  * `EventSource` reconnects on its own, and a reconnection re-reads the load-on-open history
- * — which costs nothing, because `(run_id, seq)` is the event identity and the fold has
+ * — which costs nothing, because `(run_id, seq)` is the event identity and both folds have
  * already seen every one of those events.
+ *
+ * Two folds over one stream, not one fold read twice: the *Console* is every App log event
+ * in append order, *Echoes* included, and the Activity table's rows are the same events
+ * grouped by what owns them, *Echoes* dropped. Neither is derivable from the other, which is
+ * why the envelopes go to both.
  */
 export function useSidecar(): WireStatus {
-  const [status, setStatus] = useState<WireStatus>({ rows: [], liveWireVersion: null, liveRunId: null })
+  const [status, setStatus] = useState<WireStatus>({
+    rows: [],
+    lines: [],
+    liveWireVersion: null,
+    liveRunId: null,
+  })
 
   useEffect(() => {
     const activity = activityTable()
+    const stream = consoleStream()
     const sidecar = new EventSource("/events")
 
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
       activity.fold(envelopes)
+      stream.fold(envelopes)
       const latest = envelopes.at(-1)
 
       setStatus((previous) => ({
@@ -42,6 +57,9 @@ export function useSidecar(): WireStatus {
         // they mutate — that is what "rows mutate in place and never move" means — so the
         // array is the only thing left that can tell React the table has changed.
         rows: [...activity.rows],
+        // Console lines never mutate at all — a line is one envelope — so this array is
+        // copied for the one reason the rows' is: React is told by identity.
+        lines: [...stream.lines],
         liveWireVersion: latest?.v ?? previous.liveWireVersion,
         liveRunId: latest?.run_id ?? previous.liveRunId,
       }))
