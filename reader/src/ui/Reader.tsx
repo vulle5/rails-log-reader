@@ -6,7 +6,8 @@ import type { Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./ActivityTable"
-import { ConsoleFilters, linesShown, useConsoleFilter } from "./ConsoleFilters"
+import { useAutoScroll, type ColumnAutoScroll } from "./auto-scroll"
+import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
 import { ConsoleRail } from "./ConsoleRail"
 import { DetailColumn } from "./DetailColumn"
 import { HoverGrouping } from "./HoverGrouping"
@@ -29,6 +30,11 @@ import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKind
  * does *not* touch the Activity table beyond marking the row and, for a Console click,
  * jumping to it: you have to scroll up to click a moving row anyway, and that scroll has
  * already paused it.
+ *
+ * Each column follows new activity on its own — three *auto-scrolls*, one rule, no shared
+ * state — which is why the three hooks are here rather than inside the three columns: what
+ * each of them is following is what this component decided to show, thinned by this
+ * component's filters. Everything they may not do is in `auto-scroll.ts`.
  *
  * Rows and Console lines are passed in rather than subscribed to here: the live Sidecar is
  * `main.tsx`'s business, which keeps this component mountable over a seeded fold. The
@@ -84,12 +90,37 @@ export function Reader({
   const [pinned, setPinned] = useState<ConsoleLine | null>(null)
   const drawnFrom = hovered ?? pinned
 
+  // What each column is actually showing, which is what each column is actually following.
+  const showingRows = rowsOfKind(rows, showingKind)
+  const showingLines = linesShown(lines, filter)
+
+  // The three auto-scrolls. Each is handed how much its column is rendering and what it is
+  // rendering it *of* — a filter, a tab, a Selection — and nothing else: there is no event
+  // and no state anywhere else in the Reader that may pause or resume one of them.
+  //
+  // Only the Detail column refollows when what it is showing changes, because only there is
+  // that a different thing entirely: another row's timeline, which opens at its newest
+  // activity rather than inheriting the last one's scroll position. A tab or a chip is the
+  // same stream thinned, and a reader who scrolled up in it is still reading where they were.
+  const consoleScroll = useAutoScroll({ items: showingLines.length, showing: consoleFilterKey(filter) })
+  const activityScroll = useAutoScroll({ items: showingRows.length, showing: showingKind })
+  const detailScroll = useAutoScroll({
+    items: showing === null ? 0 : showing.timeline.length + (showing.kind === "request" ? showing.trailing.length : 0),
+    showing: selected ?? "",
+    refollowsWhenShowingChanges: true,
+  })
+
   // A jump is asked for rather than done on the spot: the same click can clear a tab filter,
   // and the row it is jumping to does not exist in the DOM until that render has happened.
   // An object, so clicking the same line twice jumps twice.
   const [jumpTo, setJumpTo] = useState<{ row: string } | null>(null)
   const reader = useRef<HTMLDivElement>(null)
 
+  // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
+  // which is a change of what the Activity table is showing, and a column that was following
+  // sticks to its bottom on one. Landing last is what makes "take me there" win — and the
+  // scroll it causes is then read like any other, so a jump to an old row pauses the table
+  // exactly as scrolling to it by hand would. No second pause state, no special case.
   useLayoutEffect(() => {
     if (jumpTo === null) return
 
@@ -133,9 +164,6 @@ export function Reader({
     )
   }
 
-  const showingRows = rowsOfKind(rows, showingKind)
-  const showingLines = linesShown(lines, filter)
-
   return (
     <div className="reader-shell">
       <InitializerBanner
@@ -148,6 +176,7 @@ export function Reader({
         <Column
           place="console"
           name="Console"
+          scroll={consoleScroll}
           controls={
             <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
           }
@@ -163,6 +192,7 @@ export function Reader({
         <Column
           place="activity"
           name="Activity table"
+          scroll={activityScroll}
           controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
         >
           <ActivityTable
@@ -173,7 +203,7 @@ export function Reader({
             onSelect={selectRow}
           />
         </Column>
-        <Column place="detail" name="Detail column">
+        <Column place="detail" name="Detail column" scroll={detailScroll}>
           <DetailColumn row={showing} />
         </Column>
         {/* Over all three, because the rule belongs to none of them: it leaves the Console's
@@ -201,17 +231,30 @@ type ColumnProps = {
    * exactly when it is wanted.
    */
   controls?: ReactNode
+  /** This column's own *auto-scroll*: the scrollport it follows, and what the pill says. */
+  scroll: ColumnAutoScroll
   children?: ReactNode
 }
 
-function Column({ place, name, controls, children }: ColumnProps) {
+function Column({ place, name, controls, scroll, children }: ColumnProps) {
   return (
     <section className={`column column-${place}`} role="region" aria-label={name}>
       <header className="column-heading">
         <h2>{name}</h2>
         {controls}
       </header>
-      <div className="column-body">{children}</div>
+      <div className="column-body" ref={scroll.port} onScroll={scroll.onScroll}>
+        {children}
+      </div>
+      {/* Only where there is something to go and see. A pill on a paused column with nothing
+          below it would read "0 new" — sending the reader to look at nothing, and covering
+          the lines they scrolled up to read while it did. Scrolling back down is the way out
+          of a pause either way; the pill is what the count is for. */}
+      {!scroll.following && scroll.unseen > 0 && (
+        <button type="button" className="new-pill" onClick={scroll.resume} title="Follow new activity again">
+          <span aria-hidden="true">↓</span> {scroll.unseen} new
+        </button>
+      )}
     </section>
   )
 }

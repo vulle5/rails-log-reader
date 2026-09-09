@@ -38,6 +38,16 @@ export type ConsoleFilter = {
 
 export const CONSOLE_FILTER_ON_OPEN: ConsoleFilter = { hiddenLevels: new Set(), showingRails: false }
 
+/**
+ * What the rail is showing, as one string. Read by the Console's *auto-scroll*, and for one
+ * thing only: a chip going off or on re-derives the whole list rather than appending to it,
+ * so the lines that appear are old ones and counting them as arrivals would be the pill
+ * saying something false.
+ */
+export function consoleFilterKey(filter: ConsoleFilter) {
+  return `${[...filter.hiddenLevels].sort().join(" ")}${filter.showingRails ? " +rails" : ""}`
+}
+
 export function linesShown(lines: readonly ConsoleLine[], filter: ConsoleFilter) {
   return lines.filter((line) => {
     const { severity, source } = line.event.payload
