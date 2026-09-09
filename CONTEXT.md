@@ -301,7 +301,10 @@ pill, which resumes on click. The count is the point of the pill — it is what 
 stop reading and look — so it counts what the column is *showing*: a line a level chip is
 hiding is not something scrolling down would reveal. A chip going off or on is not arrivals at
 all, the list having been re-derived rather than appended to, so nothing is counted for it and
-what was already counted stands. With nothing new below there is no pill: "0 new" would send
+what was already counted stands. Neither is chased further than that: a count that stayed
+exact across a narrowing list would need a second record of what the reader has already been
+shown, which is a second source of truth about the same question — and the number is a prompt
+to go and look, not a ledger. With nothing new below there is no pill: "0 new" would send
 a reader to look at nothing, over the lines they scrolled up to read.
 
 All three open pinned to the bottom of the loaded history. The *Detail column* is the one that

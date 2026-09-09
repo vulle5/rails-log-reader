@@ -98,9 +98,15 @@ type AutoScrollOptions = {
    * changes the list was re-derived rather than appended to, so that render's difference in
    * `items` is not arrivals and is not counted — a chip revealing fifty old lines is not fifty
    * new ones. What was already counted stands, because how much arrived while you were away is
-   * a fact about arrivals and no filter changes it. The seam is a render that does both at
-   * once, which drops that one batch from the count: it takes a chip clicked in the very
-   * commit a batch lands in, and the count is a prompt to go and look rather than a ledger.
+   * a fact about arrivals and no filter changes it.
+   *
+   * That leaves one seam, and it is left there deliberately: a render that relists *and*
+   * delivers in the same commit drops that batch from the count. Closing it means a second
+   * record of what the reader has already seen — an anchor on the last line they were shown,
+   * or a tally per listing — which is a second source of truth about the same question, wrong
+   * whenever its anchor is filtered away or evicted, and due to be wrong again under #27's
+   * *Memory bound*. The pill's number is a prompt to go and look, not a ledger, and it costs
+   * more to make it exact than being exact is worth here.
    */
   listing: string
   /**
