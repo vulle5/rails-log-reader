@@ -138,6 +138,17 @@ export type RequestFinishEvent = EventEnvelope<"request_finish", RequestFinishPa
 export type SqlEvent = EventEnvelope<"sql", SqlPayload>
 export type AppLogEvent = EventEnvelope<"app_log", AppLogPayload>
 
+/**
+ * What identifies one Event: the Run it came from and its `seq` within that Run. `seq`
+ * restarts at 1 in every Run, so neither half is an identity alone — together they are, and
+ * they are what lets the Reader be handed the same bytes twice. A reconnecting browser and a
+ * backward scan overlapping what is already held both cost a `Set` lookup rather than a
+ * doubled row or a doubled Console line.
+ */
+export function eventIdentity(envelope: Pick<Envelope, "run_id" | "seq">) {
+  return `${envelope.run_id} ${envelope.seq}`
+}
+
 export type Envelope =
   | RunHeaderEvent
   | RunEndEvent

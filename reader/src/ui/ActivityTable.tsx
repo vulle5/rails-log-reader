@@ -54,10 +54,16 @@ type ActivityTableProps = {
   rows: readonly ActivityRow[]
   /** The `id` of the row the detail column is showing, if any. */
   selected: string | null
+  /**
+   * The `id` of the row at the far end of *Hover grouping*'s rule — the Console line under
+   * the pointer, or the one pinned by a click. Distinct from `selected`, and deliberately:
+   * hovering draws the connection without moving anything, selection included.
+   */
+  lit: string | null
   onSelect: (id: string) => void
 }
 
-export function ActivityTable({ rows, selected, onSelect }: ActivityTableProps) {
+export function ActivityTable({ rows, selected, lit, onSelect }: ActivityTableProps) {
   return (
     <table className="activity" role="grid">
       <thead>
@@ -72,9 +78,21 @@ export function ActivityTable({ rows, selected, onSelect }: ActivityTableProps) 
       <tbody>
         {rows.map((row) =>
           row.kind === "request" ? (
-            <RequestRow key={row.id} row={row} selected={row.id === selected} onSelect={() => onSelect(row.id)} />
+            <RequestRow
+              key={row.id}
+              row={row}
+              selected={row.id === selected}
+              lit={row.id === lit}
+              onSelect={() => onSelect(row.id)}
+            />
           ) : (
-            <RunRow key={row.id} row={row} selected={row.id === selected} onSelect={() => onSelect(row.id)} />
+            <RunRow
+              key={row.id}
+              row={row}
+              selected={row.id === selected}
+              lit={row.id === lit}
+              onSelect={() => onSelect(row.id)}
+            />
           ),
         )}
       </tbody>
@@ -82,12 +100,15 @@ export function ActivityTable({ rows, selected, onSelect }: ActivityTableProps) 
   )
 }
 
-type RowProps<T> = { row: T; selected: boolean; onSelect: () => void }
+type RowProps<T> = { row: T; selected: boolean; lit: boolean; onSelect: () => void }
 
-function RequestRow({ row, selected, onSelect }: RowProps<Request>) {
+function RequestRow({ row, selected, lit, onSelect }: RowProps<Request>) {
   return (
     <tr
-      className={rowClassName(["activity-row", `activity-row-${row.state}`], selected)}
+      className={rowClassName(["activity-row", `activity-row-${row.state}`], selected, lit)}
+      // What the Console finds a row by, and what it scrolls to: the fold's own `id`, which
+      // is the same string a Console line names its owner with.
+      data-row={row.id}
       aria-selected={selected}
       onClick={onSelect}
     >
@@ -130,10 +151,15 @@ function RequestRow({ row, selected, onSelect }: RowProps<Request>) {
  * That is also why no row anywhere carries a Run tag — the marker is the only thing the
  * table says about which process wrote what, and it says it in one place.
  */
-function RunRow({ row, selected, onSelect }: RowProps<Run>) {
+function RunRow({ row, selected, lit, onSelect }: RowProps<Run>) {
   return (
     <tr
-      className={rowClassName(["activity-row", "activity-row-run", row.marker ? "activity-row-marker" : ""], selected)}
+      className={rowClassName(
+        ["activity-row", "activity-row-run", row.marker ? "activity-row-marker" : ""],
+        selected,
+        lit,
+      )}
+      data-row={row.id}
       aria-selected={selected}
       onClick={onSelect}
     >
@@ -157,8 +183,10 @@ function RunRow({ row, selected, onSelect }: RowProps<Run>) {
   )
 }
 
-function rowClassName(classes: readonly string[], selected: boolean) {
-  return [...classes, selected ? "activity-row-selected" : ""].filter((each) => each !== "").join(" ")
+function rowClassName(classes: readonly string[], selected: boolean, lit: boolean) {
+  return [...classes, selected ? "activity-row-selected" : "", lit ? "activity-row-lit" : ""]
+    .filter((each) => each !== "")
+    .join(" ")
 }
 
 /**

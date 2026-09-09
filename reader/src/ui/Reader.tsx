@@ -1,14 +1,18 @@
-import { useState, type ReactNode } from "react"
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import type { ActivityRow } from "../shared/activity"
+import type { ConsoleLine } from "../shared/console"
 import type { Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable } from "./ActivityTable"
+import { ConsoleRail } from "./ConsoleRail"
 import { DetailColumn } from "./DetailColumn"
+import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
-import { RowKindTabs, rowsOfKind, type RowKindFilter } from "./RowKindTabs"
+import { LevelChips, linesOfLevel, useHiddenLevels } from "./LevelChips"
+import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and
@@ -20,20 +24,23 @@ import { RowKindTabs, rowsOfKind, type RowKindFilter } from "./RowKindTabs"
  * for the same reason: the first request of the session must not be the thing that
  * introduces a header row and pushes the layout around.
  *
- * Selection lives here, between the two columns it joins — clicking a row in the Activity
- * table is what the detail column shows. Selecting deliberately does *not* touch the
- * Activity table beyond marking the row: you have to scroll up to click a moving row anyway,
- * and that scroll has already paused it.
+ * Selection lives here, between the columns it joins — a row clicked in the Activity table
+ * or a line clicked in the Console is what the detail column shows. Selecting deliberately
+ * does *not* touch the Activity table beyond marking the row and, for a Console click,
+ * jumping to it: you have to scroll up to click a moving row anyway, and that scroll has
+ * already paused it.
  *
- * Rows are passed in rather than subscribed to here: the live Sidecar is `main.tsx`'s
- * business, which keeps this component mountable over a seeded fold. The version-mismatch
- * props below (#29) are the same idea applied to the Initializer's own status: `main.tsx`
- * owns the fetch and the `EventSource`, and everything here is a pure render of whatever it
- * was handed, defaulting to "nothing wrong" so a seeded fold with no opinion about the
- * Initializer renders exactly as it always has.
+ * Rows and Console lines are passed in rather than subscribed to here: the live Sidecar is
+ * `main.tsx`'s business, which keeps this component mountable over a seeded fold. The
+ * version-mismatch props below (#29) are the same idea applied to the Initializer's own
+ * status: `main.tsx` owns the fetch and the `EventSource`, and everything here is a pure
+ * render of whatever it was handed, defaulting to "nothing wrong" so a seeded fold with no
+ * opinion about the Initializer renders exactly as it always has.
  */
 type ReaderProps = {
   rows?: readonly ActivityRow[]
+  /** Every App log event, in append order: the *Console*'s own fold, not this one's rows. */
+  lines?: readonly ConsoleLine[]
   /** File-on-disk vs. process-still-running, from `detectMismatch`. */
   mismatch?: Mismatch
   /** `v` off the most recently observed envelope, whichever process wrote it. */
@@ -45,6 +52,7 @@ type ReaderProps = {
 
 export function Reader({
   rows = [],
+  lines = [],
   mismatch = { kind: "none" },
   liveWireVersion = null,
   repairState = { phase: "idle" },
@@ -62,6 +70,49 @@ export function Reader({
   // jumping to, and "take me there" is a promise neither a filter nor a scroll position may
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
+  const { hidden, toggle } = useHiddenLevels()
+
+  // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
+  // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
+  // it. Hover wins while it lasts: you are pointing at something, and one group is lit at a
+  // time.
+  const [hovered, setHovered] = useState<ConsoleLine | null>(null)
+  const [pinned, setPinned] = useState<ConsoleLine | null>(null)
+  const grouped = hovered ?? pinned
+
+  // A jump is asked for rather than done on the spot: the same click can clear a tab filter,
+  // and the row it is jumping to does not exist in the DOM until that render has happened.
+  // An object, so clicking the same line twice jumps twice.
+  const [jumpTo, setJumpTo] = useState<{ row: string } | null>(null)
+  const reader = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (jumpTo === null) return
+
+    reader.current?.querySelector(`[data-row=${CSS.escape(jumpTo.row)}]`)?.scrollIntoView({ block: "center" })
+    setJumpTo(null)
+  }, [jumpTo])
+
+  /**
+   * Clicking a Console line: it selects the row that printed it — its request's, or, for an
+   * unattributed line, its *Run*'s — pins the group lit, and takes you to the row. If a tab
+   * filter is what is hiding that row, the filter goes first: clicking means "take me
+   * there", and taking you to a row you cannot see is a broken promise.
+   */
+  function pick(line: ConsoleLine) {
+    const row = rows.find((each) => each.id === line.owner)
+
+    setPinned(line)
+    setSelected(line.owner)
+    if (row !== undefined && !showsRow(showingKind, row)) setShowingKind("all")
+    setJumpTo({ row: line.owner })
+  }
+
+  /** Clicking a row says nothing about the Console, so it takes the pin down rather than moving it. */
+  function selectRow(id: string) {
+    setSelected(id)
+    setPinned(null)
+  }
 
   // #29's one hard stop: a `v` newer than this Reader understands is a shape it has never
   // read a line from, so it declines to render any of the three columns rather than guess
@@ -78,6 +129,9 @@ export function Reader({
     )
   }
 
+  const showingRows = rowsOfKind(rows, showingKind)
+  const showingLines = linesOfLevel(lines, hidden)
+
   return (
     <div className="reader-shell">
       <InitializerBanner
@@ -86,18 +140,43 @@ export function Reader({
         onRepair={onRepair}
         onDismiss={onDismissRepair}
       />
-      <div className="reader">
-        <Column place="console" name="Console" />
+      <div className="reader" ref={reader}>
+        <Column
+          place="console"
+          name="Console"
+          controls={<LevelChips hidden={hidden} onToggle={toggle} />}
+        >
+          <ConsoleRail
+            lines={showingLines}
+            lit={grouped?.owner ?? null}
+            onHover={setHovered}
+            onPick={pick}
+          />
+        </Column>
         <Column
           place="activity"
           name="Activity table"
           controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
         >
-          <ActivityTable rows={rowsOfKind(rows, showingKind)} selected={selected} onSelect={setSelected} />
+          <ActivityTable
+            rows={showingRows}
+            selected={selected}
+            lit={grouped?.owner ?? null}
+            onSelect={selectRow}
+          />
         </Column>
         <Column place="detail" name="Detail column">
           <DetailColumn row={showing} />
         </Column>
+        {/* Over all three, because the rule belongs to none of them: it leaves the Console's
+            gutter and lands on a row in the table beside it. `version` is everything that
+            could have moved an end without changing which two ends they are. */}
+        <HoverGrouping
+          reader={reader}
+          line={grouped?.id ?? null}
+          row={grouped?.owner ?? null}
+          version={`${showingKind} ${showingRows.length} ${showingLines.length}`}
+        />
       </div>
     </div>
   )
@@ -108,9 +187,10 @@ type ColumnProps = {
   /** The glossary's name for the column: what it is headed with, and what a screen reader announces. */
   name: string
   /**
-   * What sits in the heading beside the name — the Activity table's row-kind tabs, today.
-   * In the heading and not in the body, because the body is the scrollport: a filter that
-   * scrolled away with the rows it was filtering would be gone exactly when it is wanted.
+   * What sits in the heading beside the name — the Activity table's row-kind tabs and the
+   * Console's level chips. In the heading and not in the body, because the body is the
+   * scrollport: a filter that scrolled away with the rows it was filtering would be gone
+   * exactly when it is wanted.
    */
   controls?: ReactNode
   children?: ReactNode

@@ -93,6 +93,7 @@ body {
 }
 
 .reader {
+  position: relative;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 40%);
   grid-template-rows: minmax(0, 1fr);
@@ -200,7 +201,8 @@ body {
 .column-heading {
   display: flex;
   flex: 0 0 auto;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
   justify-content: space-between;
   min-height: 30px;
@@ -494,6 +496,197 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/* ---- the Console rail ------------------------------------------------------ */
+
+/* Every App log event in append order and no SQL at all, which is the whole reason a
+   `Rails.logger` call you wrote is findable by scanning one place.
+
+   The right padding is the **gutter**: the strip *Hover grouping*'s rule travels down, kept
+   clear of text so the rule never crosses a word on its way to the row. */
+.console-lines {
+  margin: 0;
+  padding: 0 18px 24px 0;
+  list-style: none;
+}
+
+/* One line each, cut rather than wrapped: the rail is swept rather than read, a uniform
+   rhythm is what makes that possible at 159 lines, and it gives the gutter rule one
+   unambiguous height to point at. The whole message is a `title` away and a click away. */
+.console-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0 2px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.console-line:hover {
+  background: var(--bg-raised);
+}
+
+/* The lit group: the line under the pointer, its siblings, and — across the gutter — their
+   row. Additive and nothing more. Dimming the rest was built and rejected: hovering is what
+   you do constantly, and it made everything else unreadable exactly then. */
+.console-line-lit,
+.console-line-lit:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.console-severity {
+  flex: 0 0 auto;
+  width: 5ch;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+/* Rails' own lines are kept and said to be Rails'. On the line and not only in its colour:
+   `source` is a fact read off `caller_locations`, and it is worth as much to a screen reader
+   as to the eye. The app's own lines carry nothing, because they are the ones the eye should
+   land on first. */
+.console-source,
+.console-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.console-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-from-rails .console-message {
+  color: var(--fg-muted);
+}
+
+.log-warn .console-severity,
+.log-warn .console-message {
+  color: var(--warn);
+}
+
+.log-error .console-severity,
+.log-error .console-message,
+.log-fatal .console-severity,
+.log-fatal .console-message {
+  color: var(--error);
+}
+
+/* The Console's only thinning, and every one of them on until somebody says otherwise: a
+   floor above `debug` would hide the developer's own calls, which is the exact failure the
+   Console is here to prevent. */
+.level-chips {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.level-chip {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--selected);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+/* Off, and legibly so: an outline with nothing in it, rather than a chip that has merely
+   gone quiet — the difference between "no warnings" and "warnings hidden" is the one thing
+   this control must never blur. */
+.level-chip-off {
+  background: none;
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+.level-chip-warn {
+  color: var(--warn);
+}
+
+.level-chip-error,
+.level-chip-fatal {
+  color: var(--error);
+}
+
+.level-chip-off.level-chip-warn,
+.level-chip-off.level-chip-error,
+.level-chip-off.level-chip-fatal {
+  color: var(--fg-faint);
+}
+
+/* ---- Hover grouping -------------------------------------------------------- */
+
+/* Over all three columns, because the rule belongs to none of them — and inert, so the line
+   under the pointer stays under the pointer and the rule cannot come between the hover and
+   the click that follows it. */
+.grouping {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.grouping-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.grouping-rule {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+/* A stub is a rule that stopped, so it has to look stopped rather than aimed. */
+.grouping-rule-stub {
+  stroke-dasharray: 3 3;
+}
+
+.grouping-landing {
+  fill: var(--accent);
+}
+
+/* What the stub means, said rather than left to the shape of a line going nowhere. */
+.grouping-caption {
+  position: absolute;
+  margin: 0;
+  padding: 2px 6px;
+  transform: translateY(-50%);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The far end of the lit group. The row keeps whatever else it was saying about itself —
+   in flight, Interrupted, selected — and gains an accent edge on top of it. */
+.activity-row-lit td {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+
+.activity-row-lit td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* ---- the detail column ---------------------------------------------------- */
