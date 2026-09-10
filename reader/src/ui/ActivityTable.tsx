@@ -142,6 +142,11 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
       <td className="cell-count">{count(row.logCount)}</td>
       <td className="cell-ms">{ms(row.dbRuntimeMs)}</td>
       <td className="cell-ms">{ms(row.viewRuntimeMs)}</td>
+      {/* The total: what the request said it took, or — where it said nothing — what the
+          Reader can prove it took. A finish that carried no `duration_ms` at all, the
+          Initializer having never seen that request start, reads exactly as an in-flight row
+          does, as the distance between the request's own first and last events, frozen. Never
+          a `0ms` standing in for a number nobody has. */}
       <td className="cell-ms cell-total">
         {row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}
       </td>
@@ -228,6 +233,11 @@ function StateDot({ state }: { state: Request["state"] }) {
  * The climbing pill. It shows where a *Partial request* would show nothing, because a
  * request whose start was never seen has nothing to be elapsed from — an honest blank rather
  * than a number measured from when the Reader happened to arrive.
+ *
+ * Climbing only while the row is in flight: an *Interrupted* row keeps its last reading
+ * frozen, and so does a finished row whose finish carried no duration. Both are the same
+ * answer — this is how far the file proves it got — and both are set apart from a duration
+ * the request itself reported by being seconds in a faded pill rather than milliseconds.
  */
 function Elapsed({ row }: { row: Request }) {
   const climbing = row.state === "in-flight"

@@ -45,9 +45,14 @@ require "json"
 require "securerandom"
 
 module RailsLogReader
-  # Stamped on every envelope, and bumped when a field changes meaning. The Reader reads it
-  # to tell "the new file is loaded" from "the file on disk is new but the process is not".
-  WIRE_VERSION = 1
+  # Stamped on every envelope, and bumped when a field changes meaning — including when a
+  # field a Reader could once count on becomes one it has to check for, which is a meaning
+  # change from the reading half's side even though the field itself still says what it did.
+  # The Reader reads it to tell "the new file is loaded" from "the file on disk is new but
+  # the process is not".
+  #
+  # 2: `duration_ms` became optional on a `request_finish` (#45).
+  WIRE_VERSION = 2
 
   SIDECAR = Rails.root.join("log/rails_log_reader.jsonl")
 
@@ -72,11 +77,42 @@ module RailsLogReader
 
   # Request-scoped handoff between the pieces below, which observe the same request on the
   # same thread but never share a method call: the middleware that opens it, and the
-  # subscribers that close it. Reset automatically at the request boundary, like every
-  # CurrentAttributes — so a bug that leaked a value across requests is not a failure mode
-  # this file has to think about.
-  class Current < ActiveSupport::CurrentAttributes
-    attribute :request_id, :started_at_mono, :status, :view_runtime_ms, :db_runtime_ms, :exception_object
+  # subscribers that close it.
+  #
+  # `ActiveSupport::CurrentAttributes` was the obvious home for this and is the wrong one
+  # (#45). Rails clears every CurrentAttributes from `reloader.before_class_unload`, and the
+  # Middleware below is installed *above* `ActionDispatch::Reloader` — so on the first request
+  # after any edit, that reset landed in the middle of a live request instead of at its
+  # boundary. The row lost its request_id halfway through, every event it emitted afterwards
+  # went to its Run instead, and it never got a finish at all.
+  #
+  # A CurrentAttributes instance is itself kept in `ActiveSupport::IsolatedExecutionState`, so
+  # this is the same per-execution-context storage under a key Rails does not clear — and not
+  # a new idea in this file, which already keeps `rails_log_reader_sql_starts` there. What is
+  # given up is the automatic reset at the request boundary, and that is a real cost rather
+  # than a free win: a thread serves one request after another, so a request_id left behind on
+  # one would attribute the next request's events — and every unattributed line in between —
+  # to a request that is over. So this file clears its own key, at the same boundary Rails
+  # cleared it at: `executor.to_complete`, registered in `install_request_events`. A value
+  # leaking across requests stays a failure mode with exactly one place to look.
+  module Current
+    KEY = :rails_log_reader_request
+    ATTRIBUTES = %i[request_id started_at_mono status view_runtime_ms db_runtime_ms exception_object].freeze
+
+    class << self
+      # A pair of accessors per attribute, over one Hash. Reading never creates it, so the
+      # ordinary unattributed event — a boot line, a rake task's query — costs one lookup and
+      # no allocation, and `nil` is the answer to every question asked outside a request.
+      ATTRIBUTES.each do |attribute|
+        define_method(attribute) { ActiveSupport::IsolatedExecutionState[KEY]&.fetch(attribute, nil) }
+
+        define_method(:"#{attribute}=") do |value|
+          (ActiveSupport::IsolatedExecutionState[KEY] ||= {})[attribute] = value
+        end
+      end
+
+      def reset = ActiveSupport::IsolatedExecutionState.delete(KEY)
+    end
   end
 
   # Inserted with `insert_after ActionDispatch::RequestId`, so attribution and the request
@@ -124,7 +160,9 @@ module RailsLogReader
       # None of this reads from the notification's own payload — `request.action_dispatch`
       # never carries anything but `request:` — it is all handed off through Current instead.
       def build_payload
-        payload = { status: Current.status, duration_ms: duration_ms }
+        duration = duration_ms
+        payload = { status: Current.status }
+        payload[:duration_ms] = duration if duration
         payload[:view_runtime_ms] = Current.view_runtime_ms if Current.view_runtime_ms
         payload[:db_runtime_ms] = Current.db_runtime_ms if Current.db_runtime_ms
         payload[:exception] = exception_payload if Current.exception_object
@@ -134,7 +172,17 @@ module RailsLogReader
       # The request's own duration, not `process_action.action_controller`'s: it has to
       # cover routing and the middleware either side, not just what ran inside a controller
       # — and it has to exist at all for the 404s that never reach one.
+      #
+      # A finish is a fact about a request that ended, and the one field it cannot measure must
+      # not be able to take the whole event down with it: this used to subtract a `Current` the
+      # reloader had cleared mid-request, raise a TypeError inside `guard`, and lose the finish
+      # in silence (#45). No start to measure from is `nil` here and a field left off the wire
+      # there — absence, the same answer `row_count` gets above, and never a zero that would
+      # read as an instant request. A missing start is also what a `run_end` mid-request leaves
+      # behind, so this is worth having whatever cleared it.
       def duration_ms
+        return unless Current.started_at_mono
+
         elapsed_ns = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond) - Current.started_at_mono
         elapsed_ns / 1_000_000.0
       end
@@ -505,6 +553,28 @@ module RailsLogReader
     def install_request_events
       guard_boot do
         Rails.application.config.middleware.insert_after ActionDispatch::RequestId, Middleware
+
+        # `Current`'s reset: what the CurrentAttributes it replaced got for free, put back by
+        # hand at the same boundary Rails used for it. `ActionDispatch::Executor` sits well
+        # above the Middleware below, and completes the request either from the response
+        # body's close or — on Rack 3.1 and up, which is every server this runs under —
+        # from `rack.response_finished`. Same ordering either way: this runs after every
+        # middleware inside it has unwound and after the `request_finish` that closes the
+        # row. Its `ensure` covers the paths where `@app.call` raises rather than returns,
+        # which is the case with no `BodyProxy` to hang a close on at all.
+        #
+        # That is why the reset is registered here rather than in the Middleware: the finish
+        # arrives *after* `call` has returned, so an `ensure` there would clear the context
+        # out from under it.
+        #
+        # Registration order is the boundary, and this file is late on purpose. Rails
+        # registers its own `CurrentAttributes.clear_all` from a railtie initializer, which
+        # runs before `config/initializers/` — and `to_complete` callbacks are `:before`
+        # kind, so they run in registration order. This one therefore runs *after* Rails'
+        # own, and the *Trailing event* window this ADR opened is left as wide as it was,
+        # never narrower. Blocks registered on the executor are instance_exec'd against it,
+        # hence the explicit receiver on `guard`.
+        Rails.application.executor.to_complete { RailsLogReader.guard { Current.reset } }
 
         ActiveSupport::Notifications.subscribe("request.action_dispatch", RequestFinishSubscriber.new)
 

@@ -12,7 +12,7 @@ class RunTest < ActiveSupport::TestCase
     assert_equal 1, headers.size, "expected exactly one run_header:\n#{run.sidecar_bytes}"
 
     header = headers.first
-    assert_equal 1, header["v"]
+    assert_equal 2, header["v"], "spelled out rather than read off the constant, so a bump has to be noticed here"
     assert_equal 1, header["seq"], "the header is the Run's first observation"
     assert_match(/\A[0-9a-f-]{36}\z/, header["run_id"])
     assert_nil header["request_id"], "a run_header belongs to no request"

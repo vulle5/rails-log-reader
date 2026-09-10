@@ -83,7 +83,7 @@ export function aRun(runId: string, epoch = EPOCH) {
     seq += 1
     tick += 1
     return {
-      v: 1,
+      v: 2,
       run_id: runId,
       seq,
       at_mono: BOOT_MONO + tick * 100_000_000,
