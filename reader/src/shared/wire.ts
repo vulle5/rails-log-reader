@@ -93,7 +93,13 @@ export type RequestException = {
 
 export type RequestFinishPayload = {
   status: number
-  duration_ms: number
+  /**
+   * Absent when the Initializer never saw the request start and so has nothing to measure
+   * from — a finish is a fact about a request that ended, and the one field it cannot
+   * measure does not take the event down with it. Absence is absence, as with `row_count`
+   * below: never a zero, which would read as an instant request.
+   */
+  duration_ms?: number
   view_runtime_ms?: number
   db_runtime_ms?: number
   exception?: RequestException

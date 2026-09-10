@@ -160,3 +160,48 @@ not at its start time. For an ordinary request that is `request_start` and nothi
 for a *Partial request*, which by definition has no observed start, it is whichever child
 arrived first. Every new row is therefore an append at the bottom and never an insert, which
 is what makes "nothing ever reorders" true by construction under concurrency too.
+
+### From #45 (a code reload mid-request): the request context leaves `CurrentAttributes`
+
+The #14 amendment above gave the Initializer its own middleware, whose first job is to write
+`request_id` into the Initializer's `CurrentAttributes`. That storage was the wrong one, for a
+reason neither amendment could see from where it stood: `insert_after ActionDispatch::RequestId`
+puts the middleware *above* `ActionDispatch::Reloader`, and Rails clears every
+`CurrentAttributes` from `reloader.before_class_unload`. So on the first request after any edit
+— a routine moment in a dev tool, and reliably the request the developer is watching most
+closely — that reset landed in the middle of a live request instead of at its boundary. The row
+lost its `request_id` halfway through, everything it emitted afterwards went to its *Run row*,
+and it never got a `request_finish` at all: `duration_ms` subtracted the cleared start, raised a
+`TypeError` inside the Initializer's own `guard`, and the finish was dropped in silence. The row
+then sat *in-flight* for the rest of the session — and [#27](https://github.com/vulle5/rails-log-reader/issues/27)
+exempts an in-flight row from eviction under the *Memory bound*, which made it immortal.
+
+Nothing on the wire moves. What changes is where the context lives, and one field a finish may
+now leave off.
+
+- **The request context moves to `ActiveSupport::IsolatedExecutionState`**, under a key of the
+  Initializer's own. Not a new mechanism: a `CurrentAttributes` instance is *itself* kept there,
+  and the Initializer already keeps its SQL start stack there — so this is the same
+  per-execution-context storage under a key Rails does not clear. What it gives up is the
+  automatic reset at the request boundary, and that is a real cost rather than a free win. A
+  thread serves one request after another, so a `request_id` left behind on one would attribute
+  the next request's events — and every unattributed line in between — to a request that is
+  over. The Initializer therefore registers its own reset on `executor.to_complete`: the same
+  callback chain Rails clears `CurrentAttributes` from, on a middleware that sits well above
+  the Initializer's own and completes from the response body's close — so after the
+  `request_finish` that closes the row, whether the request returned a response or raised. The *Trailing event* window this ADR described is unchanged, because the boundary is.
+- **`duration_ms` becomes optional on the wire.** The backstop under the above, and worth having
+  on its own: a finish is a fact about a request that ended, and the one field it cannot measure
+  must not be able to take the whole event down with it — a missing start is also what a
+  `run_end` mid-request would leave behind. Where the Initializer never saw a request start, the
+  finish carries no duration at all: absence, as with `row_count`, and never a zero that would
+  read as an instant request. The Reader shows such a row what it can prove instead — the
+  distance in `at_mono` between the request's own first and last events, frozen, exactly as an
+  *Interrupted* row reads — and shows nothing at all where it cannot prove even that, which is a
+  *Partial request* whose finish carried no duration.
+
+Moving the middleware below `ActionDispatch::Reloader` would have fixed the attribution loss in
+one line and was refused: it trades away exactly what the #14 amendment bought, the request row
+beginning on the same line of code as attribution, and reopens the band of middleware where a
+request has a `request_id` and no row. The storage was the thing that was wrong, not the
+position.

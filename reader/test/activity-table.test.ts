@@ -137,6 +137,28 @@ describe("folding a request", () => {
     })
   })
 
+  // #45: a finish with no duration is still a finish. The Initializer leaves the field off
+  // when it never saw the request start and so has nothing to measure from — where it used to
+  // subtract the missing start, raise, and drop the whole event, leaving the row in flight for
+  // the rest of the session.
+  test("finishes a row on a request_finish that carries no duration, rather than reading one as zero", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.header(),
+      run.start("req-1", "GET", "/posts/12"),
+      run.finish("req-1", { status: 200, duration_ms: undefined }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({ state: "finished", status: 200, durationMs: null })
+    // What the row has instead, and what the table shows in that column: the Reader's own
+    // measurement, across the one clock two events may be subtracted in.
+    expect(theOnlyRequest(rows).provenElapsed?.ms).toBe(100)
+  })
+
   test("a request that never routed still gets a row, showing its method and path", async () => {
     const log = await aLogDirectory()
     const run = aRun("srv-1")

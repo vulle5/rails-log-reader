@@ -82,6 +82,12 @@ export type RequestRow = {
   controller: string | null
   action: string | null
   status: number | null
+  /**
+   * What the request itself said it took. `null` while it is still in flight, and `null` for
+   * a finish that carried no duration at all — the Initializer emits none when it never saw
+   * the request start, so there is nothing to measure from. Either way the row falls back to
+   * `provenElapsed`, which is the Reader's own measurement rather than the request's.
+   */
   durationMs: number | null
   dbRuntimeMs: number | null
   viewRuntimeMs: number | null
@@ -569,7 +575,9 @@ export function activityTable(): ActivityTable {
         break
       case "request_finish":
         row.status = envelope.payload.status
-        row.durationMs = envelope.payload.duration_ms
+        // `?? null`, because a finish is allowed to carry no duration: the Initializer leaves
+        // the field off rather than emit a nil-derived number when it never saw the start.
+        row.durationMs = envelope.payload.duration_ms ?? null
         row.viewRuntimeMs = envelope.payload.view_runtime_ms ?? null
         row.dbRuntimeMs = envelope.payload.db_runtime_ms ?? null
         row.exception = envelope.payload.exception ?? null

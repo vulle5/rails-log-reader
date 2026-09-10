@@ -221,6 +221,22 @@ describe("what a row says it is", () => {
     expect(row?.querySelector(".state-dot")?.getAttribute("aria-label")).toBe("Interrupted")
   })
 
+  // #45's other half, on screen. A request whose finish carried no duration at all has
+  // finished — dot gone, status shown — and the column that would hold its total falls back to
+  // what the Reader proved, frozen, rather than to a number nobody wrote down.
+  test("shows a finished request whose finish carried no duration as its proven elapsed", async () => {
+    const run = aRun("srv-1")
+    const table = await theActivityTable(
+      run.start("req-1", "GET", "/posts/12"),
+      run.finish("req-1", { status: 200, duration_ms: undefined }),
+    )
+
+    expect(cells(table)[1]).toBe("200")
+    expect(table.querySelector(".elapsed-frozen")).not.toBeNull()
+    // The 100ms between the request's own two events, and never `0ms` or `NaNms`.
+    expect(elapsedSeconds(table)).toBe(0.1)
+  })
+
   test("marks a Partial request, and keeps it marked once its finish promotes it", async () => {
     const run = aRun("srv-1")
     const table = await theActivityTable(
