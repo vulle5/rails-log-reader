@@ -1,3 +1,4 @@
+import { LOAD_ON_OPEN_EVENTS } from "./bounds"
 import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RunKind, type SqlEvent } from "./wire"
 
 /**
@@ -191,19 +192,59 @@ export type ActivityTable = {
   readonly rows: readonly ActivityRow[]
   /** Fold a batch of envelopes, in append order. Safe to hand the same bytes twice. */
   fold: (envelopes: readonly Envelope[]) => void
+  /**
+   * Fold a block of envelopes that sits *before* everything the fold holds: what the
+   * *load-earlier* control went and got. The rows it opens go in above the rows already
+   * there, because that is where their earliest event sits — which is the same rule the
+   * live fold keeps, read from the other end.
+   */
+  foldEarlier: (envelopes: readonly Envelope[]) => void
 }
 
 /**
- * Unbounded, deliberately and only for now: the *Memory bound* — the ring buffer that
- * evicts the oldest rows and thereby closes the attribution horizon — is #27's, and it
- * bounds `rows`, `byRequest`, `byRun` and `folded` together, since all four are one
- * retention question rather than four.
+ * The fold, bounded: the *Memory bound* is a ring holding no more events than the Reader
+ * opened on — `LOAD_ON_OPEN_EVENTS`, the one number — and evicting the oldest rows once it
+ * holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
+ * because all five are one retention question rather than five.
+ *
+ * Counted in *events* and not in rows, which is what makes it match the figure it is sized
+ * by: the fold opens holding exactly the history ADR-0003's backward scan delivered, and a
+ * row full of an all-day worker's output is bounded by the same number a table full of
+ * requests is. Eviction is by whole rows all the same — a row that had half its queries
+ * taken away would be a table saying 24 beside a timeline showing three.
+ *
+ * The bound doubles as the **attribution horizon**: a finished request stops being adoptable
+ * by a *Trailing event* the instant its row is evicted, after which such an event is simply
+ * unattributed. That is one rule rather than two, and it needs no timer — which is what lets
+ * "no timeout, ever" survive a feature about time.
  */
 export function activityTable(): ActivityTable {
   const rows: ActivityRow[] = []
   const byRequest = new Map<string, Folding>()
   const byRun = new Map<string, Running>()
   const folded = new Set<string>()
+  /**
+   * Requests the bound has taken the row of. Kept — rather than simply forgotten with the
+   * row — because forgetting is what a *Partial request* is made of: without this, the first
+   * Trailing event past the horizon would open a brand new row for a request the fold has in
+   * fact already shown and evicted, which is the one reading of it that is false.
+   */
+  const evicted = new Set<string>()
+
+  /** Events the fold is holding. */
+  let held = 0
+  /**
+   * The load-on-open figure, plus whatever a *load-earlier* went and got. Raised by exactly
+   * what was pulled in, because the bound is on what the Reader accumulates *by itself*:
+   * history the developer explicitly asked for that evaporated under the next request to
+   * arrive would make the control useless, and there is no traffic that can raise this on
+   * its own.
+   */
+  let ceiling = LOAD_ON_OPEN_EVENTS
+  /** How many rows at the front a load-earlier pulled in. Never evicted, for the same reason. */
+  let pulled = 0
+  /** The load-earlier block being folded, if one is: `null` in the ordinary live fold. */
+  let earlier: EarlierBlock | null = null
 
   /**
    * `(run_id, seq)` is the event identity, so re-reading the same bytes — a reconnecting
@@ -251,9 +292,10 @@ export function activityTable(): ActivityTable {
       startedAtMono: null,
       finishSeq: null,
       echoing: null,
+      events: 0,
     }
     byRequest.set(requestId, folding)
-    rows.push(folding.row)
+    open(folding)
     return folding
   }
 
@@ -277,10 +319,46 @@ export function activityTable(): ActivityTable {
         timeline: [],
       },
       echoing: null,
+      events: 0,
     }
     byRun.set(envelope.run_id, running)
-    rows.push(running.row)
+    open(running)
     return running
+  }
+
+  /**
+   * Where a row goes when it is opened: the bottom of the table, or — while a load-earlier
+   * block is being folded — into that block, whose rows go in above everything held once the
+   * block is done. Either way the rule is the one rule: a row sits at the append position of
+   * the earliest event the Reader has observed for it.
+   */
+  function open(owner: Owner) {
+    if (earlier === null) rows.push(owner.row)
+    else earlier.opened.push(owner)
+  }
+
+  /** One more event the fold is holding, against the bound and against its own row. */
+  function count(owner: Owner) {
+    owner.events += 1
+    held += 1
+  }
+
+  /**
+   * Onto the timeline the event belongs to — or, while a load-earlier block is being folded,
+   * into that block's own list for this owner, which goes in *front* of the timeline when
+   * the block is done. Held back rather than pushed, because everything the block carries
+   * happened before everything the row already holds, and a timeline is in append order.
+   */
+  function keep(owner: Owner, event: TimelineEvent) {
+    const block = earlier
+    if (block === null) {
+      owner.row.timeline.push(event)
+      return
+    }
+
+    const buffered = block.prepending.get(owner) ?? []
+    block.prepending.set(owner, buffered)
+    buffered.push(event)
   }
 
   /**
@@ -291,8 +369,12 @@ export function activityTable(): ActivityTable {
    */
   function place(folding: Folding, event: TimelineEvent) {
     const trailing = folding.finishSeq !== null && event.seq > folding.finishSeq
+    // Pushed rather than held back even inside a load-earlier block, and safely: a Trailing
+    // event is one appended after its own `request_finish`, so a block that ends before the
+    // finish cannot be carrying one, and the only trailing section a block ever writes is
+    // that of a request it opened, finished and outlived within itself.
     if (trailing) folding.row.trailing.push(event)
-    else folding.row.timeline.push(event)
+    else keep(folding, event)
   }
 
   /**
@@ -388,85 +470,124 @@ export function activityTable(): ActivityTable {
   }
 
   function fold(envelopes: readonly Envelope[]) {
-    for (const envelope of envelopes) {
-      if (alreadyFolded(envelope)) continue
+    for (const envelope of envelopes) foldOne(envelope)
+    evictToBound()
+  }
 
-      if (envelope.type === "run_header") {
-        const opensTheRow = !byRun.has(envelope.run_id)
-        const row = runningFor(envelope).row
-        row.runKind = envelope.payload.kind
-        row.pid = envelope.payload.pid
-        row.railsVersion = envelope.payload.rails_version
-        row.appName = envelope.payload.app_name
+  /**
+   * The same fold, run over a block that precedes everything held: the rows it opens are
+   * spliced in above the rows already there, and its events go in front of the timelines
+   * they precede. Nothing is evicted for having made room for it — the ceiling rises by
+   * exactly what came in, so the ring goes on bounding what arrives on its own and this
+   * stays what the developer asked for.
+   */
+  function foldEarlier(envelopes: readonly Envelope[]) {
+    const heldBefore = held
+    const block: EarlierBlock = { opened: [], prepending: new Map() }
+    earlier = block
+    try {
+      for (const envelope of envelopes) foldOne(envelope)
+    } finally {
+      earlier = null
+    }
 
-        if (bootsAWebProcess(envelope.payload.kind)) {
-          // The marker goes where this header landed, so it is only ever drawn on a row this
-          // header opened — a Run the Reader met further down started somewhere it cannot see.
-          if (opensTheRow) row.marker = true
-          interrupt((folding) => folding.row.runId !== envelope.run_id, null)
-        }
-        continue
+    for (const [owner, buffered] of block.prepending) {
+      owner.row.timeline = buffered.concat(owner.row.timeline)
+    }
+    rows.splice(0, 0, ...block.opened.map((owner) => owner.row))
+    pulled += block.opened.length
+    ceiling += held - heldBefore
+    evictToBound()
+  }
+
+  function foldOne(envelope: Envelope) {
+    if (alreadyFolded(envelope)) return
+
+    if (envelope.type === "run_header") {
+      const opensTheRow = !byRun.has(envelope.run_id)
+      const running = runningFor(envelope)
+      const row = running.row
+      count(running)
+      row.runKind = envelope.payload.kind
+      row.pid = envelope.payload.pid
+      row.railsVersion = envelope.payload.rails_version
+      row.appName = envelope.payload.app_name
+
+      if (bootsAWebProcess(envelope.payload.kind)) {
+        // The marker goes where this header landed, so it is only ever drawn on a row this
+        // header opened — a Run the Reader met further down started somewhere it cannot see.
+        if (opensTheRow) row.marker = true
+        interrupt((folding) => folding.row.runId !== envelope.run_id, null)
       }
+      return
+    }
 
-      if (envelope.type === "run_end") {
-        // No row of its own: an ending carries nothing for a Run row to hold, and a Run the
-        // Reader met at its `run_end` and nowhere else has nothing to show either.
-        interrupt((folding) => folding.row.runId === envelope.run_id, envelope)
-        continue
-      }
+    if (envelope.type === "run_end") {
+      // No row of its own: an ending carries nothing for a Run row to hold, and a Run the
+      // Reader met at its `run_end` and nowhere else has nothing to show either.
+      interrupt((folding) => folding.row.runId === envelope.run_id, envelope)
+      return
+    }
 
-      const requestId = envelope.request_id
-      if (requestId === null) {
-        // Only SQL and App log events have a home without one: a request event that names no
-        // request says nothing about any row, and a hand-written Sidecar is the only place
-        // one can come from.
-        if (envelope.type === "sql" || envelope.type === "app_log") foldIntoRun(envelope)
-        continue
-      }
+    const requestId = envelope.request_id
+    // Two ways to have no row of one's own to go to, and one answer to both. A `null`
+    // `request_id` is *unattributed* on the wire; a request the bound has already taken the
+    // row of is unattributed by the attribution horizon closing behind it — and either way
+    // its Run owns it. Opening a fresh row for the second would be the fold claiming to have
+    // met a request it has in fact shown and forgotten.
+    if (requestId === null || evicted.has(requestId)) {
+      // Only SQL and App log events have a home without one: a request event that names no
+      // request says nothing about any row, and a hand-written Sidecar is the only place
+      // one can come from.
+      if (envelope.type === "sql" || envelope.type === "app_log") foldIntoRun(envelope)
+      return
+    }
 
-      const folding = foldingFor(envelope, requestId)
-      const row = folding.row
-      // Only while in flight: past that the elapsed is a finished request's duration or the
-      // frozen reading an Interrupted row keeps.
-      if (row.state === "in-flight") proveElapsed(folding, envelope)
+    const folding = foldingFor(envelope, requestId)
+    const row = folding.row
+    // Only while in flight: past that the elapsed is a finished request's duration or the
+    // frozen reading an Interrupted row keeps.
+    if (row.state === "in-flight") proveElapsed(folding, envelope)
 
-      switch (envelope.type) {
-        case "request_start":
-          row.startedAtWall = envelope.at_wall
-          row.method = envelope.payload.method
-          row.path = envelope.payload.path
-          folding.startedAtMono = envelope.at_mono
-          row.provenElapsed ??= { ms: 0, atWall: envelope.at_wall }
-          break
-        case "request_route":
-          row.controller = envelope.payload.controller
-          row.action = envelope.payload.action
-          break
-        case "request_finish":
-          row.status = envelope.payload.status
-          row.durationMs = envelope.payload.duration_ms
-          row.viewRuntimeMs = envelope.payload.view_runtime_ms ?? null
-          row.dbRuntimeMs = envelope.payload.db_runtime_ms ?? null
-          row.exception = envelope.payload.exception ?? null
-          row.backtraceCutFrom = envelope.truncated?.backtrace ?? null
-          folding.finishSeq = envelope.seq
-          // Finished even if the row had been called Interrupted: that was inferred from a
-          // Run looking ended, and a finish is the file saying outright that it was not.
-          row.state = "finished"
-          break
-        case "sql":
-          row.sqlCount += 1
-          folding.echoing = envelope
-          place(folding, envelope)
-          break
-        case "app_log":
-          // Dropped from the row rather than marked on it: the Console reads the envelope
-          // stream and not this fold, so the line itself survives where the log lives.
-          if (isEcho(folding, envelope)) break
-          row.logCount += 1
-          place(folding, envelope)
-          break
-      }
+    // An *Echo* is dropped from the row rather than marked on it — the Console reads the
+    // envelope stream and not this fold, so the line itself survives where the log lives —
+    // and, being dropped, it never takes a place under the bound either.
+    if (envelope.type === "app_log" && isEcho(folding, envelope)) return
+    count(folding)
+
+    switch (envelope.type) {
+      case "request_start":
+        row.startedAtWall = envelope.at_wall
+        row.method = envelope.payload.method
+        row.path = envelope.payload.path
+        folding.startedAtMono = envelope.at_mono
+        row.provenElapsed ??= { ms: 0, atWall: envelope.at_wall }
+        break
+      case "request_route":
+        row.controller = envelope.payload.controller
+        row.action = envelope.payload.action
+        break
+      case "request_finish":
+        row.status = envelope.payload.status
+        row.durationMs = envelope.payload.duration_ms
+        row.viewRuntimeMs = envelope.payload.view_runtime_ms ?? null
+        row.dbRuntimeMs = envelope.payload.db_runtime_ms ?? null
+        row.exception = envelope.payload.exception ?? null
+        row.backtraceCutFrom = envelope.truncated?.backtrace ?? null
+        folding.finishSeq = envelope.seq
+        // Finished even if the row had been called Interrupted: that was inferred from a
+        // Run looking ended, and a finish is the file saying outright that it was not.
+        row.state = "finished"
+        break
+      case "sql":
+        row.sqlCount += 1
+        folding.echoing = envelope
+        place(folding, envelope)
+        break
+      case "app_log":
+        row.logCount += 1
+        place(folding, envelope)
+        break
     }
   }
 
@@ -482,11 +603,93 @@ export function activityTable(): ActivityTable {
       if (isEcho(running, event)) return
       row.logCount += 1
     }
+    count(running)
     // No trailing section: a Run has no finish for anything to trail.
-    row.timeline.push(event)
+    keep(running, event)
   }
 
-  return { rows, fold }
+  /**
+   * The *Memory bound*, applied once a batch is folded rather than event by event: a batch
+   * is what the Sidecar delivered in one read, and evicting inside one would let a row leave
+   * before the events already on their way to it had arrived.
+   *
+   * Oldest first, and three rows it will not take. What a *load-earlier* pulled in, because
+   * the bound is on what the Reader accumulates by itself. A request still *in flight*, for
+   * the reason below. And the last row standing — which is the one row that is over the
+   * bound by itself, a `rake` burst of unattributed queries landing in a single Run row,
+   * where evicting it would leave the table empty rather than bounded and trimming inside it
+   * would leave a count of 20,000 beside a timeline holding the last few. That is where this
+   * bound stops being one, and it is the honest place to stop.
+   */
+  function evictToBound() {
+    const taken = new Set<ActivityRow>()
+    let standing = rows.length
+
+    for (let index = pulled; index < rows.length && held > ceiling && standing > 1; index++) {
+      const row = rows[index]
+      if (row === undefined || !evictable(row)) continue
+
+      held -= forget(row)
+      taken.add(row)
+      standing -= 1
+    }
+    compact(taken)
+
+    // The same retention question, asked of the two things that outlive the rows they are
+    // about: what is worth deduplicating, and what is past the horizon. Both are bounded by
+    // the one number, so neither can quietly become the thing that grows — and a Trailing
+    // event for a request evicted five thousand evictions ago does open a row of its own
+    // again, which is the reading left once the fold no longer remembers the row at all.
+    keepLatest(folded, ceiling)
+    keepLatest(evicted, ceiling)
+  }
+
+  /**
+   * A request still in flight is never evicted. There is no timeout, ever — and a bound that
+   * quietly took the hanging request away once five thousand events had gone past it would
+   * be one, measured in other people's traffic rather than in seconds, and hiding the single
+   * thing the Reader exists to show. It stays until its Run ends under it: an *Interrupted*
+   * row evicts like any other, because that one has been concluded.
+   */
+  function evictable(row: ActivityRow) {
+    return row.kind === "run" || row.state !== "in-flight"
+  }
+
+  /** The evicted rows out, in one pass over the array everything else is holding on to. */
+  function compact(taken: Set<ActivityRow>) {
+    if (taken.size === 0) return
+
+    let kept = 0
+    for (const row of rows) if (!taken.has(row)) rows[kept++] = row
+    rows.length = kept
+  }
+
+  /** Let go of a row, and say how many events the fold stops holding by doing so. */
+  function forget(row: ActivityRow) {
+    if (row.kind === "run") {
+      const running = byRun.get(row.runId)
+      byRun.delete(row.runId)
+      // Not remembered as evicted: a Run row is opened by whatever its Run says next, and a
+      // Run that is still running has every right to another one. A request does not — it
+      // has been shown and finished, and its second row would be a lie about a first.
+      return running?.events ?? 0
+    }
+
+    const folding = byRequest.get(row.requestId)
+    byRequest.delete(row.requestId)
+    evicted.add(row.requestId)
+    return folding?.events ?? 0
+  }
+
+  return { rows, fold, foldEarlier }
+}
+
+/** Drop a set's oldest entries: a `Set` iterates in insertion order, which is the ring's. */
+function keepLatest(remembered: Set<string>, limit: number) {
+  for (const entry of remembered) {
+    if (remembered.size <= limit) return
+    remembered.delete(entry)
+  }
 }
 
 /** What both kinds of owner keep so an *Echo* can be recognised against the query above it. */
@@ -507,9 +710,26 @@ type Folding = Echoing & {
   /** `null` for a *Partial request*: there is no start to measure from. */
   startedAtMono: number | null
   finishSeq: number | null
+  /** What this row costs the *Memory bound*, and what evicting it gives back. */
+  events: number
 }
 
 /** The same, for a Run: its row, and the query an unattributed *Echo* would be echoing. */
 type Running = Echoing & {
   row: RunRow & { timeline: TimelineEvent[] }
+  events: number
+}
+
+/** The two things that own events, which is the two things the bound holds and lets go of. */
+type Owner = Folding | Running
+
+/**
+ * A *load-earlier* block, mid-fold. Both halves exist because the block runs backwards
+ * against everything else here: the rows it opens belong above the rows already held rather
+ * than below them, and its events belong in front of the timelines they precede — so both
+ * are collected as the block folds and put in place when it is done, rather than pushed.
+ */
+type EarlierBlock = {
+  opened: Owner[]
+  prepending: Map<Owner, TimelineEvent[]>
 }

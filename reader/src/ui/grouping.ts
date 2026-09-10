@@ -39,8 +39,11 @@ export const OFF_SCREEN_CAPTION = "row is off screen — click to jump"
 
 /**
  * The row is not rendered: a tab filter is hiding it, which the click clears on its way
- * there. #27's *Memory bound* will add a second way to be missing — an evicted row, which a
- * click cannot take you to — and that one needs its own answer rather than this caption.
+ * there. Since #27 there is a second way to be missing and this caption does not yet tell
+ * them apart — a row evicted under the *Memory bound* is gone rather than hidden, so the
+ * caption reads "filtered out" for a row no filter is holding back and the click it invites
+ * lands nowhere. The Console outlives the fold's rows, which is what makes this reachable at
+ * all; it still needs its own answer rather than this caption (#44).
  */
 export const NOT_SHOWN_CAPTION = "row is filtered out — click to jump"
 

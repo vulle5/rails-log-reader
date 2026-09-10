@@ -13,6 +13,8 @@ import { detailItems, DetailColumn } from "./DetailColumn"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
+import type { EarlierState } from "./live"
+import { LoadEarlier } from "./LoadEarlier"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
 
 /**
@@ -54,6 +56,9 @@ type ReaderProps = {
   repairState?: RepairState
   onRepair?: () => void
   onDismissRepair?: () => void
+  /** Whether there is anything before the history the fold holds, and whether it is coming. */
+  earlier?: EarlierState
+  onLoadEarlier?: () => void
 }
 
 export function Reader({
@@ -64,6 +69,8 @@ export function Reader({
   repairState = { phase: "idle" },
   onRepair = () => {},
   onDismissRepair = () => {},
+  earlier = { available: false, loading: false },
+  onLoadEarlier = () => {},
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -103,7 +110,15 @@ export function Reader({
   // inheriting the last one's scroll position. A tab or a chip is the same stream thinned, and
   // a reader who scrolled up in it is still reading where they were.
   const consoleScroll = useAutoScroll({ items: showingLines.length, listing: consoleFilterKey(filter) })
-  const activityScroll = useAutoScroll({ items: showingRows.length, listing: showingKind })
+  // The Activity table's listing is its tab *and* the row it starts at, because it is the one
+  // column whose list can change at the top rather than only at the bottom: a *load-earlier*
+  // prepends history above the oldest row, and the *Memory bound* takes rows off the same end.
+  // Neither is something that arrived below, which is the only thing the pill may count — a
+  // pull that said "↓ 3 new" would be sending the reader down to find history that went up.
+  const activityScroll = useAutoScroll({
+    items: showingRows.length,
+    listing: `${showingKind} ${showingRows[0]?.id ?? ""}`,
+  })
   const detailScroll = useAutoScroll({
     items: detailItems(showing),
     listing: selected ?? "",
@@ -195,6 +210,7 @@ export function Reader({
           scroll={activityScroll}
           controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
         >
+          <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
           <ActivityTable
             rows={showingRows}
             selected={selected}

@@ -16,7 +16,7 @@ if (container === null) throw new Error("index.html is missing its #root element
  * Sidecar last reported into the one thing `Reader` actually renders.
  */
 function LiveReader() {
-  const { rows, lines, liveWireVersion, liveRunId } = useSidecar()
+  const { rows, lines, liveWireVersion, liveRunId, earlier, loadEarlier } = useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
 
@@ -38,6 +38,8 @@ function LiveReader() {
       repairState={repairState}
       onRepair={onRepair}
       onDismissRepair={dismiss}
+      earlier={earlier}
+      onLoadEarlier={loadEarlier}
     />
   )
 }

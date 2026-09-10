@@ -38,8 +38,10 @@ export type ConsoleStream = {
 }
 
 /**
- * Unbounded for the same reason `activityTable` is: the *Memory bound* is #27's, and the
- * Console's retention is that question rather than a second one.
+ * Unbounded, and now the only fold that is: #27 bounded `activityTable` and left the Console
+ * out of it, so a session long enough to evict its oldest rows still holds every App log line
+ * it ever saw. That is the *Memory bound*'s question rather than a second one, and it is
+ * open (#44) — as is what a line whose row has been evicted selects when it is clicked.
  */
 export function consoleStream(): ConsoleStream {
   const lines: ConsoleLine[] = []

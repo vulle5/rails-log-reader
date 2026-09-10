@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
-import { openSidecar, type Sidecar } from "../src/server/sidecar"
+import { openSidecar, readEarlier, type Sidecar } from "../src/server/sidecar"
+import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import {
   activityTable,
   type ActivityRow,
@@ -45,9 +46,22 @@ afterEach(async () => {
  */
 async function theReaderReads(logDirectory: string) {
   const activity = activityTable()
-  const sidecar = await openSidecar(logDirectory, activity.fold)
+  // The offset the history the Reader was given begins at, kept exactly as the browser keeps
+  // it: the Sidecar announces it on attaching, and a load-earlier continues the scan from
+  // there and hands back where the history begins now.
+  let from = 0
+  const sidecar = await openSidecar(logDirectory, activity.fold, (start) => {
+    from = start
+  })
   opened.push(sidecar)
-  return { rows: activity.rows, caughtUp: () => sidecar.catchUp() }
+
+  async function loadEarlier() {
+    const earlier = await readEarlier(logDirectory, from)
+    from = earlier.from
+    activity.foldEarlier(earlier.envelopes)
+  }
+
+  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier }
 }
 
 /** What a timeline event is, in one string: the query it ran or the line it printed. */
@@ -923,5 +937,139 @@ describe("Run rows", () => {
 
     expect(runs(reader.rows)).toHaveLength(1)
     expect(runRow(reader.rows, "srv-1").logCount).toBe(2)
+  })
+})
+
+/**
+ * The *Memory bound*: the fold holds no more events than the Reader opened on, and the
+ * oldest rows leave first once it does. Two events to a row here — a start and a finish —
+ * so a test can say how many rows a number of events comes to.
+ */
+function finishedRequests(run: ReturnType<typeof aRun>, count: number, from = 0) {
+  return Array.from({ length: count }, (_, index) => [
+    run.start(`req-${from + index}`, "GET", `/posts/${from + index}`),
+    run.finish(`req-${from + index}`),
+  ]).flat()
+}
+
+describe("the Memory bound", () => {
+  test("gives up its oldest rows once it holds more events than it opened on", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+
+    // Ten rows past the bound, arriving live: the load-on-open window cannot overrun it,
+    // because the same number sizes both.
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10))
+    await reader.caughtUp()
+
+    expect(reader.rows).toHaveLength(LOAD_ON_OPEN_EVENTS / 2)
+    expect(requests(reader.rows).at(0)?.path).toBe("/posts/10")
+    expect(requests(reader.rows).at(-1)?.path).toBe(`/posts/${LOAD_ON_OPEN_EVENTS / 2 + 9}`)
+  })
+
+  test("never evicts a request that is still in flight, however much arrives after it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+    await appendToSidecar(log, run.start("req-hanging", "GET", "/reports"))
+    await reader.caughtUp()
+
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10, 100))
+    await reader.caughtUp()
+
+    // The oldest row in the table, and the one the Reader exists to show: a request that
+    // hangs. Evicting it would be a timeout — one measured in other people's traffic.
+    expect(reader.rows.at(0)?.id).toBe("request req-hanging")
+    expect(row(reader.rows, "/reports").state).toBe("in-flight")
+  })
+
+  test("stops a finished request taking Trailing events the instant its row is evicted", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+    await appendToSidecar(log, run.header(), run.start("req-1"), run.finish("req-1"))
+    await reader.caughtUp()
+
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2, 100))
+    await reader.caughtUp()
+    // The event that would have been a Trailing event, arriving after the horizon closed.
+    await appendToSidecar(log, run.sql("req-1", "SELECT 'after the horizon'"))
+    await reader.caughtUp()
+
+    // Not a row of its own — a Partial request would be the fold claiming to have met a
+    // request it has in fact forgotten — and not attributed to anything: its Run holds it.
+    expect(requests(reader.rows).map((request) => request.requestId)).not.toContain("req-1")
+    expect(runs(reader.rows).flatMap(timeline)).toContain("SELECT 'after the horizon'")
+  })
+})
+
+/**
+ * Load-earlier: the same backward scan the Reader opened on, continued from an earlier
+ * point when the developer asks for it. A file with more than the load-on-open figure in it
+ * is the whole apparatus — what the load-on-open figure leaves behind is what the control goes and gets.
+ */
+async function aSidecarWithHistory(log: string) {
+  const server = aRun("srv-1")
+  const rake = aRun("rake-1")
+  const head = [
+    server.header(),
+    rake.log(null, "rake-1 counted the posts"),
+    server.start("req-1"),
+    server.sql("req-1", "SELECT 'the query before the history'"),
+  ]
+  const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS }, (_, index) =>
+    server.log(null, `filler ${index}`),
+  )
+  await appendToSidecar(log, ...head, ...filler, server.finish("req-1"))
+  return { server }
+}
+
+describe("load-earlier", () => {
+  test("opens the rows the earlier block holds above the rows already there", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithHistory(log)
+    const reader = await theReaderReads(log)
+
+    expect(runs(reader.rows).map((run) => run.runId)).toEqual(["srv-1"])
+
+    await reader.loadEarlier()
+
+    // The rake Run said nothing inside the loaded history, so its row is new — and it is above the
+    // rows that were already there, because that is where its earliest event sits.
+    expect(reader.rows.at(0)?.id).toBe("run rake-1")
+    expect(timeline(runRow(reader.rows, "rake-1"))).toEqual(["rake-1 counted the posts"])
+  })
+
+  test("promotes the request the history cut in half, without moving its row", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithHistory(log)
+    const reader = await theReaderReads(log)
+
+    const before = reader.rows.indexOf(theOnlyRequest(reader.rows))
+    expect(theOnlyRequest(reader.rows).path).toBeNull()
+
+    await reader.loadEarlier()
+
+    const request = theOnlyRequest(reader.rows)
+    expect(request.path).toBe("/posts/12")
+    // The query it ran before the history opened, in front of a timeline it was not in.
+    expect(timeline(request)).toEqual(["SELECT 'the query before the history'"])
+    expect(reader.rows.indexOf(request)).toBe(before + 1)
+  })
+
+  test("keeps what it was asked for rather than evicting it under the next request", async () => {
+    const log = await aLogDirectory()
+    const { server } = await aSidecarWithHistory(log)
+    const reader = await theReaderReads(log)
+    await reader.loadEarlier()
+
+    await appendToSidecar(log, ...finishedRequests(server, 20, 500))
+    await reader.caughtUp()
+
+    // The bound is on what the Reader accumulates by itself: history the developer went and
+    // asked for does not evaporate under the first request to arrive after it.
+    expect(reader.rows.at(0)?.id).toBe("run rake-1")
+    expect(timeline(runRow(reader.rows, "rake-1"))).toEqual(["rake-1 counted the posts"])
   })
 })

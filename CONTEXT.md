@@ -172,10 +172,23 @@ with `log/development.log`, which the Reader only ever leaves alone. See
 **Memory bound** — the Reader's bounded in-memory fold of *Activity table* rows: a ring
 buffer that evicts the oldest rows once exceeded, sized to match the load-on-open figure
 (the last ~5,000 events, read backward from EOF over the file offset the Reader already
-tracks) so there is one number, not two. Doubles as the attribution horizon: a finished
-request stops accepting *Trailing events* the instant its row is evicted. Reachable past
-load-on-open only through an explicit **load-earlier** control that continues the same
-backward scan — no infinite scroll, no silent fetch. A live request reset mid-Run by
+tracks) so there is one number, not two. Counted in **events** and evicted by whole
+**rows**, which is what makes it match the figure it is named by: the fold opens holding
+exactly the history that backward scan delivered, and one Run row carrying an all-day
+worker's output is bounded by the same number a table full of requests is — while a row
+that had half its queries taken away would be a count of 24 beside a timeline showing
+three, so a row leaves whole or it stays. A request still *in flight* is never evicted —
+there is no timeout, ever, and a bound that took the hanging request away once five thousand
+events had gone past it would be one, measured in other people's traffic; an *Interrupted*
+row evicts like any other, having been concluded. Nor is the one row left standing, and that
+is where this bound stops being one: a `rake` burst larger than the figure lands in a single
+Run row, and emptying the table is worse than exceeding the number. Doubles as the
+attribution horizon: a finished request stops accepting *Trailing events* the instant its
+row is evicted. Reachable past load-on-open only through an explicit **load-earlier**
+control that continues the same backward scan — no infinite scroll, no silent fetch — and
+what that control pulls in is exempt from eviction, because the bound is on what the Reader
+accumulates by itself and history the developer went and asked for that evaporated under
+the next request to arrive would make the control useless. A live request reset mid-Run by
 boot-time truncation gets no extra signal; it surfaces as an ordinary *Partial request*,
 which already reads honestly on its own. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
@@ -306,6 +319,14 @@ exact across a narrowing list would need a second record of what the reader has 
 shown, which is a second source of truth about the same question — and the number is a prompt
 to go and look, not a ledger. With nothing new below there is no pill: "0 new" would send
 a reader to look at nothing, over the lines they scrolled up to read.
+
+Neither is a **load-earlier** counted. Its control sits at the top of the *Activity table*,
+so reaching it has already paused that column, and the history it prepends went *up* rather
+than arriving below — a pill offering to take the reader down to it would be pointing the
+wrong way. Under the *Memory bound* the number is an undercount instead: a fold at its cap
+evicts a row for every row it takes, so the length it is read from stands still. That is the
+same trade as the seam above and it is worn rather than fixed — being exact would need the
+second record of what the reader has seen that the pill is deliberately not.
 
 All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a

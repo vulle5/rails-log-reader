@@ -134,8 +134,19 @@ async function openTheReader(...envelopes: Envelope[]) {
     await act(async () => root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} />))
   }
 
+  /**
+   * What a *load-earlier* click puts into the fold: a block of history that happened before
+   * everything the fold holds, so its rows open above them. The Console is not given it, for
+   * the reason `useSidecar` does not give it either — the Console is append order, and this
+   * block belongs before the lines it already has rather than after them.
+   */
+  async function pullEarlier(...pulled: Envelope[]) {
+    activity.foldEarlier(pulled)
+    await act(async () => root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} />))
+  }
+
   await arrive(...envelopes)
-  return { container, arrive }
+  return { container, arrive, pullEarlier }
 }
 
 function column(container: HTMLElement, name: string) {
@@ -292,6 +303,55 @@ describe("scrolling up", () => {
     // Paused, and the pill's own text is the reason it is not here: "0 new" would send a
     // reader to look at nothing. Scrolling back down is the way out either way.
     expect(pill(container, "Console")).toBeNull()
+  })
+})
+
+describe("load-earlier", () => {
+  // The control sits at the top of the Activity table's scrollport, above the oldest row it
+  // holds, so reaching it means scrolling up — which is the gesture that pauses the column.
+  // Every pull therefore lands in a paused table, and what a paused table does with rows is
+  // count them.
+  const previously = aRun("srv-25")
+  const EARLIER: Envelope[] = [
+    previously.header(),
+    previously.start("e1", "GET", "/earlier/one"),
+    previously.route("e1"),
+    previously.finish("e1"),
+    previously.start("e2", "GET", "/earlier/two"),
+    previously.route("e2"),
+    previously.finish("e2"),
+  ]
+
+  test("does not count what it prepends, because none of it arrived below", async () => {
+    const { container, pullEarlier } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+
+    await pullEarlier(...EARLIER)
+
+    // The rows are there — three of them, a Run row and two requests — and above everything
+    // the table already held. A pill saying "3 new" would be sending the reader *down* to
+    // find history that went *up*.
+    expect(container.querySelectorAll('[data-row="request e1"]').length).toBe(1)
+    expect(pill(container, "Activity table")).toBeNull()
+  })
+
+  test("leaves the paused table paused, rather than following what it was handed", async () => {
+    const { container, pullEarlier } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+
+    await pullEarlier(...EARLIER)
+
+    expect(pinnedToBottom(container, "Activity table")).toBe(false)
+  })
+
+  test("counts what arrives below afterwards, the pull having changed nothing about that", async () => {
+    const { container, arrive, pullEarlier } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+
+    await pullEarlier(...EARLIER)
+    await arrive(...aRequest("r4", "/late", 2))
+
+    expect(pill(container, "Activity table")?.textContent).toContain("1 new")
   })
 })
 

@@ -87,10 +87,14 @@ type AutoScrollOptions = {
    * not something the reader would see by scrolling down, and a pill that counted it would
    * be sending them to look at nothing.
    *
-   * Growth of a length, which holds for as long as a column only ever appends. #27's *Memory
-   * bound* is where that stops being true — a ring buffer at its cap evicts a row for every
-   * row it takes — and it will have to hand this hook arrivals somebody counted rather than a
-   * length to subtract.
+   * Growth of a length, which holds for as long as a column only ever appends — and since #27
+   * the Activity table does not. Its two other ends are both handled by `listing`, which that
+   * column feeds the row it starts at: a *load-earlier* prepending history above the oldest
+   * row is not growth below, and the *Memory bound* taking a row off the same end is not a
+   * loss below either. What is left is the fold sitting *at* its cap, where a row evicted per
+   * row taken holds the length still and this undercounts. Being exact there means arrivals
+   * somebody counted rather than a length to subtract — a second record of what the reader
+   * has been shown, which is the thing the pill is deliberately not.
    */
   items: number
   /**
@@ -104,9 +108,9 @@ type AutoScrollOptions = {
    * delivers in the same commit drops that batch from the count. Closing it means a second
    * record of what the reader has already seen — an anchor on the last line they were shown,
    * or a tally per listing — which is a second source of truth about the same question, wrong
-   * whenever its anchor is filtered away or evicted, and due to be wrong again under #27's
-   * *Memory bound*. The pill's number is a prompt to go and look, not a ledger, and it costs
-   * more to make it exact than being exact is worth here.
+   * whenever its anchor is filtered away or evicted under the *Memory bound*. The pill's
+   * number is a prompt to go and look, not a ledger, and it costs more to make it exact than
+   * being exact is worth here.
    */
   listing: string
   /**
