@@ -1,5 +1,5 @@
 /**
- * The *load-earlier* control: the one way past the window the Reader opened on, and a thing
+ * The *load-earlier* control: the one way past the history the Reader opened on, and a thing
  * the developer asks for rather than something that happens while they scroll. Infinite
  * scroll was the rival and lost on exactly that — reaching back is a decision, and a
  * decision that fires when your finger slips on a trackpad is not one.
@@ -10,12 +10,7 @@
  * anything is a question the developer has to answer before they can ignore it.
  */
 
-export type EarlierState = {
-  /** Whether the Sidecar holds anything before the window the Reader has. */
-  available: boolean
-  /** Whether a scan is in flight. A backward read of a 64 MB Sidecar is not instant. */
-  loading: boolean
-}
+import type { EarlierState } from "./live"
 
 type LoadEarlierProps = {
   state: EarlierState

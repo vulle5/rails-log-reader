@@ -158,12 +158,15 @@ buffer that evicts the oldest rows once exceeded, sized to match the load-on-ope
 (the last ~5,000 events, read backward from EOF over the file offset the Reader already
 tracks) so there is one number, not two. Counted in **events** and evicted by whole
 **rows**, which is what makes it match the figure it is named by: the fold opens holding
-exactly the window that backward scan delivered, and one Run row carrying an all-day
+exactly the history that backward scan delivered, and one Run row carrying an all-day
 worker's output is bounded by the same number a table full of requests is — while a row
 that had half its queries taken away would be a count of 24 beside a timeline showing
-three, so a row leaves whole or it stays. The one row left standing is never evicted, and
-that is where this bound stops being one: a `rake` burst larger than the figure lands in a
-single Run row, and emptying the table is worse than exceeding the number. Doubles as the
+three, so a row leaves whole or it stays. A request still *in flight* is never evicted —
+there is no timeout, ever, and a bound that took the hanging request away once five thousand
+events had gone past it would be one, measured in other people's traffic; an *Interrupted*
+row evicts like any other, having been concluded. Nor is the one row left standing, and that
+is where this bound stops being one: a `rake` burst larger than the figure lands in a single
+Run row, and emptying the table is worse than exceeding the number. Doubles as the
 attribution horizon: a finished request stops accepting *Trailing events* the instant its
 row is evicted. Reachable past load-on-open only through an explicit **load-earlier**
 control that continues the same backward scan — no infinite scroll, no silent fetch — and

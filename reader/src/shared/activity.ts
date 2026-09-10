@@ -195,7 +195,7 @@ export type ActivityTable = {
  * because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized
- * by: the fold opens holding exactly the window ADR-0003's backward scan delivered, and a
+ * by: the fold opens holding exactly the history ADR-0003's backward scan delivered, and a
  * row full of an all-day worker's output is bounded by the same number a table full of
  * requests is. Eviction is by whole rows all the same — a row that had half its queries
  * taken away would be a table saying 24 beside a timeline showing three.
@@ -228,8 +228,8 @@ export function activityTable(): ActivityTable {
    * its own.
    */
   let ceiling = LOAD_ON_OPEN_EVENTS
-  /** How many rows at the front a load-earlier put there. Never evicted, for the same reason. */
-  let pinned = 0
+  /** How many rows at the front a load-earlier pulled in. Never evicted, for the same reason. */
+  let pulled = 0
   /** The load-earlier block being folded, if one is: `null` in the ordinary live fold. */
   let earlier: EarlierBlock | null = null
 
@@ -356,6 +356,10 @@ export function activityTable(): ActivityTable {
    */
   function place(folding: Folding, event: TimelineEvent) {
     const trailing = folding.finishSeq !== null && event.seq > folding.finishSeq
+    // Pushed rather than held back even inside a load-earlier block, and safely: a Trailing
+    // event is one appended after its own `request_finish`, so a block that ends before the
+    // finish cannot be carrying one, and the only trailing section a block ever writes is
+    // that of a request it opened, finished and outlived within itself.
     if (trailing) folding.row.trailing.push(event)
     else keep(folding, event)
   }
@@ -478,7 +482,7 @@ export function activityTable(): ActivityTable {
       owner.row.timeline = buffered.concat(owner.row.timeline)
     }
     rows.splice(0, 0, ...block.opened.map((owner) => owner.row))
-    pinned += block.opened.length
+    pulled += block.opened.length
     ceiling += held - heldBefore
     evictToBound()
   }
@@ -596,27 +600,55 @@ export function activityTable(): ActivityTable {
    * is what the Sidecar delivered in one read, and evicting inside one would let a row leave
    * before the events already on their way to it had arrived.
    *
-   * Oldest first, from below whatever a load-earlier pinned to the top, and never the last
-   * row standing. That guard is for the one row that is over the bound by itself — a `rake`
-   * burst of unattributed queries lands in one Run row — where evicting it would leave the
-   * table empty rather than bounded, and trimming inside it would leave a count of 20,000
-   * beside a timeline holding the last few. It is where this bound stops being one, and it
-   * is the honest place to stop.
+   * Oldest first, and three rows it will not take. What a *load-earlier* pulled in, because
+   * the bound is on what the Reader accumulates by itself. A request still *in flight*, for
+   * the reason below. And the last row standing — which is the one row that is over the
+   * bound by itself, a `rake` burst of unattributed queries landing in a single Run row,
+   * where evicting it would leave the table empty rather than bounded and trimming inside it
+   * would leave a count of 20,000 beside a timeline holding the last few. That is where this
+   * bound stops being one, and it is the honest place to stop.
    */
   function evictToBound() {
-    let dropped = pinned
+    const taken = new Set<ActivityRow>()
+    let standing = rows.length
 
-    while (held > ceiling && dropped < rows.length - 1) {
-      held -= forget(rows[dropped] as ActivityRow)
-      dropped += 1
+    for (let index = pulled; index < rows.length && held > ceiling && standing > 1; index++) {
+      const row = rows[index]
+      if (row === undefined || !evictable(row)) continue
+
+      held -= forget(row)
+      taken.add(row)
+      standing -= 1
     }
-    if (dropped > pinned) rows.splice(pinned, dropped - pinned)
+    compact(taken)
 
     // The same retention question, asked of the two things that outlive the rows they are
     // about: what is worth deduplicating, and what is past the horizon. Both are bounded by
-    // the one number, so neither can quietly become the thing that grows.
+    // the one number, so neither can quietly become the thing that grows — and a Trailing
+    // event for a request evicted five thousand evictions ago does open a row of its own
+    // again, which is the reading left once the fold no longer remembers the row at all.
     keepLatest(folded, ceiling)
     keepLatest(evicted, ceiling)
+  }
+
+  /**
+   * A request still in flight is never evicted. There is no timeout, ever — and a bound that
+   * quietly took the hanging request away once five thousand events had gone past it would
+   * be one, measured in other people's traffic rather than in seconds, and hiding the single
+   * thing the Reader exists to show. It stays until its Run ends under it: an *Interrupted*
+   * row evicts like any other, because that one has been concluded.
+   */
+  function evictable(row: ActivityRow) {
+    return row.kind === "run" || row.state !== "in-flight"
+  }
+
+  /** The evicted rows out, in one pass over the array everything else is holding on to. */
+  function compact(taken: Set<ActivityRow>) {
+    if (taken.size === 0) return
+
+    let kept = 0
+    for (const row of rows) if (!taken.has(row)) rows[kept++] = row
+    rows.length = kept
   }
 
   /** Let go of a row, and say how many events the fold stops holding by doing so. */

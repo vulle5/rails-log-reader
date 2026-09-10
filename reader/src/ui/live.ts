@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react"
 import { activityTable, type ActivityRow } from "../shared/activity"
 import type { Earlier } from "../shared/earlier"
 import type { Envelope } from "../shared/wire"
-import type { EarlierState } from "./LoadEarlier"
 
 /**
  * What the live wire is saying about itself, apart from the rows folded out of it: the `v`
@@ -17,13 +16,20 @@ export type WireStatus = {
   rows: readonly ActivityRow[]
   liveWireVersion: number | null
   liveRunId: string | null
-  /** Whether there is anything before the loaded window, and whether a pull is in flight. */
+  /** Whether there is anything before the loaded history, and whether a pull is in flight. */
   earlier: EarlierState
   loadEarlier: () => void
 }
 
-/** Where the window the server attached on begins: `event: window`, off the same stream. */
-type Window = { from: number }
+/**
+ * Whether the Sidecar holds anything before the history the Reader has, and whether a scan
+ * for it is in flight. Lives here rather than with the control it draws, because it is the
+ * shape of what this hook knows: the control renders it and nothing more.
+ */
+export type EarlierState = {
+  available: boolean
+  loading: boolean
+}
 
 /**
  * The live Sidecar, folded in the browser. The server sends envelopes in append order and
@@ -47,7 +53,7 @@ export function useSidecar(): WireStatus {
   }>({ rows: [], liveWireVersion: null, liveRunId: null })
   const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
   /**
-   * The offset the loaded window begins at. `null` until the server says — nothing has been
+   * The offset the loaded history begins at. `null` until the server says — nothing has been
    * attached to yet, so there is nothing to be earlier *than*.
    */
   const from = useRef<number | null>(null)
@@ -70,13 +76,13 @@ export function useSidecar(): WireStatus {
       }))
     }
 
-    // Sent on attaching, and again whenever a truncation moves the window: the cursor is
+    // Sent on attaching, and again whenever a truncation moves the history: the cursor is
     // taken from what the server is reading *now*, never carried across a file that was
     // replaced under it.
-    sidecar.addEventListener("window", (message) => {
-      const window = JSON.parse((message as MessageEvent).data) as Window
-      from.current = window.from
-      setEarlier((current) => ({ ...current, available: window.from > 0 }))
+    sidecar.addEventListener("history", (message) => {
+      const history = JSON.parse((message as MessageEvent).data) as { from: number }
+      from.current = history.from
+      setEarlier((current) => ({ ...current, available: history.from > 0 }))
     })
 
     return () => sidecar.close()

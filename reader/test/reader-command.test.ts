@@ -83,11 +83,11 @@ async function reachReader(reader: Bun.Subprocess) {
 
 /**
  * The first SSE message of a given kind, decoded. The stream carries two: the envelopes
- * themselves, which have no `event:` line, and `window`, which says where the window the
- * Reader attached on begins — so a reader of this stream has to tell them apart rather than
- * take the first `data:` it sees.
+ * themselves, which have no `event:` line, and `history`, which says where the load-on-open
+ * history the Reader attached on begins — so a reader of this stream has to tell them apart
+ * rather than take the first `data:` it sees.
  */
-async function firstMessage<T>(response: Response, kind: "envelopes" | "window") {
+async function firstMessage<T>(response: Response, kind: "envelopes" | "history") {
   const stream = response.body?.getReader()
   if (stream === undefined) throw new Error("the Reader answered /events with no body")
 
@@ -162,7 +162,7 @@ describe("starting the Reader", () => {
     ])
   })
 
-  test("tells the browser where the window it attached on begins, so load-earlier can go on from there", async () => {
+  test("tells the browser where the history it attached on begins, so load-earlier can go on from there", async () => {
     const root = await railsRoot()
     const rails = aRun("srv-1")
     await appendToSidecar(join(root, "log"), rails.header(), rails.start("req-1"))
@@ -170,9 +170,9 @@ describe("starting the Reader", () => {
 
     const response = await Bun.fetch(new URL("events", url))
 
-    // The whole file fits inside the load-on-open window, so the window opens at its top —
+    // The whole file fits inside the load-on-open figure, so the history opens at its top —
     // and a cursor of 0 is the Reader saying there is nothing earlier to ask it for.
-    expect(await firstMessage<{ from: number }>(response, "window")).toEqual({ from: 0 })
+    expect(await firstMessage<{ from: number }>(response, "history")).toEqual({ from: 0 })
   })
 
   test("GET /earlier answers the load-earlier control from wherever it is asked to scan", async () => {
@@ -183,7 +183,7 @@ describe("starting the Reader", () => {
 
     const answered = await Bun.fetch(new URL("earlier?from=0", url))
 
-    // Asked from the top of the file, which is where this one's window already begins:
+    // Asked from the top of the file, which is where this one's history already begins:
     // nothing earlier, and the same offset back, rather than the file over again.
     expect(await answered.json()).toEqual({ envelopes: [], from: 0 })
   })

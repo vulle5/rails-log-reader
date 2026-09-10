@@ -46,9 +46,9 @@ afterEach(async () => {
  */
 async function theReaderReads(logDirectory: string) {
   const activity = activityTable()
-  // The offset the window the Reader was given begins at, kept exactly as the browser keeps
+  // The offset the history the Reader was given begins at, kept exactly as the browser keeps
   // it: the Sidecar announces it on attaching, and a load-earlier continues the scan from
-  // there and hands back where the window begins now.
+  // there and hands back where the history begins now.
   let from = 0
   const sidecar = await openSidecar(logDirectory, activity.fold, (start) => {
     from = start
@@ -968,6 +968,22 @@ describe("the Memory bound", () => {
     expect(requests(reader.rows).at(-1)?.path).toBe(`/posts/${LOAD_ON_OPEN_EVENTS / 2 + 9}`)
   })
 
+  test("never evicts a request that is still in flight, however much arrives after it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+    await appendToSidecar(log, run.start("req-hanging", "GET", "/reports"))
+    await reader.caughtUp()
+
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10, 100))
+    await reader.caughtUp()
+
+    // The oldest row in the table, and the one the Reader exists to show: a request that
+    // hangs. Evicting it would be a timeout — one measured in other people's traffic.
+    expect(reader.rows.at(0)?.id).toBe("request req-hanging")
+    expect(row(reader.rows, "/reports").state).toBe("in-flight")
+  })
+
   test("stops a finished request taking Trailing events the instant its row is evicted", async () => {
     const log = await aLogDirectory()
     const run = aRun("srv-1")
@@ -991,7 +1007,7 @@ describe("the Memory bound", () => {
 /**
  * Load-earlier: the same backward scan the Reader opened on, continued from an earlier
  * point when the developer asks for it. A file with more than the load-on-open figure in it
- * is the whole apparatus — what the window leaves behind is what the control goes and gets.
+ * is the whole apparatus — what the load-on-open figure leaves behind is what the control goes and gets.
  */
 async function aSidecarWithHistory(log: string) {
   const server = aRun("srv-1")
@@ -1000,7 +1016,7 @@ async function aSidecarWithHistory(log: string) {
     server.header(),
     rake.log(null, "rake-1 counted the posts"),
     server.start("req-1"),
-    server.sql("req-1", "SELECT 'the query before the window'"),
+    server.sql("req-1", "SELECT 'the query before the history'"),
   ]
   const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS }, (_, index) =>
     server.log(null, `filler ${index}`),
@@ -1019,13 +1035,13 @@ describe("load-earlier", () => {
 
     await reader.loadEarlier()
 
-    // The rake Run said nothing inside the window, so its row is new — and it is above the
+    // The rake Run said nothing inside the loaded history, so its row is new — and it is above the
     // rows that were already there, because that is where its earliest event sits.
     expect(reader.rows.at(0)?.id).toBe("run rake-1")
     expect(timeline(runRow(reader.rows, "rake-1"))).toEqual(["rake-1 counted the posts"])
   })
 
-  test("promotes the request the window cut in half, without moving its row", async () => {
+  test("promotes the request the history cut in half, without moving its row", async () => {
     const log = await aLogDirectory()
     await aSidecarWithHistory(log)
     const reader = await theReaderReads(log)
@@ -1037,8 +1053,8 @@ describe("load-earlier", () => {
 
     const request = theOnlyRequest(reader.rows)
     expect(request.path).toBe("/posts/12")
-    // The query it ran before the window opened, in front of a timeline it was not in.
-    expect(timeline(request)).toEqual(["SELECT 'the query before the window'"])
+    // The query it ran before the history opened, in front of a timeline it was not in.
+    expect(timeline(request)).toEqual(["SELECT 'the query before the history'"])
     expect(reader.rows.indexOf(request)).toBe(before + 1)
   })
 

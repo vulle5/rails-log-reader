@@ -68,12 +68,12 @@ function envelopeStream() {
       attached = await openSidecar(
         logDirectory,
         (batch) => send(`data: ${JSON.stringify(batch)}\n\n`),
-        // Where the window this attachment opened on begins — an event of its own, because
-        // it is not envelopes and because it is sent again whenever the window moves under a
-        // truncation. The browser holds it and hands it back to `GET /earlier`: the cursor
+        // Where the load-on-open history this attachment opened on begins — an event of its
+        // own, because it is not envelopes and because it is sent again whenever a truncation
+        // moves it. The browser holds it and hands it back to `GET /earlier`: the cursor
         // belongs to the side that holds the model, so a reconnection cannot forget how far
         // back the developer had asked to see.
-        (from) => send(`event: window\ndata: ${JSON.stringify({ from })}\n\n`),
+        (from) => send(`event: history\ndata: ${JSON.stringify({ from })}\n\n`),
       )
     },
     cancel() {
@@ -91,10 +91,10 @@ function envelopeStream() {
 }
 
 /**
- * The *load-earlier* control: the block of envelopes immediately before the window the
+ * The *load-earlier* control: the block of envelopes immediately before the history the
  * browser holds, read by continuing the same backward scan ADR-0003's load-on-open is. A
  * `GET` because it only ever reads, and stateless because the offset comes in with the
- * request — the server is the Sidecar and nothing else, and holds no window of its own.
+ * request — the server is the Sidecar and nothing else, and holds no history of its own.
  */
 async function earlier(request: Request) {
   const from = Number(new URL(request.url).searchParams.get("from"))

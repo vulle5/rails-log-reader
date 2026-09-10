@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs"
-import { open, stat, type FileHandle } from "node:fs/promises"
+import { open, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 import { LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
@@ -51,7 +51,7 @@ export type Sidecar = {
 export async function openSidecar(
   logDirectory: string,
   onEnvelopes: (envelopes: Envelope[]) => void,
-  onHistoryStart: (from: number) => void = () => {},
+  onHistoryStart: (from: number) => void,
 ): Promise<Sidecar> {
   const path = join(logDirectory, SIDECAR_NAME)
 
@@ -112,7 +112,7 @@ export async function openSidecar(
       inode = sidecar.ino
       offset = await startOfHistory(path, sidecar.size)
       // Announced on every attachment and every reset, not once at open: a truncation moves
-      // the whole window, and a load-earlier cursor taken before it points into bytes that
+      // the whole history, and a load-earlier cursor taken before it points into bytes that
       // are no longer the ones it was taken from.
       onHistoryStart(offset)
     }
@@ -173,24 +173,45 @@ export async function openSidecar(
 }
 
 /**
- * Where the load-on-open history begins: the start of the ~5,000th line back from EOF,
- * found by scanning backwards over the same offset the Reader tracks — the one seek
- * ADR-0003 describes.
+ * Where the load-on-open history before `end` begins: the start of the ~5,000th line back
+ * from it, found by scanning backwards over the same offset the Reader tracks — the one seek
+ * ADR-0003 describes. `end` is the end of a line — EOF, or the start of the line the Reader
+ * already has — so the newline the count runs one past closes the line before the history,
+ * and the byte after it opens it.
+ *
+ * Called with EOF when a Sidecar is attached to, and with the history's own start when the
+ * *load-earlier* control continues the scan: one function, because it is one scan.
  */
-async function startOfHistory(path: string, size: number) {
+async function startOfHistory(path: string, end: number) {
   const handle = await open(path, "r")
   try {
-    return await startOfWindow(handle, size)
+    const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, end))
+    let position = end
+    let lines = 0
+
+    while (position > 0) {
+      const length = Math.min(chunk.length, position)
+      position -= length
+      await handle.read(chunk, 0, length, position)
+
+      for (let index = length - 1; index >= 0; index--) {
+        if (chunk[index] !== NEWLINE) continue
+        lines += 1
+        if (lines > LOAD_ON_OPEN_EVENTS) return position + index + 1
+      }
+    }
+
+    return 0
   } finally {
     await handle.close()
   }
 }
 
 /**
- * The *load-earlier* control: the window before the window, read by continuing the same
- * backward scan from where the Reader's own window begins. Not infinite scroll, not a silent
- * fetch, and not a second mechanism — the only thing that makes this different from opening
- * the file is where the scan starts.
+ * The *load-earlier* control: the history before the history the Reader holds, read by
+ * continuing the same backward scan from where that one begins. Not infinite scroll, not a
+ * silent fetch, and not a second mechanism — the only thing that makes this different from
+ * opening the file is where the scan starts.
  *
  * Nothing is remembered between calls. The offset comes in from the browser and goes back
  * out with the envelopes, so this survives the browser reconnecting, which is exactly when a
@@ -206,13 +227,13 @@ export async function readEarlier(logDirectory: string, before: number): Promise
   })
   // The Sidecar the offset was taken from is not the one there now — it was truncated at a
   // boot, or has not been written yet. There is nothing earlier to give, and the live
-  // attachment is announcing the new window as this returns.
+  // attachment is announcing where the history begins now as this returns.
   if (sidecar === null) return { envelopes: [], from: 0 }
 
   const end = Math.min(before, sidecar.size)
+  const from = await startOfHistory(path, end)
   const handle = await open(path, "r")
   try {
-    const from = await startOfWindow(handle, end)
     const span = Buffer.alloc(end - from)
     const { bytesRead } = await handle.read(span, 0, span.length, from)
     const complete = span.subarray(0, bytesRead).lastIndexOf(NEWLINE)
@@ -222,32 +243,6 @@ export async function readEarlier(logDirectory: string, before: number): Promise
   } finally {
     await handle.close()
   }
-}
-
-/**
- * Where the load-on-open figure's worth of lines before `end` begins. `end` is the end of a
- * line — EOF, or the start of the line the Reader's window opens on — so the newline the
- * count runs one past is the one closing the line before the window, and the byte after it
- * opens it.
- */
-async function startOfWindow(handle: FileHandle, end: number) {
-  const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, end))
-  let position = end
-  let lines = 0
-
-  while (position > 0) {
-    const length = Math.min(chunk.length, position)
-    position -= length
-    await handle.read(chunk, 0, length, position)
-
-    for (let index = length - 1; index >= 0; index--) {
-      if (chunk[index] !== NEWLINE) continue
-      lines += 1
-      if (lines > LOAD_ON_OPEN_EVENTS) return position + index + 1
-    }
-  }
-
-  return 0
 }
 
 function readEnvelopes(lines: Buffer) {

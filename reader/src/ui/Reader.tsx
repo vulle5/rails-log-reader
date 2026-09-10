@@ -8,7 +8,8 @@ import { ActivityTable } from "./ActivityTable"
 import { DetailColumn } from "./DetailColumn"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
-import { LoadEarlier, type EarlierState } from "./LoadEarlier"
+import type { EarlierState } from "./live"
+import { LoadEarlier } from "./LoadEarlier"
 import { RowKindTabs, rowsOfKind, type RowKindFilter } from "./RowKindTabs"
 
 /**
@@ -42,7 +43,7 @@ type ReaderProps = {
   repairState?: RepairState
   onRepair?: () => void
   onDismissRepair?: () => void
-  /** Whether there is anything before the window the fold holds, and whether it is on its way. */
+  /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
 }

@@ -31,7 +31,7 @@ afterEach(async () => {
 
 async function theReaderReads(logDirectory: string) {
   const delivered: Envelope[] = []
-  // Where the window the Reader was given begins, as the Sidecar announces it: the offset a
+  // Where the history the Reader was given begins, as the Sidecar announces it: the offset a
   // load-earlier continues the backward scan from, kept here exactly as the browser keeps it.
   let historyStart = 0
   const sidecar = await openSidecar(
@@ -214,7 +214,7 @@ describe("a line the Reader cannot use", () => {
 })
 
 describe("load-earlier", () => {
-  test("continues the same backward scan from where the loaded window begins", async () => {
+  test("continues the same backward scan from where the loaded history begins", async () => {
     const log = await aLogDirectory()
     const run = aRun("srv-1")
     const events = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) =>
