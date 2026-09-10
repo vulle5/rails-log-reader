@@ -39,18 +39,21 @@ h2 { font-size: 1.125rem; margin-top: 2rem; }
   border-bottom: 1px solid var(--rule);
 }
 
-.posts, .comments {
+.posts, .comments, .scenarios {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.posts li, .comments li {
+.posts li, .comments li, .scenarios li {
   padding: 1rem 0;
   border-bottom: 1px solid var(--rule);
 }
 
 .posts h2 { margin: 0; font-size: 1.125rem; }
+
+.scenarios button { font: inherit; padding: 0.5rem 0.875rem; }
+#scenario-output { color: var(--muted); min-height: 1.5em; }
 
 .errors { color: crimson; }
 

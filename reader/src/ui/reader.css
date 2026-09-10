@@ -24,6 +24,11 @@
 
   --warn: #9a6700;
   --error: #cf222e;
+
+  /* The one thing in the Reader that floats over its own column, and the only place a shadow
+     is what says so. Darker in the dark theme, where a light pill on a dark column needs more
+     under it to lift, not less. */
+  --shadow: rgb(0 0 0 / 18%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,6 +52,8 @@
 
     --warn: #e3b341;
     --error: #ff7b72;
+
+    --shadow: rgb(0 0 0 / 45%);
   }
 }
 
@@ -93,6 +100,7 @@ body {
 }
 
 .reader {
+  position: relative;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) minmax(380px, 40%);
   grid-template-rows: minmax(0, 1fr);
@@ -181,6 +189,7 @@ body {
    minimum size is its content, so without this a column would overflow the track the line
    above just constrained, and hand the overflow back to the page. */
 .column {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -200,7 +209,8 @@ body {
 .column-heading {
   display: flex;
   flex: 0 0 auto;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
   justify-content: space-between;
   min-height: 30px;
@@ -225,6 +235,38 @@ body {
   min-height: 0;
   overflow: auto;
   scrollbar-width: thin;
+}
+
+/* A paused column's "N new" pill: floating over the column rather than sitting in it, and
+   positioned against the column and not its scrollport, so it stays put while the rows it is
+   counting move underneath. It has to be reachable without scrolling — scrolling to the
+   bottom is the very thing it is offering to do — and it may not push the rows around when
+   it appears, since it appears while they are being read.
+
+   Centred at the foot of the column, which is where the new rows are and which way the arrow
+   points. It is a `button` because it is one: unlike a row or a Console line, this is a
+   single control with one action, so it costs nothing to be keyboard-reachable and it would
+   be strange not to be. */
+.new-pill {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 2;
+  padding: 3px 10px;
+  transform: translateX(-50%);
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 2px 8px var(--shadow);
+  color: var(--bg);
+  font-family: var(--ui);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.new-pill:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--fg));
 }
 
 .placeholder {
@@ -526,6 +568,222 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/* ---- the Console rail ------------------------------------------------------ */
+
+/* Every App log event in append order and no SQL at all, which is the whole reason a
+   `Rails.logger` call you wrote is findable by scanning one place.
+
+   The right padding is the **gutter**: the strip *Hover grouping*'s rule travels down, kept
+   clear of text so the rule never crosses a word on its way to the row. */
+.console-lines {
+  margin: 0;
+  padding: 0 18px 24px 0;
+  list-style: none;
+}
+
+/* One line each, cut rather than wrapped: the rail is swept rather than read, a uniform
+   rhythm is what makes that possible in a busy one, and it gives the gutter rule one
+   unambiguous height to point at. The whole message is a `title` away and a click away. */
+.console-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0 2px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.console-line:hover {
+  background: var(--bg-raised);
+}
+
+/* The lit group: the line under the pointer, its siblings, and — across the gutter — their
+   row. Additive and nothing more. Dimming the rest was built and rejected: hovering is what
+   you do constantly, and it made everything else unreadable exactly then. */
+.console-line-lit,
+.console-line-lit:hover {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+}
+
+/* The pinned group, marked harder and declared last so it survives a hover passing over it —
+   which is the whole reason a pin exists. Sweeping the rail after clicking is what happens
+   next, and the group you just fixed in place has to still be there when you stop. */
+.console-line-pinned,
+.console-line-pinned:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.console-severity {
+  flex: 0 0 auto;
+  width: 5ch;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+/* Rails' own lines are kept and said to be Rails'. On the line and not only in its colour:
+   `source` is a fact read off `caller_locations`, and it is worth as much to a screen reader
+   as to the eye. The app's own lines carry nothing, because they are the ones the eye should
+   land on first. */
+.console-source,
+.console-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+
+.console-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-from-rails .console-message {
+  color: var(--fg-muted);
+}
+
+.log-warn .console-severity,
+.log-warn .console-message {
+  color: var(--warn);
+}
+
+.log-error .console-severity,
+.log-error .console-message,
+.log-fatal .console-severity,
+.log-fatal .console-message {
+  color: var(--error);
+}
+
+/* The Console's two thinnings, in two groups: a level and a source are different questions
+   about a line, and one row of seven chips would invite `warn` and `rails` to be compared.
+   The separator between them is what says they are two. */
+.console-filters {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.chips + .chips {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.chip {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--selected);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+/* Off, and legibly so: an outline with nothing in it, rather than a chip that has merely
+   gone quiet — the difference between "no warnings" and "warnings hidden" is the one thing
+   this control must never blur. It is the same mark whichever axis is off, because "hidden"
+   is the same fact about the rail either way — and `rails` wears it on open, which is how
+   the Console says out loud that it is not showing everything it holds. */
+.chip-off {
+  background: none;
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+.chip-level-warn {
+  color: var(--warn);
+}
+
+.chip-level-error,
+.chip-level-fatal {
+  color: var(--error);
+}
+
+.chip-off.chip-level-warn,
+.chip-off.chip-level-error,
+.chip-off.chip-level-fatal {
+  color: var(--fg-faint);
+}
+
+/* ---- Hover grouping -------------------------------------------------------- */
+
+/* Over all three columns, because the rule belongs to none of them — and inert, so the line
+   under the pointer stays under the pointer and the rule cannot come between the hover and
+   the click that follows it. */
+.grouping {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.grouping-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.grouping-rule {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+/* A stub is a rule that stopped, so it has to look stopped rather than aimed. Both ways of
+   failing to reach a row are drawn alike — what differs between them is what the caption
+   says, because they are two different facts about where the row is. */
+.grouping-rule-off-screen,
+.grouping-rule-not-shown {
+  stroke-dasharray: 3 3;
+}
+
+/* What the stub means, said rather than left to the shape of a line going nowhere. */
+.grouping-caption {
+  position: absolute;
+  margin: 0;
+  padding: 2px 6px;
+  transform: translateY(-50%);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The far end of the group, hovered and pinned. The row keeps whatever else it was saying
+   about itself — in flight, Interrupted, selected — and gains an accent tint on top of it. */
+.activity-row-lit td {
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg));
+}
+
+.activity-row-pinned td {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+
+.activity-row-pinned td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 /* ---- the detail column ---------------------------------------------------- */

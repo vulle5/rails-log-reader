@@ -31,7 +31,17 @@ const TABS: readonly [RowKindFilter, string][] = [
 
 export function rowsOfKind(rows: readonly ActivityRow[], filter: RowKindFilter) {
   if (filter === "all") return rows
-  return rows.filter((row) => row.kind === filter)
+  return rows.filter((row) => showsRow(filter, row))
+}
+
+/**
+ * Whether a filter is showing one particular row. Read by the *Console*, whose click has to
+ * clear a filter that is hiding the row it is jumping to — and asked of the filter rather
+ * than of the DOM, because "is it on screen" and "is it rendered at all" are two questions
+ * and this is the second one.
+ */
+export function showsRow(filter: RowKindFilter, row: ActivityRow) {
+  return filter === "all" || filter === row.kind
 }
 
 type RowKindTabsProps = {

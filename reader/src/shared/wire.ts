@@ -119,7 +119,13 @@ export type SqlPayload = {
   binds: BindValue[]
 }
 
-export type Severity = "debug" | "info" | "warn" | "error" | "fatal" | "unknown"
+/**
+ * Every level `Rails.logger` can be called at, quietest first — a tuple rather than a union
+ * spelled twice, so the Console's chips are these and cannot drift out of step with them.
+ */
+export const SEVERITIES = ["debug", "info", "warn", "error", "fatal", "unknown"] as const
+
+export type Severity = (typeof SEVERITIES)[number]
 
 export type AppLogPayload = {
   severity: Severity
@@ -137,6 +143,17 @@ export type RequestRouteEvent = EventEnvelope<"request_route", RequestRoutePaylo
 export type RequestFinishEvent = EventEnvelope<"request_finish", RequestFinishPayload>
 export type SqlEvent = EventEnvelope<"sql", SqlPayload>
 export type AppLogEvent = EventEnvelope<"app_log", AppLogPayload>
+
+/**
+ * What identifies one Event: the Run it came from and its `seq` within that Run. `seq`
+ * restarts at 1 in every Run, so neither half is an identity alone — together they are, and
+ * they are what lets the Reader be handed the same bytes twice. A reconnecting browser and a
+ * backward scan overlapping what is already held both cost a `Set` lookup rather than a
+ * doubled row or a doubled Console line.
+ */
+export function eventIdentity(envelope: Pick<Envelope, "run_id" | "seq">) {
+  return `${envelope.run_id} ${envelope.seq}`
+}
 
 export type Envelope =
   | RunHeaderEvent

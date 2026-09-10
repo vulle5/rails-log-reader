@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow } from "../shared/activity"
+import { consoleStream, type ConsoleLine } from "../shared/console"
 import type { Earlier } from "../shared/earlier"
 import type { Envelope } from "../shared/wire"
 
@@ -14,6 +15,8 @@ import type { Envelope } from "../shared/wire"
  */
 export type WireStatus = {
   rows: readonly ActivityRow[]
+  /** The *Console*'s own fold of the same envelopes: every App log event, in append order. */
+  lines: readonly ConsoleLine[]
   liveWireVersion: number | null
   liveRunId: string | null
   /** Whether there is anything before the loaded history, and whether a pull is in flight. */
@@ -36,21 +39,28 @@ export type EarlierState = {
  * nothing else, so this is where the Reader's model actually lives.
  *
  * `EventSource` reconnects on its own, and a reconnection re-reads the load-on-open history
- * — which costs nothing, because `(run_id, seq)` is the event identity and the fold has
+ * — which costs nothing, because `(run_id, seq)` is the event identity and both folds have
  * already seen every one of those events.
  *
- * The fold and the cursor outlive that effect, in a `useState` initialiser and a ref, for
- * the same reason: a reconnection is not a new Reader. Rows the fold holds — including
- * whatever a *load-earlier* went and got — survive it, and so does how far back the
+ * Two folds over one stream, not one fold read twice: the *Console* is every App log event
+ * in append order, *Echoes* included, and the Activity table's rows are the same events
+ * grouped by what owns them, *Echoes* dropped. Neither is derivable from the other, which is
+ * why the envelopes go to both.
+ *
+ * Both folds and the cursor outlive that effect, in `useState` initialisers and a ref, for
+ * the same reason: a reconnection is not a new Reader. What the folds hold — including
+ * whatever a *load-earlier* went and got — survives it, and so does how far back the
  * developer had asked to see, which the server has no memory of by design.
  */
 export function useSidecar(): WireStatus {
   const [activity] = useState(activityTable)
+  const [stream] = useState(consoleStream)
   const [status, setStatus] = useState<{
     rows: readonly ActivityRow[]
+    lines: readonly ConsoleLine[]
     liveWireVersion: number | null
     liveRunId: string | null
-  }>({ rows: [], liveWireVersion: null, liveRunId: null })
+  }>({ rows: [], lines: [], liveWireVersion: null, liveRunId: null })
   const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
   /**
    * The offset the loaded history begins at. `null` until the server says — nothing has been
@@ -64,6 +74,7 @@ export function useSidecar(): WireStatus {
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
       activity.fold(envelopes)
+      stream.fold(envelopes)
       const latest = envelopes.at(-1)
 
       setStatus((previous) => ({
@@ -71,6 +82,9 @@ export function useSidecar(): WireStatus {
         // they mutate — that is what "rows mutate in place and never move" means — so the
         // array is the only thing left that can tell React the table has changed.
         rows: [...activity.rows],
+        // Console lines never mutate at all — a line is one envelope — so this array is
+        // copied for the one reason the rows' is: React is told by identity.
+        lines: [...stream.lines],
         liveWireVersion: latest?.v ?? previous.liveWireVersion,
         liveRunId: latest?.run_id ?? previous.liveRunId,
       }))
@@ -86,7 +100,7 @@ export function useSidecar(): WireStatus {
     })
 
     return () => sidecar.close()
-  }, [activity])
+  }, [activity, stream])
 
   /**
    * One click, one continuation of the backward scan. The cursor goes out and comes back,
@@ -103,6 +117,9 @@ export function useSidecar(): WireStatus {
       const block = (await response.json()) as Earlier
 
       from.current = block.from
+      // The Activity fold only. The *Console* is append order, and this block belongs before
+      // every line it holds rather than after them — appending it there would put the oldest
+      // lines of the session at the bottom of the rail, under the newest.
       activity.foldEarlier(block.envelopes)
       setStatus((previous) => ({ ...previous, rows: [...activity.rows] }))
       setEarlier({ available: block.from > 0, loading: false })

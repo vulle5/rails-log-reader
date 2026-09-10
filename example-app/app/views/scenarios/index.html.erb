@@ -1,0 +1,25 @@
+<% content_for :title, "Scenarios" %>
+<% content_for :head do %>
+  <%= javascript_include_tag "scenarios", defer: true %>
+<% end %>
+
+<h1>Scenarios</h1>
+
+<p class="lede">
+  The traffic shapes the Reader exists to make readable, one button each. Every button below
+  is also a <code>curl</code> line — see the example app README for the exact ones. This
+  page's own requests are not excluded from capture.
+</p>
+
+<ul class="scenarios">
+  <% @scenarios.each do |scenario| %>
+    <li>
+      <button type="button" data-scenario="<%= scenario.path %>" data-count="<%= scenario.count %>">
+        <%= scenario.label %>
+      </button>
+      <p class="meta"><%= scenario.description %></p>
+    </li>
+  <% end %>
+</ul>
+
+<p id="scenario-output" role="status"></p>
