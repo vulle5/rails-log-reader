@@ -39,8 +39,8 @@ restores the same rows rather than fresh rows of the same shape.
 
 The web side is three actions: `posts#index`, `posts#show`, and `comments#create`. Leaving
 a comment is a plain GET → POST → redirect → GET, with the write in the middle. ERB and
-Propshaft, no Hotwire, no JavaScript at all — so what the log shows is what the browser
-did.
+Propshaft, no Hotwire — so what the log shows for those pages is what the browser did. The
+one exception is `/scenarios`, below, where a little vanilla `fetch()` is the point.
 
 SQLite, so there is no service to start and nothing to install.
 
@@ -73,6 +73,44 @@ to tail. Both files are git-ignored already — Rails' generated `.gitignore` co
 `/log/*`, which is why the marker lives there. Delete it and restart to turn the
 Initializer off again: it is read once, at boot, so enabling and disabling both take a
 restart.
+
+## Scenarios
+
+`/scenarios` has one button per Scenario — the traffic shapes the Reader exists to make
+readable. Every button is also a plain `curl` line, listed below, because the endpoints
+are the interface: an agent can drive the same traffic the page does, no `bin/scenarios`
+CLI required, and there is no launcher in the Reader either. This page's own requests are
+not excluded from capture.
+
+```sh
+# 1 — Parallel in-flight requests with interleaving queries. One request is nothing special;
+# fire several at once for the shape this Scenario is named for.
+for i in 1 2 3 4; do curl -s http://localhost:3000/scenarios/parallel & done; wait
+
+# 2 — An N+1-shaped request: one query for the comments, one more per comment for its author.
+curl -s http://localhost:3000/scenarios/n_plus_one
+
+# 3 — A slow query: a recursive CTE, genuinely slow inside SQLite. No Ruby `sleep`.
+curl -s http://localhost:3000/scenarios/slow_query
+
+# 4 — A hanging request. Never responds; Ctrl-C to give up on it.
+curl -s http://localhost:3000/scenarios/hang
+
+# 5 — A 500 with a real backtrace.
+curl -s http://localhost:3000/scenarios/error
+
+# 6 — A Rails.logger call sandwiched between two queries: the dual-homing case.
+curl -s http://localhost:3000/scenarios/dual_homing
+
+# 7 — A raw connection.execute: no model, no binds, a nil name.
+curl -s http://localhost:3000/scenarios/raw_sql
+
+# 9 — A request flood at ~20 concurrent. Only 8 are ever truly mid-flight at once — Puma's
+# pool above is fixed at `threads 8, 8` — but each is cheap enough that the rest drain from
+# the queue in milliseconds, so the Activity table still sees it as a burst. For a wider one,
+# `WEB_CONCURRENCY=2 bin/dev` first.
+for i in $(seq 20); do curl -s http://localhost:3000/scenarios/flood & done; wait
+```
 
 ## Tests
 
