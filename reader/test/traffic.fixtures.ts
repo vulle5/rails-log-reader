@@ -454,7 +454,7 @@ export const DENSE_TRAFFIC: Envelope[] = (() => {
       perRun.set(emission.runId, seq)
 
       return {
-        v: 1,
+        v: 2,
         run_id: emission.runId,
         seq,
         at_mono: BOOT_MONO + emission.at * 1_000_000,

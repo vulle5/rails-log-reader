@@ -6,8 +6,16 @@
  * `run_end` and the pid-keyed `run_id` come from the amendment, not the body.
  */
 
-/** Stamped on every envelope. Bumped when a field changes meaning. */
-export const WIRE_VERSION = 1
+/**
+ * Stamped on every envelope. Bumped when a field changes meaning — including when a field a
+ * Reader could once count on becomes one it has to check for. That is a meaning change from
+ * the reading half's side even though the field itself still says what it always did: a
+ * Reader built before the change reads the absence as `undefined` and renders straight
+ * through it, which is the exact failure `isWireVersionUnderstood` exists to refuse.
+ *
+ * 2: `duration_ms` became optional on a `request_finish` (#45).
+ */
+export const WIRE_VERSION = 2
 
 export const EVENT_TYPES = [
   "run_header",
@@ -92,12 +100,18 @@ export type RequestException = {
 }
 
 export type RequestFinishPayload = {
-  status: number
   /**
-   * Absent when the Initializer never saw the request start and so has nothing to measure
-   * from — a finish is a fact about a request that ended, and the one field it cannot
-   * measure does not take the event down with it. Absence is absence, as with `row_count`
-   * below: never a zero, which would read as an instant request.
+   * `null` where the request raised its way out of the whole middleware stack: the
+   * Initializer's own middleware reads the status off what `@app.call` returned, and on that
+   * path it returned nothing. Rare — in development `DebugExceptions` renders an exception
+   * and hands back an ordinary 500 — but reachable from anything raising above it, and the
+   * finish is emitted either way.
+   */
+  status: number | null
+  /**
+   * Absent where the Initializer had no start to measure from — the one thing a finish is
+   * allowed not to carry. Absence, as `row_count` below is absent, and never a zero that
+   * would read as an instant request. See ADR-0002's amendment from #45.
    */
   duration_ms?: number
   view_runtime_ms?: number

@@ -185,6 +185,48 @@ class RequestTest < ActiveSupport::TestCase
     assert_nil after["request_id"], "its Run owns it, not the request that happened to run before it"
   end
 
+  # The other path the by-hand reset has to cover, and the one #45's own notes called out:
+  # the middleware has to clear its keys "including on the paths where `@app.call` raises".
+  # Nothing in the Initializer catches that — `ActionDispatch::Executor`'s own `ensure` does,
+  # which is the whole reason the reset is registered on the executor rather than written as
+  # an `ensure` inside the Middleware.
+  #
+  # Reaching the path takes `show_exceptions: :none`, because `ActionDispatch::DebugExceptions`
+  # otherwise renders the exception and hands the middleware above it an ordinary 500 to
+  # return — a raise that never leaves the stack, which is why development normally never
+  # sees this. What is left when it does leave is a request that ended without a response.
+  test "a request whose exception escapes the whole stack still finishes, and still clears its context" do
+    run = DevelopmentRun.boot(script: <<~RUBY)
+      Rails.application.env_config["action_dispatch.show_exceptions"] = :none
+
+      begin
+        #{DevelopmentRun.real_request("/posts/999999999")}
+      rescue ActiveRecord::RecordNotFound
+        puts "the exception left the middleware stack"
+      end
+
+      Rails.logger.info("after the raising request, on the same thread")
+    RUBY
+
+    assert run.booted?, run.output
+    assert_includes run.output, "the exception left the middleware stack",
+      "with DebugExceptions rendering it this would test the returning path over again"
+
+    start = run.events_of("request_start").sole
+    finish = run.events_of("request_finish").sole
+
+    assert_equal start["request_id"], finish["request_id"],
+      "the finish is emitted from below the Executor, so the context is still there for it"
+    assert_operator finish["payload"]["duration_ms"], :>, 0,
+      "the reset runs after the finish on this path too, not before it"
+    assert_nil finish["payload"]["status"],
+      "the status is read off what `@app.call` returned, and it returned nothing"
+
+    after = run.events_of("app_log").find { |event| event["payload"]["message"].include?("after the raising") }
+    assert after, "the line was written, so it is somewhere in the file"
+    assert_nil after["request_id"], "the Executor's `ensure` cleared the context the raise blew past"
+  end
+
   # Puma's own C extension hands `request.request_method` over BINARY-tagged
   # (`rb_str_new` with no encoding, right beside header values the same extension does tag
   # UTF-8) even though every HTTP method is plain ASCII — a mislabel, not a blob. #33's scrub

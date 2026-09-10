@@ -173,11 +173,13 @@ closely — that reset landed in the middle of a live request instead of at its 
 lost its `request_id` halfway through, everything it emitted afterwards went to its *Run row*,
 and it never got a `request_finish` at all: `duration_ms` subtracted the cleared start, raised a
 `TypeError` inside the Initializer's own `guard`, and the finish was dropped in silence. The row
-then sat *in-flight* for the rest of the session — and [#27](https://github.com/vulle5/rails-log-reader/issues/27)
-exempts an in-flight row from eviction under the *Memory bound*, which made it immortal.
+then sat *in-flight* for the rest of the session — and
+[#27](https://github.com/vulle5/rails-log-reader/issues/27) exempts an in-flight row from
+eviction under the *Memory bound*, which made it immortal.
 
-Nothing on the wire moves. What changes is where the context lives, and one field a finish may
-now leave off.
+No event moves and no field changes meaning. What changes is where the context lives, and one
+field a finish may now leave off — which is a wire change, and carries a `WIRE_VERSION` bump
+with it.
 
 - **The request context moves to `ActiveSupport::IsolatedExecutionState`**, under a key of the
   Initializer's own. Not a new mechanism: a `CurrentAttributes` instance is *itself* kept there,
@@ -189,7 +191,16 @@ now leave off.
   over. The Initializer therefore registers its own reset on `executor.to_complete`: the same
   callback chain Rails clears `CurrentAttributes` from, on a middleware that sits well above
   the Initializer's own and completes from the response body's close — so after the
-  `request_finish` that closes the row, whether the request returned a response or raised. The *Trailing event* window this ADR described is unchanged, because the boundary is.
+  `request_finish` that closes the row, whether the request returned a response or raised.
+
+  The *Trailing event* window this ADR described is not narrowed, and the reason is
+  registration order. `to_complete` callbacks are `:before` kind, so they run in the order
+  they were registered; Rails registers its `CurrentAttributes.clear_all` from a railtie
+  initializer, which runs before `config/initializers/`. The Initializer's reset is therefore
+  *later* in the chain than the clear it replaces, and the window is as wide as it was or
+  wider — never shorter. What is new is that the boundary now depends on that order at all,
+  which is worth knowing before anything else registers a `to_complete` that reads a
+  `request_id`.
 - **`duration_ms` becomes optional on the wire.** The backstop under the above, and worth having
   on its own: a finish is a fact about a request that ended, and the one field it cannot measure
   must not be able to take the whole event down with it — a missing start is also what a
@@ -199,6 +210,17 @@ now leave off.
   distance in `at_mono` between the request's own first and last events, frozen, exactly as an
   *Interrupted* row reads — and shows nothing at all where it cannot prove even that, which is a
   *Partial request* whose finish carried no duration.
+- **`WIRE_VERSION` goes to 2**, which is the first bump this file has taken. The rule it is
+  bumped under is "when a field changes meaning", and `duration_ms` means what it always did
+  when it is there — so the bump is for the reading half rather than the writing one. A Reader
+  built before this amendment has `duration_ms: number` in its own copy of the contract and
+  renders straight through the absence; `ms(undefined)` throws inside the row, which is not a
+  blank cell but a dead table. That is exactly the case
+  [#29](https://github.com/vulle5/rails-log-reader/issues/29) drew `isWireVersionUnderstood`
+  for — "guessing through it is how a future field silently renders wrong" — and the bump is
+  what gives that check something to see. The cost is named rather than dodged: an older
+  Reader now refuses the whole Sidecar over one optional field, and refusing with #29's banner
+  is the better of the two failures.
 
 Moving the middleware below `ActionDispatch::Reloader` would have fixed the attribution loss in
 one line and was refused: it trades away exactly what the #14 amendment bought, the request row
