@@ -156,10 +156,20 @@ with `log/development.log`, which the Reader only ever leaves alone. See
 **Memory bound** — the Reader's bounded in-memory fold of *Activity table* rows: a ring
 buffer that evicts the oldest rows once exceeded, sized to match the load-on-open figure
 (the last ~5,000 events, read backward from EOF over the file offset the Reader already
-tracks) so there is one number, not two. Doubles as the attribution horizon: a finished
-request stops accepting *Trailing events* the instant its row is evicted. Reachable past
-load-on-open only through an explicit **load-earlier** control that continues the same
-backward scan — no infinite scroll, no silent fetch. A live request reset mid-Run by
+tracks) so there is one number, not two. Counted in **events** and evicted by whole
+**rows**, which is what makes it match the figure it is named by: the fold opens holding
+exactly the window that backward scan delivered, and one Run row carrying an all-day
+worker's output is bounded by the same number a table full of requests is — while a row
+that had half its queries taken away would be a count of 24 beside a timeline showing
+three, so a row leaves whole or it stays. The one row left standing is never evicted, and
+that is where this bound stops being one: a `rake` burst larger than the figure lands in a
+single Run row, and emptying the table is worse than exceeding the number. Doubles as the
+attribution horizon: a finished request stops accepting *Trailing events* the instant its
+row is evicted. Reachable past load-on-open only through an explicit **load-earlier**
+control that continues the same backward scan — no infinite scroll, no silent fetch — and
+what that control pulls in is exempt from eviction, because the bound is on what the Reader
+accumulates by itself and history the developer went and asked for that evaporated under
+the next request to arrive would make the control useless. A live request reset mid-Run by
 boot-time truncation gets no extra signal; it surfaces as an ordinary *Partial request*,
 which already reads honestly on its own. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.

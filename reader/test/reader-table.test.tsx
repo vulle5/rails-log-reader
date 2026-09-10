@@ -361,3 +361,57 @@ describe("the row-kind tabs", () => {
     expect(shown.every((row) => row.className.includes("activity-row-run"))).toBe(true)
   })
 })
+
+/**
+ * The *load-earlier* control. Reaching further back is a thing the developer asks for, so
+ * what is tested here is the asking: that there is a control to click when there is
+ * something to go and get, that clicking it says so once, and that it is gone rather than
+ * dead when the scan has reached the top of the Sidecar.
+ */
+describe("load-earlier", () => {
+  async function theReaderReaching(earlier: { available: boolean; loading: boolean }, onLoadEarlier = () => {}) {
+    const container = document.createElement("div")
+    document.body.append(container)
+    await act(async () => {
+      const root = createRoot(container)
+      mounted.push(root)
+      root.render(<Reader earlier={earlier} onLoadEarlier={onLoadEarlier} />)
+    })
+    return container
+  }
+
+  function control(container: HTMLElement) {
+    return container.querySelector(".load-earlier-button")
+  }
+
+  test("offers the control above the oldest row, where what it gets will appear", async () => {
+    const container = await theReaderReaching({ available: true, loading: false })
+
+    const activity = container.querySelector("[aria-label='Activity table'] .column-body")
+    expect(control(container)?.textContent).toBe("Load earlier")
+    expect(activity?.firstElementChild?.className).toBe("load-earlier")
+  })
+
+  test("asks once per click, and says the scan is running while it is", async () => {
+    let asked = 0
+    const container = await theReaderReaching({ available: true, loading: false }, () => {
+      asked += 1
+    })
+
+    await act(async () => {
+      control(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    })
+
+    expect(asked).toBe(1)
+
+    const running = await theReaderReaching({ available: true, loading: true })
+    expect(control(running)?.textContent).toBe("Loading earlier…")
+    expect((control(running) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  test("is absent, rather than dead, once the scan has reached the top of the Sidecar", async () => {
+    const container = await theReaderReaching({ available: false, loading: false })
+
+    expect(control(container)).toBeNull()
+  })
+})

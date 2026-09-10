@@ -4,7 +4,8 @@ import { watch } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { LOAD_ON_OPEN_EVENTS, MAX_LINE_BYTES, openSidecar, type Sidecar } from "../src/server/sidecar"
+import { MAX_LINE_BYTES, openSidecar, readEarlier, type Sidecar } from "../src/server/sidecar"
+import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { Envelope } from "../src/shared/wire"
 import {
   aLogDirectory,
@@ -30,9 +31,18 @@ afterEach(async () => {
 
 async function theReaderReads(logDirectory: string) {
   const delivered: Envelope[] = []
-  const sidecar = await openSidecar(logDirectory, (envelopes) => delivered.push(...envelopes))
+  // Where the window the Reader was given begins, as the Sidecar announces it: the offset a
+  // load-earlier continues the backward scan from, kept here exactly as the browser keeps it.
+  let historyStart = 0
+  const sidecar = await openSidecar(
+    logDirectory,
+    (envelopes) => delivered.push(...envelopes),
+    (from) => {
+      historyStart = from
+    },
+  )
   opened.push(sidecar)
-  return { delivered, caughtUp: () => sidecar.catchUp() }
+  return { delivered, caughtUp: () => sidecar.catchUp(), historyStart: () => historyStart }
 }
 
 /** Polls, because the watcher and the backstop are the two things under test here. */
@@ -200,5 +210,49 @@ describe("a line the Reader cannot use", () => {
     expect(delivered.payload.message.startsWith("xxxx")).toBe(true)
     expect(delivered.truncated).toEqual({ message: 300_000 })
     expect(Buffer.byteLength(JSON.stringify(delivered))).toBeLessThanOrEqual(MAX_LINE_BYTES)
+  })
+})
+
+describe("load-earlier", () => {
+  test("continues the same backward scan from where the loaded window begins", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const events = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) =>
+      run.start(`req-${index}`, "GET", `/posts/${index}`),
+    )
+    await appendToSidecar(log, ...events)
+    const reader = await theReaderReads(log)
+
+    const earlier = await readEarlier(log, reader.historyStart())
+
+    // The ten the load-on-open window left behind, and nothing the Reader already holds:
+    // one scan continued from an earlier point, rather than a second mechanism.
+    expect(earlier.envelopes.map((envelope) => envelope.request_id)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `req-${index}`),
+    )
+    expect(earlier.from).toBe(0)
+  })
+
+  test("has nothing left to give once the scan has reached the top of the file", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), run.start("req-1"))
+    const reader = await theReaderReads(log)
+
+    expect(reader.historyStart()).toBe(0)
+
+    const earlier = await readEarlier(log, reader.historyStart())
+
+    expect(earlier.envelopes).toEqual([])
+    expect(earlier.from).toBe(0)
+  })
+
+  test("asks the Sidecar that is there now, not the one the offset was taken from", async () => {
+    const log = await aLogDirectoryThatDoesNotExistYet()
+
+    const earlier = await readEarlier(log, 4_096)
+
+    expect(earlier.envelopes).toEqual([])
+    expect(earlier.from).toBe(0)
   })
 })

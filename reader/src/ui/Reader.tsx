@@ -8,6 +8,7 @@ import { ActivityTable } from "./ActivityTable"
 import { DetailColumn } from "./DetailColumn"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
+import { LoadEarlier, type EarlierState } from "./LoadEarlier"
 import { RowKindTabs, rowsOfKind, type RowKindFilter } from "./RowKindTabs"
 
 /**
@@ -41,6 +42,9 @@ type ReaderProps = {
   repairState?: RepairState
   onRepair?: () => void
   onDismissRepair?: () => void
+  /** Whether there is anything before the window the fold holds, and whether it is on its way. */
+  earlier?: EarlierState
+  onLoadEarlier?: () => void
 }
 
 export function Reader({
@@ -50,6 +54,8 @@ export function Reader({
   repairState = { phase: "idle" },
   onRepair = () => {},
   onDismissRepair = () => {},
+  earlier = { available: false, loading: false },
+  onLoadEarlier = () => {},
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -93,6 +99,7 @@ export function Reader({
           name="Activity table"
           controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
         >
+          <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
           <ActivityTable rows={rowsOfKind(rows, showingKind)} selected={selected} onSelect={setSelected} />
         </Column>
         <Column place="detail" name="Detail column">

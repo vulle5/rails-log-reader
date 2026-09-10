@@ -234,6 +234,38 @@ body {
   text-align: center;
 }
 
+/* The *load-earlier* control, above the oldest row the Reader holds, which is where what it
+   goes and gets will appear. Inside the scrollport rather than in the heading beside the
+   tabs: reaching further back is a thing you go looking for, and it is exactly where you
+   arrive when you scroll to the top of what you already have. */
+.load-earlier {
+  display: flex;
+  justify-content: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.load-earlier-button {
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.load-earlier-button:hover:not(:disabled) {
+  background: var(--selected);
+  color: var(--fg);
+}
+
+.load-earlier-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* The Activity table is dense and its rows are a fixed height, so a row that gains a
    status or a duration changes what it says without changing what it displaces — and the
    eye can hold a position in a table that is being appended to underneath it. */

@@ -4,7 +4,7 @@ import index from "../ui/index.html"
 import { initializerFileStatus, repairInitializerFile } from "./initializer-file"
 import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
-import { openSidecar, type Sidecar } from "./sidecar"
+import { openSidecar, readEarlier, type Sidecar } from "./sidecar"
 
 const detectedRailsRoot = findRailsRoot(process.cwd())
 
@@ -48,22 +48,33 @@ function envelopeStream() {
 
   const envelopes = new ReadableStream<string>({
     async start(controller) {
-      // An SSE comment, sent before anything is read. The response headers do not leave the
-      // server until the body produces its first bytes, and a Reader watching a Rails app
-      // that has not booted yet has nothing to say for as long as that takes — so without
-      // this the browser cannot tell "attached, and quiet" from "not attached".
-      controller.enqueue(": attached\n\n")
-
-      attached = await openSidecar(logDirectory, (batch) => {
+      function send(message: string) {
         try {
-          controller.enqueue(`data: ${JSON.stringify(batch)}\n\n`)
+          controller.enqueue(message)
         } catch {
           // The browser went away between one append and the next. Let go of the Sidecar
           // here rather than waiting for a `cancel` that an errored stream may never send:
           // a watcher and a 1 Hz timer left behind would follow the file forever.
           attached?.close()
         }
-      })
+      }
+
+      // An SSE comment, sent before anything is read. The response headers do not leave the
+      // server until the body produces its first bytes, and a Reader watching a Rails app
+      // that has not booted yet has nothing to say for as long as that takes — so without
+      // this the browser cannot tell "attached, and quiet" from "not attached".
+      controller.enqueue(": attached\n\n")
+
+      attached = await openSidecar(
+        logDirectory,
+        (batch) => send(`data: ${JSON.stringify(batch)}\n\n`),
+        // Where the window this attachment opened on begins — an event of its own, because
+        // it is not envelopes and because it is sent again whenever the window moves under a
+        // truncation. The browser holds it and hands it back to `GET /earlier`: the cursor
+        // belongs to the side that holds the model, so a reconnection cannot forget how far
+        // back the developer had asked to see.
+        (from) => send(`event: window\ndata: ${JSON.stringify({ from })}\n\n`),
+      )
     },
     cancel() {
       attached?.close()
@@ -77,6 +88,22 @@ function envelopeStream() {
       connection: "keep-alive",
     },
   })
+}
+
+/**
+ * The *load-earlier* control: the block of envelopes immediately before the window the
+ * browser holds, read by continuing the same backward scan ADR-0003's load-on-open is. A
+ * `GET` because it only ever reads, and stateless because the offset comes in with the
+ * request — the server is the Sidecar and nothing else, and holds no window of its own.
+ */
+async function earlier(request: Request) {
+  const from = Number(new URL(request.url).searchParams.get("from"))
+
+  if (!Number.isSafeInteger(from) || from < 0) {
+    return Response.json({ error: "from must be a byte offset into the Sidecar" }, { status: 400 })
+  }
+
+  return Response.json(await readEarlier(logDirectory, from))
 }
 
 /**
@@ -125,6 +152,7 @@ function serveOrSaySo(port: number) {
       port,
       routes: {
         "/events": envelopeStream,
+        "/earlier": { GET: earlier },
         "/initializer-status": { GET: initializerStatus },
         "/initializer-repair": { POST: repairInitializer },
         "/*": index,

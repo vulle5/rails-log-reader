@@ -81,8 +81,13 @@ async function reachReader(reader: Bun.Subprocess) {
   return await Bun.fetch(await readerUrl(reader))
 }
 
-/** The first SSE message the Reader sends, decoded back into the envelopes it carries. */
-async function firstEnvelopes(response: Response) {
+/**
+ * The first SSE message of a given kind, decoded. The stream carries two: the envelopes
+ * themselves, which have no `event:` line, and `window`, which says where the window the
+ * Reader attached on begins — so a reader of this stream has to tell them apart rather than
+ * take the first `data:` it sees.
+ */
+async function firstMessage<T>(response: Response, kind: "envelopes" | "window") {
   const stream = response.body?.getReader()
   if (stream === undefined) throw new Error("the Reader answered /events with no body")
 
@@ -91,12 +96,18 @@ async function firstEnvelopes(response: Response) {
 
   try {
     while (true) {
-      const data = received.indexOf("data: ")
-      const end = data === -1 ? -1 : received.indexOf("\n", data)
-      if (end !== -1) return JSON.parse(received.slice(data + "data: ".length, end)) as Envelope[]
+      const messages = received.split("\n\n")
+      // The last is whatever has arrived of the next message, which may be nothing at all.
+      received = messages.pop() ?? ""
+
+      for (const message of messages) {
+        const named = /^event: (\S+)$/m.exec(message)?.[1] ?? "envelopes"
+        const data = /^data: (.*)$/m.exec(message)?.[1]
+        if (data !== undefined && named === kind) return JSON.parse(data) as T
+      }
 
       const { value, done } = await stream.read()
-      if (done) throw new Error("the stream ended before an envelope arrived")
+      if (done) throw new Error(`the stream ended before a ${kind} message arrived`)
       received += decoder.decode(value, { stream: true })
     }
   } finally {
@@ -145,10 +156,44 @@ describe("starting the Reader", () => {
     await appendToSidecar(join(root, "log"), rails.header(), rails.start("req-1", "GET", "/posts/12"))
 
     expect(response.headers.get("content-type")).toContain("text/event-stream")
-    expect((await firstEnvelopes(response)).map((envelope) => envelope.type)).toEqual([
+    expect((await firstMessage<Envelope[]>(response, "envelopes")).map((envelope) => envelope.type)).toEqual([
       "run_header",
       "request_start",
     ])
+  })
+
+  test("tells the browser where the window it attached on begins, so load-earlier can go on from there", async () => {
+    const root = await railsRoot()
+    const rails = aRun("srv-1")
+    await appendToSidecar(join(root, "log"), rails.header(), rails.start("req-1"))
+    const url = await readerUrl(run(root))
+
+    const response = await Bun.fetch(new URL("events", url))
+
+    // The whole file fits inside the load-on-open window, so the window opens at its top —
+    // and a cursor of 0 is the Reader saying there is nothing earlier to ask it for.
+    expect(await firstMessage<{ from: number }>(response, "window")).toEqual({ from: 0 })
+  })
+
+  test("GET /earlier answers the load-earlier control from wherever it is asked to scan", async () => {
+    const root = await railsRoot()
+    const rails = aRun("srv-1")
+    await appendToSidecar(join(root, "log"), rails.header(), rails.start("req-1"))
+    const url = await readerUrl(run(root))
+
+    const answered = await Bun.fetch(new URL("earlier?from=0", url))
+
+    // Asked from the top of the file, which is where this one's window already begins:
+    // nothing earlier, and the same offset back, rather than the file over again.
+    expect(await answered.json()).toEqual({ envelopes: [], from: 0 })
+  })
+
+  test("refuses a load-earlier cursor that is not an offset into the Sidecar", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    const answered = await Bun.fetch(new URL("earlier?from=halfway", url))
+
+    expect(answered.status).toBe(400)
   })
 })
 
