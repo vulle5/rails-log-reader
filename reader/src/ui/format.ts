@@ -88,9 +88,11 @@ export function methodClassName(method: string | null) {
 }
 
 /**
- * Grouped by class and not by exact code: a 404 and a 422 read the same colour. Only 4xx and
- * 5xx are ever coloured — 1xx, 2xx and 3xx render unchanged, so this returns `""` for them
- * rather than a class the stylesheet would have to define as a no-op.
+ * Grouped by class and not by exact code: a 404 and a 422 read the same colour, and so do a
+ * 500 and a 503 — `.status-5xx` shares `--error` with `.no-status` in the stylesheet rather
+ * than getting a token of its own, since a 5xx is the same failure. Only 4xx and 5xx are ever
+ * coloured — 1xx, 2xx and 3xx render unchanged, so this returns `""` for them rather than a
+ * class the stylesheet would have to define as a no-op.
  */
 export function statusClassName(status: number) {
   if (status >= 400 && status < 500) return "status-4xx"

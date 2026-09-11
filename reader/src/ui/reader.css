@@ -33,12 +33,12 @@
   /* #50: HTTP methods and status classes, coloured independently of each other and of
      `--warn`/`--error` above, so a 404 is never visually identical to a logged `.error` call
      and DELETE is never mistaken for one either. GET keeps `--accent`, above, and needs no
-     token of its own. */
+     token of its own — neither does 5xx, which reads as the failure it is in `--error`, the
+     same colour `.no-status` already uses for a request that raised before it had one. */
   --method-post: #1a7f37;
   --method-put-patch: #0b7285;
   --method-delete: #8a3ffc;
   --status-4xx: #bd3900;
-  --status-5xx: #99154d;
 
   /* A search match: a background and nothing else, so the text it lights keeps whatever
      colour it was already saying something with — a keyword, a warning, a Rails line. */
@@ -77,7 +77,6 @@
   --method-put-patch: #56d4dd;
   --method-delete: #d7aeff;
   --status-4xx: #ff9757;
-  --status-5xx: #ff85b3;
 
   --match: rgb(187 128 9 / 55%);
 
@@ -623,21 +622,20 @@ mark.search-match {
 }
 
 /* A finished request that never had a status: it raised before there was a response to read
-   one off (#47). In the error colour, unlike the dot above, because this one did fail. */
-.no-status {
+   one off (#47). In the error colour, unlike the dot above, because this one did fail — the
+   same reason `.status-5xx` below shares it rather than getting a colour of its own. */
+.no-status,
+.status-5xx {
   color: var(--error);
 }
 
-/* #50: 4xx and 5xx grouped by class, not by exact code — a 404 and a 422 are one colour, a
-   500 and a 503 another — and dedicated tokens rather than `--warn`/`--error`, so a status
-   is never visually identical to a logged `.warn` or `.error` call. 1xx, 2xx and 3xx carry
-   no class at all and stay exactly as they render today. */
+/* #50: 4xx grouped by class, not by exact code — a 404 and a 422 are one colour — and a
+   dedicated token rather than `--warn`/`--error`, so a 4xx is never visually identical to a
+   logged `.warn` or `.error` call. 5xx has no token of its own: it is `--error`, above, one
+   fewer colour for the same failure `.no-status` already means. 1xx, 2xx and 3xx carry no
+   class at all and stay exactly as they render today. */
 .status-4xx {
   color: var(--status-4xx);
-}
-
-.status-5xx {
-  color: var(--status-5xx);
 }
 
 /* The method colours (`.method-*`) live beside `.detail-method` below, rather than here:
