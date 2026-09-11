@@ -37,7 +37,7 @@
   --method-post: #1a7f37;
   --method-put-patch: #0b7285;
   --method-delete: #8a3ffc;
-  --status-4xx: #bc4c00;
+  --status-4xx: #bd3900;
   --status-5xx: #99154d;
 
   /* A search match: a background and nothing else, so the text it lights keeps whatever
@@ -76,7 +76,7 @@
   --method-post: #3fb950;
   --method-put-patch: #56d4dd;
   --method-delete: #d7aeff;
-  --status-4xx: #ffa657;
+  --status-4xx: #ff9757;
   --status-5xx: #ff85b3;
 
   --match: rgb(187 128 9 / 55%);
