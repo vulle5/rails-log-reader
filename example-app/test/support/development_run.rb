@@ -71,7 +71,9 @@ class DevelopmentRun
         output, status = run(root, env)
 
         Result.new(
-          root:, output:, status:,
+          # Resolved, because Rails.root is: on macOS the temp dir sits under /var, which
+          # is a symlink to /private/var, and the Run only ever knows itself by the latter.
+          root: File.realpath(root), output:, status:,
           sidecar_bytes: read(File.join(root, SIDECAR)),
           development_log: read(File.join(root, "log/development.log")).to_s
         )
