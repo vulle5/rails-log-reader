@@ -1,6 +1,6 @@
 import type { ActivityRow } from "../shared/activity"
 import { useClimbingElapsed } from "./elapsed"
-import { clock, controllerAction, count, elapsed, ms, runDescription } from "./format"
+import { clock, controllerAction, count, elapsed, methodClassName, ms, runDescription, statusClassName } from "./format"
 import { Highlight } from "./search"
 
 /**
@@ -136,7 +136,7 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
       <td className="cell-status">
         <Status row={row} />
       </td>
-      <td className="cell-method">
+      <td className={`cell-method ${methodClassName(row.method)}`}>
         <Highlight text={row.method ?? ""} />
       </td>
       <td className="cell-path" title={row.path ?? undefined}>
@@ -223,7 +223,13 @@ function rowClassName(classes: readonly string[], selected: boolean, pinned: boo
  * with nothing to say, on the row that most needs to read as an error.
  */
 function Status({ row }: { row: Request }) {
-  if (row.status !== null) return <Highlight text={String(row.status)} />
+  if (row.status !== null) {
+    const className = statusClassName(row.status)
+    const status = <Highlight text={String(row.status)} />
+    // 1xx, 2xx and 3xx get no class and so no span: unchanged, plain text, exactly as before
+    // #50 gave 4xx and 5xx colours of their own.
+    return className === "" ? status : <span className={className}>{status}</span>
+  }
   if (row.state !== "finished") return <StateDot state={row.state} />
 
   return (

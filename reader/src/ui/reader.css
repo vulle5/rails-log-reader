@@ -30,6 +30,16 @@
   --warn: #9a6700;
   --error: #cf222e;
 
+  /* #50: HTTP methods and status classes, coloured independently of each other and of
+     `--warn`/`--error` above, so a 404 is never visually identical to a logged `.error` call
+     and DELETE is never mistaken for one either. GET keeps `--accent`, above, and needs no
+     token of its own — neither does 5xx, which reads as the failure it is in `--error`, the
+     same colour `.no-status` already uses for a request that raised before it had one. */
+  --method-post: #1a7f37;
+  --method-put-patch: #0b7285;
+  --method-delete: #8a3ffc;
+  --status-4xx: #bd3900;
+
   /* A search match: a background and nothing else, so the text it lights keeps whatever
      colour it was already saying something with — a keyword, a warning, a Rails line. */
   --match: #ffe58f;
@@ -62,6 +72,11 @@
 
   --warn: #e3b341;
   --error: #ff7b72;
+
+  --method-post: #3fb950;
+  --method-put-patch: #56d4dd;
+  --method-delete: #d7aeff;
+  --status-4xx: #ff9757;
 
   --match: rgb(187 128 9 / 55%);
 
@@ -494,7 +509,6 @@ mark.search-match {
 
 .cell-method {
   font-weight: 700;
-  color: var(--accent);
 }
 
 /* The path is the column given the slack, and — with Controller#action — the one that may
@@ -608,10 +622,24 @@ mark.search-match {
 }
 
 /* A finished request that never had a status: it raised before there was a response to read
-   one off (#47). In the error colour, unlike the dot above, because this one did fail. */
-.no-status {
+   one off (#47). In the error colour, unlike the dot above, because this one did fail — the
+   same reason `.status-5xx` below shares it rather than getting a colour of its own. */
+.no-status,
+.status-5xx {
   color: var(--error);
 }
+
+/* #50: 4xx grouped by class, not by exact code — a 404 and a 422 are one colour — and a
+   dedicated token rather than `--warn`/`--error`, so a 4xx is never visually identical to a
+   logged `.warn` or `.error` call. 5xx has no token of its own: it is `--error`, above, one
+   fewer colour for the same failure `.no-status` already means. 1xx, 2xx and 3xx carry no
+   class at all and stay exactly as they render today. */
+.status-4xx {
+  color: var(--status-4xx);
+}
+
+/* The method colours (`.method-*`) live beside `.detail-method` below, rather than here:
+   they override that rule's own default and have to come after it in the cascade to do so. */
 
 /* The climbing elapsed, in the column a finished request shows its total in: the same
    question, asked of a request that has not answered it yet. */
@@ -950,6 +978,34 @@ mark.search-match {
   margin-left: auto;
   color: var(--fg-muted);
   white-space: nowrap;
+}
+
+/* #50: the same lookup as `.cell-method` above, so a verb reads one colour in the Activity
+   table and the same colour here — `format.ts`'s `methodClassName` is what makes it one
+   function rather than two copies of this list. Declared after `.detail-method`, above,
+   because these override its default `--accent` and — tied on specificity — only later rules
+   in the file win. `.method-get` restates that default explicitly rather than leaving GET to
+   fall through to it, so nothing here depends on staying below `.detail-method` by accident.
+   A *Run row*'s kind (`server`, `rake`, …) carries none of these classes and keeps
+   `.detail-method`'s own colour untouched — it is not a method to begin with. */
+.method-get {
+  color: var(--accent);
+}
+
+.method-post {
+  color: var(--method-post);
+}
+
+.method-put-patch {
+  color: var(--method-put-patch);
+}
+
+.method-delete {
+  color: var(--method-delete);
+}
+
+.method-other {
+  color: var(--fg);
 }
 
 .timeline {

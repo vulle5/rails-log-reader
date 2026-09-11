@@ -276,6 +276,85 @@ describe("what a row says it is", () => {
 })
 
 /**
+ * #50: method and status coloured independently, from evidence in the row alone — never a
+ * threshold, and never one colour standing in for the other's meaning.
+ */
+describe("colouring methods and statuses", () => {
+  test("gives GET, POST, PUT and PATCH and DELETE each their own class, PUT and PATCH sharing one", async () => {
+    const run = aRun("srv-1")
+    const table = await theActivityTable(
+      run.start("req-1", "GET", "/posts"),
+      run.finish("req-1"),
+      run.start("req-2", "POST", "/posts"),
+      run.finish("req-2"),
+      run.start("req-3", "PUT", "/posts/1"),
+      run.finish("req-3"),
+      run.start("req-4", "PATCH", "/posts/1"),
+      run.finish("req-4"),
+      run.start("req-5", "DELETE", "/posts/1"),
+      run.finish("req-5"),
+    )
+
+    const methodClasses = [...table.querySelectorAll("tbody tr")].map(
+      (row) => row.querySelector(".cell-method")?.className,
+    )
+
+    expect(methodClasses).toEqual([
+      "cell-method method-get",
+      "cell-method method-post",
+      "cell-method method-put-patch",
+      "cell-method method-put-patch",
+      "cell-method method-delete",
+    ])
+  })
+
+  test("renders HEAD, OPTIONS and a verb it does not recognise as plain neutral text, never GET's colour", async () => {
+    const run = aRun("srv-1")
+    const table = await theActivityTable(
+      run.start("req-1", "HEAD", "/posts"),
+      run.finish("req-1"),
+      run.start("req-2", "OPTIONS", "/posts"),
+      run.finish("req-2"),
+      run.start("req-3", "TRACE", "/posts"),
+      run.finish("req-3"),
+    )
+
+    for (const row of table.querySelectorAll("tbody tr")) {
+      expect(row.querySelector(".cell-method")?.className).toBe("cell-method method-other")
+    }
+  })
+
+  test("colours 4xx and 5xx statuses by class, and leaves 1xx, 2xx and 3xx exactly as they render today", async () => {
+    const run = aRun("srv-1")
+    const table = await theActivityTable(
+      run.start("req-1", "GET", "/a"),
+      run.finish("req-1", { status: 200 }),
+      run.start("req-2", "GET", "/b"),
+      run.finish("req-2", { status: 301 }),
+      run.start("req-3", "GET", "/c"),
+      run.finish("req-3", { status: 404 }),
+      run.start("req-4", "GET", "/d"),
+      run.finish("req-4", { status: 422 }),
+      run.start("req-5", "GET", "/e"),
+      run.finish("req-5", { status: 500 }),
+      run.start("req-6", "GET", "/f"),
+      run.finish("req-6", { status: 503 }),
+    )
+
+    const statusCell = (index: number) => table.querySelectorAll("tbody tr")[index]?.querySelector(".cell-status")
+
+    // 200 and 301 render exactly as before: `Highlight` alone, no wrapping span at all.
+    expect(statusCell(0)?.querySelector("span")).toBeNull()
+    expect(statusCell(1)?.querySelector("span")).toBeNull()
+
+    expect(statusCell(2)?.querySelector(".status-4xx")?.textContent).toBe("404")
+    expect(statusCell(3)?.querySelector(".status-4xx")?.textContent).toBe("422")
+    expect(statusCell(4)?.querySelector(".status-5xx")?.textContent).toBe("500")
+    expect(statusCell(5)?.querySelector(".status-5xx")?.textContent).toBe("503")
+  })
+})
+
+/**
  * *Run rows* and the *Run marker*: one row per Run holding what it emitted unattributed, and
  * a boundary drawn only where a Run that serves requests started.
  */

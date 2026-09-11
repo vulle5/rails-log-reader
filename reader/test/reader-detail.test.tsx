@@ -131,6 +131,21 @@ describe("selecting a row", () => {
     expect(detail(container).querySelector(".detail-heading")?.textContent).toContain("/posts/12")
     expect(detail(container).querySelector(".detail-heading")?.textContent).toContain("Posts#show")
   })
+
+  // #50: one lookup, so the Detail heading's method can never drift from the Activity
+  // table's — a DELETE reads the same colour class wherever it renders.
+  test("colours its method the same class the Activity table's method cell carries", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "DELETE", "/posts/12"),
+      run.route("req-1", "PostsController", "destroy"),
+    )
+
+    const row = await select(container, "/posts/12")
+
+    expect(row.querySelector(".cell-method")?.className).toBe("cell-method method-delete")
+    expect(detail(container).querySelector(".detail-method")?.className).toBe("detail-method method-delete")
+  })
 })
 
 describe("the timeline", () => {
