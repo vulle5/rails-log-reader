@@ -237,6 +237,14 @@ sits above `ShowExceptions` and `DebugExceptions`, and its `Started GET` line is
 `ActionDispatch::RemoteIp`'s lazy check runs — so a request carrying both `X-Forwarded-For` and
 a disagreeing `Client-IP` raises there on default development settings, before routing.
 
+This corrects the #14 amendment above, which named `IpSpoofAttackError` as the example of a
+raise in the #55–#60 band with "no finish possible", resolving as **Interrupted**. It is not
+in that band. `RemoteIp` only installs a lazy `GetIp`, and the check runs the first time
+something asks for `request.remote_ip`, which is Logger's own `Started GET` line, after Logger
+has started the handle whose finish closes the row. So that request does finish, from Logger's
+`rescue Exception`. The hole the #14 amendment accepted still exists for a middleware in the
+band that raises eagerly or answers without calling `@app`. It just no longer has this example.
+
 - **`status` stays `null`.** Puma answers the client with a 500 of its own, but the Initializer
   never observes it, and another server may answer differently. A status it did not see would be
   one it made up — the same reasoning that left `duration_ms` absent rather than zero under #45.

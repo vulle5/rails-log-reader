@@ -191,10 +191,11 @@ class RequestTest < ActiveSupport::TestCase
   # which is the whole reason the reset is registered on the executor rather than written as
   # an `ensure` inside the Middleware.
   #
-  # Reaching the path takes `show_exceptions: :none`, because `ActionDispatch::DebugExceptions`
-  # otherwise renders the exception and hands the middleware above it an ordinary 500 to
-  # return — a raise that never leaves the stack, which is why development normally never
-  # sees this. What is left when it does leave is a request that ended without a response.
+  # Reaching the path from a controller takes `show_exceptions: :none`, because
+  # `ActionDispatch::DebugExceptions` otherwise renders the exception and hands the middleware
+  # above it an ordinary 500 to return — a raise that never leaves the stack. A raise from
+  # anything above DebugExceptions needs no override at all, which is the next test's (#47).
+  # What is left either way is a request that ended without a response.
   test "a request whose exception escapes the whole stack still finishes, and still clears its context" do
     run = DevelopmentRun.boot(script: <<~RUBY)
       Rails.application.env_config["action_dispatch.show_exceptions"] = :none
