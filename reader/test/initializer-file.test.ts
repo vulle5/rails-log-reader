@@ -37,7 +37,7 @@ function initializerPath(root: string) {
 
 /** What the Reader answers, with the Marker file absent unless a test says otherwise. */
 function answer(said: { installed: boolean; current: boolean; enabled?: boolean }) {
-  return { enabled: false, master: MASTER_PATH, ...said }
+  return { enabled: false, masterPath: MASTER_PATH, ...said }
 }
 
 describe("initializerFileStatus", () => {

@@ -70,14 +70,14 @@ function command(container: HTMLElement) {
 
 describe("an empty Reader says why (#28)", () => {
   test("names a missing Initializer, and the command that copies it in", async () => {
-    const container = await theReader({ kind: "not_installed", master: MASTER })
+    const container = await theReader({ kind: "not_installed", masterPath: MASTER })
 
     expect(theEmptyScreen(container).textContent).toContain("not installed")
     expect(command(container)).toBe(`cp ${MASTER} config/initializers/rails_log_reader.rb`)
   })
 
   test("quotes a master copy whose path the shell would otherwise split", async () => {
-    const container = await theReader({ kind: "not_installed", master: "/Users/dev/My Code/reader/rails/rails_log_reader.rb" })
+    const container = await theReader({ kind: "not_installed", masterPath: "/Users/dev/My Code/reader/rails/rails_log_reader.rb" })
 
     expect(command(container)).toBe(
       "cp '/Users/dev/My Code/reader/rails/rails_log_reader.rb' config/initializers/rails_log_reader.rb",
@@ -100,7 +100,7 @@ describe("an empty Reader says why (#28)", () => {
 
   test("says three different things for the three causes", async () => {
     const said = new Set<string | null>()
-    for (const state of [{ kind: "not_installed", master: MASTER }, { kind: "not_enabled" }, { kind: "idle" }] as const) {
+    for (const state of [{ kind: "not_installed", masterPath: MASTER }, { kind: "not_enabled" }, { kind: "idle" }] as const) {
       const container = await theReader(state)
       said.add(theEmptyScreen(container).querySelector("h3")?.textContent ?? null)
     }

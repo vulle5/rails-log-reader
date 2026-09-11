@@ -12,9 +12,9 @@ import { isWireVersionUnderstood } from "../src/shared/wire-compatibility"
 
 const MASTER = "/home/dev/rails-log-reader/reader/rails/rails_log_reader.rb"
 
-const CURRENT: InitializerFileStatus = { installed: true, current: true, enabled: true, master: MASTER }
-const STALE: InitializerFileStatus = { installed: true, current: false, enabled: true, master: MASTER }
-const NOT_INSTALLED: InitializerFileStatus = { installed: false, current: false, enabled: false, master: MASTER }
+const CURRENT: InitializerFileStatus = { installed: true, current: true, enabled: true, masterPath: MASTER }
+const STALE: InitializerFileStatus = { installed: true, current: false, enabled: true, masterPath: MASTER }
+const NOT_INSTALLED: InitializerFileStatus = { installed: false, current: false, enabled: false, masterPath: MASTER }
 
 describe("detectMismatch", () => {
   test("says nothing is wrong once the file matches the master and no process disagrees", () => {
@@ -55,7 +55,7 @@ describe("detectEmptyState (#28)", () => {
   const NOT_ENABLED: InitializerFileStatus = { ...CURRENT, enabled: false }
 
   test("names *not installed* when there is no Initializer, and carries the copy to install", () => {
-    expect(detectEmptyState(NOT_INSTALLED, true)).toEqual({ kind: "not_installed", master: MASTER })
+    expect(detectEmptyState(NOT_INSTALLED, true)).toEqual({ kind: "not_installed", masterPath: MASTER })
   })
 
   test("names *not installed* even with a Marker file already waiting for it", () => {
@@ -63,7 +63,7 @@ describe("detectEmptyState (#28)", () => {
     // missing is still the one to name.
     expect(detectEmptyState({ ...NOT_INSTALLED, enabled: true }, true)).toEqual({
       kind: "not_installed",
-      master: MASTER,
+      masterPath: MASTER,
     })
   })
 

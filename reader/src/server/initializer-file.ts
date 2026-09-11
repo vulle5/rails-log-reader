@@ -41,10 +41,10 @@ export async function initializerFileStatus(railsRoot: string): Promise<Initiali
     if (failure.code !== "ENOENT") throw failure
     return null
   })
-  if (workCopy === null) return { installed: false, current: false, enabled, master: MASTER_PATH }
+  if (workCopy === null) return { installed: false, current: false, enabled, masterPath: MASTER_PATH }
 
   const master = await readFile(MASTER_PATH)
-  return { installed: true, current: workCopy.equals(master), enabled, master: MASTER_PATH }
+  return { installed: true, current: workCopy.equals(master), enabled, masterPath: MASTER_PATH }
 }
 
 /**

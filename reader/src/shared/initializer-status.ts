@@ -29,7 +29,7 @@ export type InitializerFileStatus = {
    */
   enabled: boolean
   /** Where the Reader's own master copy is, absolute — what *not installed*'s command copies. */
-  master: string
+  masterPath: string
 }
 
 /**
@@ -53,6 +53,16 @@ export type Mismatch = { kind: "none" } | { kind: "file_stale" } | { kind: "proc
  * Initializer still loaded after the new one was copied in" (#29's own example), which
  * `file_stale` alone could never surface: the file already reads clean.
  */
+export function detectMismatch(
+  file: InitializerFileStatus | null,
+  liveWireVersion: number | null,
+): Mismatch {
+  if (file === null || !file.installed) return { kind: "none" }
+  if (!file.current) return { kind: "file_stale" }
+  if (liveWireVersion !== null && liveWireVersion < WIRE_VERSION) return { kind: "process_stale" }
+  return { kind: "none" }
+}
+
 /**
  * Why the Reader has nothing to show, which #28 asks it to say rather than leave the
  * developer guessing whether the tool is broken. Three causes, each one command from the
@@ -67,7 +77,10 @@ export type Mismatch = { kind: "none" } | { kind: "file_stale" } | { kind: "proc
  *   of one that has not booted at all; any process that boots with it writes a `run_header`
  *   at once, which is a row, which ends this state.
  */
-export type EmptyState = { kind: "not_installed"; master: string } | { kind: "not_enabled" } | { kind: "idle" }
+export type EmptyState =
+  | { kind: "not_installed"; masterPath: string }
+  | { kind: "not_enabled" }
+  | { kind: "idle" }
 
 /**
  * `null` until both halves have answered: the files, and the Sidecar's load-on-open history.
@@ -77,17 +90,7 @@ export type EmptyState = { kind: "not_installed"; master: string } | { kind: "no
  */
 export function detectEmptyState(file: InitializerFileStatus | null, historyLoaded: boolean): EmptyState | null {
   if (file === null || !historyLoaded) return null
-  if (!file.installed) return { kind: "not_installed", master: file.master }
+  if (!file.installed) return { kind: "not_installed", masterPath: file.masterPath }
   if (!file.enabled) return { kind: "not_enabled" }
   return { kind: "idle" }
-}
-
-export function detectMismatch(
-  file: InitializerFileStatus | null,
-  liveWireVersion: number | null,
-): Mismatch {
-  if (file === null || !file.installed) return { kind: "none" }
-  if (!file.current) return { kind: "file_stale" }
-  if (liveWireVersion !== null && liveWireVersion < WIRE_VERSION) return { kind: "process_stale" }
-  return { kind: "none" }
 }

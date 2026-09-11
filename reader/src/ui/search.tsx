@@ -20,14 +20,13 @@ import { createContext, useContext, useMemo, type ReactNode } from "react"
 export type Match = readonly [number, number]
 
 export type Search = {
-  term: string
   /** Every occurrence of the term in `text`, left to right, never overlapping. */
   find: (text: string) => readonly Match[]
 }
 
 const NOTHING: readonly Match[] = []
 
-const NOT_SEARCHING: Search = { term: "", find: () => NOTHING }
+const NOT_SEARCHING: Search = { find: () => NOTHING }
 
 export const SearchContext = createContext<Search>(NOT_SEARCHING)
 
@@ -44,7 +43,6 @@ export function useSearch(term: string): Search {
 
     const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
     return {
-      term,
       find(text) {
         const found: Match[] = []
         for (const match of text.matchAll(pattern)) found.push([match.index, match.index + match[0].length])

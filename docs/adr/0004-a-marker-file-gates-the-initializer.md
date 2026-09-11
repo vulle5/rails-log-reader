@@ -120,7 +120,9 @@ unchanged from ADR-0003: rescue and disable silently.
 - Standing constraint 4 in `CONTEXT.md` is rewritten: "Rails 7 support is welcome, not
   required" is not something a user can read. The range is now stated.
 - The Reader gains an empty state with three distinguishable causes (not installed, not
-  enabled, idle). What it renders is undecided and remains fog.
+  enabled, idle). _Settled by [#28](https://github.com/vulle5/rails-log-reader/issues/28):
+  each names the one command that resolves it, and the Marker file is only ever checked for
+  presence — see *Empty state* in `CONTEXT.md`._
 - **`test`-environment logging is out of scope, deferred rather than rejected.** It is
   wanted at work, and it is not one line of `if Rails.env`: parallel test workers,
   transactional rollback and thousands of sub-millisecond requests all press on what a *Run*

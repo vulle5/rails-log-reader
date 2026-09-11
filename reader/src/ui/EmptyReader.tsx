@@ -35,7 +35,7 @@ function said(state: EmptyState) {
         why:
           "This app has no config/initializers/rails_log_reader.rb, so nothing is writing events for the " +
           "Reader to show. Copy this Reader's own in:",
-        command: `cp ${shellWord(state.master)} config/initializers/rails_log_reader.rb`,
+        command: `cp ${shellWord(state.masterPath)} config/initializers/rails_log_reader.rb`,
       }
     case "not_enabled":
       return {
@@ -48,9 +48,14 @@ function said(state: EmptyState) {
     case "idle":
       return {
         heading: "Enabled, and nothing has happened yet",
+        // `restart` and not `server`: the process most likely to be here is one already running,
+        // under puma-dev or `rails s`, that booted before the Marker file existed — and both
+        // restart on `tmp/restart.txt`. The sentence says what to do when nothing is running,
+        // because this state cannot tell the two apart.
         why:
           "Nothing has been written to log/rails_log_reader.jsonl. Rails reads log/rails_log_reader.enabled " +
-          "once, when it boots, so a process started before it existed is not writing — restart it:",
+          "once, when it boots, so a process started before it existed is not writing — restart it, " +
+          "or start one if none is running:",
         command: "bin/rails restart",
       }
   }

@@ -247,7 +247,7 @@ const MASTER_INITIALIZER = join(import.meta.dir, "..", "rails", "rails_log_reade
 
 /** What `GET /initializer-status` answers, with the Marker file absent unless a test says otherwise. */
 function answer(said: { installed: boolean; current: boolean; enabled?: boolean }) {
-  return { enabled: false, master: MASTER_INITIALIZER, ...said }
+  return { enabled: false, masterPath: MASTER_INITIALIZER, ...said }
 }
 
 describe("the Initializer's version-mismatch surface (#29)", () => {
