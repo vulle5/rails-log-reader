@@ -227,3 +227,36 @@ one line and was refused: it trades away exactly what the #14 amendment bought, 
 beginning on the same line of code as attribution, and reopens the band of middleware where a
 request has a `request_id` and no row. The storage was the thing that was wrong, not the
 position.
+
+### From #47 (a raise above `ShowExceptions`): no response is an explicit absence
+
+A request whose exception escapes the middleware stack still gets its `request_finish`, with
+`status: null`, because the Initializer reads the status off what `@app.call` returned and on
+that path nothing was returned. That is not the rare path it looks like: `Rails::Rack::Logger`
+sits above `ShowExceptions` and `DebugExceptions`, and its `Started GET` line is where
+`ActionDispatch::RemoteIp`'s lazy check runs — so a request carrying both `X-Forwarded-For` and
+a disagreeing `Client-IP` raises there on default development settings, before routing.
+
+This corrects the #14 amendment above, which named `IpSpoofAttackError` as the example of a
+raise in the #55–#60 band with "no finish possible", resolving as **Interrupted**. It is not
+in that band. `RemoteIp` only installs a lazy `GetIp`, and the check runs the first time
+something asks for `request.remote_ip`, which is Logger's own `Started GET` line, after Logger
+has started the handle whose finish closes the row. So that request does finish, from Logger's
+`rescue Exception`. The hole the #14 amendment accepted still exists for a middleware in the
+band that raises eagerly or answers without calling `@app`. It just no longer has this example.
+
+- **`status` stays `null`.** Puma answers the client with a 500 of its own, but the Initializer
+  never observes it, and another server may answer differently. A status it did not see would be
+  one it made up — the same reasoning that left `duration_ms` absent rather than zero under #45.
+  The field was already `number | null` in the contract, so nothing changes on the wire and
+  `WIRE_VERSION` stays at 2.
+- **The exception reaches the finish, read from `$!`.** `process_action.action_controller` is
+  the only hand-off the Initializer had for an exception, and a request that never reached a
+  controller never emits it. The Middleware cannot hand one over either: Logger emits the finish
+  from its own `rescue Exception` and only then re-raises, so the raise reaches the Middleware
+  after the finish is already written. Inside that rescue, `$!` is the exception. It is read only
+  when there is no status, because a request that returned is not to be handed an exception its
+  `BodyProxy` close merely happened to run beside.
+- **The Reader shows `none` in the error colour** where a finished request has no status, so
+  the cell cannot read as one that simply has nothing to say. The row's exception is in the
+  *Detail column*, the same as any other.

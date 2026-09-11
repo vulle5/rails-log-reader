@@ -103,9 +103,11 @@ export type RequestFinishPayload = {
   /**
    * `null` where the request raised its way out of the whole middleware stack: the
    * Initializer's own middleware reads the status off what `@app.call` returned, and on that
-   * path it returned nothing. Rare — in development `DebugExceptions` renders an exception
-   * and hands back an ordinary 500 — but reachable from anything raising above it, and the
-   * finish is emitted either way.
+   * path it returned nothing. An explicit absence, decided in #47 — the client gets its
+   * server's 500, but the Initializer never sees it, so it names no status it did not observe.
+   * Not rare: `Rails::Rack::Logger` sits above `DebugExceptions`, so a raise there escapes on
+   * default settings, and a spoofed `Client-IP` header is enough. The finish is emitted either
+   * way, and `exception` below says what raised.
    */
   status: number | null
   /**

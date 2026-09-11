@@ -159,14 +159,37 @@ module RailsLogReader
     private
       # None of this reads from the notification's own payload — `request.action_dispatch`
       # never carries anything but `request:` — it is all handed off through Current instead.
+      #
+      # A `status` of `nil` stays on the wire as `null`, and that is a decision rather than a
+      # gap (#47): it is a request whose `@app.call` never returned, so there was no response
+      # to read a status off. Puma will answer the client with a 500 of its own, but this file
+      # never sees that, and a status it did not observe would be one it made up.
       def build_payload
         duration = duration_ms
         payload = { status: Current.status }
         payload[:duration_ms] = duration if duration
         payload[:view_runtime_ms] = Current.view_runtime_ms if Current.view_runtime_ms
         payload[:db_runtime_ms] = Current.db_runtime_ms if Current.db_runtime_ms
-        payload[:exception] = exception_payload if Current.exception_object
+
+        exception = Current.exception_object || escaping_exception
+        payload[:exception] = exception_payload(exception) if exception
         payload
+      end
+
+      # The exception that took the response away, when nothing handed one over. Only a
+      # request that reached a controller gets `process_action.action_controller`'s — and the
+      # ones that raise above `ShowExceptions` never do: a spoofed `Client-IP` raises from
+      # inside `Rails::Rack::Logger`'s own `Started GET` line, on default settings (#47).
+      # There is no handing this one through Current either, because Logger emits this finish
+      # from its own `rescue Exception` and only then re-raises, so the raise reaches the
+      # Middleware after the finish has already been written. Inside that rescue, `$!` is the
+      # exception, and it is the only place it exists yet.
+      #
+      # Asked only when there is no status. `$!` is whatever this thread is handling, and a
+      # finish from a response's `BodyProxy` close can run inside a rescue that has nothing
+      # to do with the request — which returned, and so has a status to prove it.
+      def escaping_exception
+        $! if Current.status.nil?
       end
 
       # The request's own duration, not `process_action.action_controller`'s: it has to
@@ -187,8 +210,7 @@ module RailsLogReader
         elapsed_ns / 1_000_000.0
       end
 
-      def exception_payload
-        exception = Current.exception_object
+      def exception_payload(exception)
         { class: exception.class.name, message: exception.message, backtrace: exception.backtrace || [] }
       end
   end

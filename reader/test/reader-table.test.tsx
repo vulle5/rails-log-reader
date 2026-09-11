@@ -237,6 +237,30 @@ describe("what a row says it is", () => {
     expect(elapsedSeconds(table)).toBe(0.1)
   })
 
+  // #47: a request that raised before it had a response finishes with a `null` status, and an
+  // empty cell would read as a request that simply had nothing to say there — the one row an
+  // error most needs to look like one.
+  test("says a finished request that never had a response had no status, rather than leaving it blank", async () => {
+    const run = aRun("srv-1")
+    const table = await theActivityTable(
+      run.start("req-1", "GET", "/posts"),
+      run.finish("req-1", {
+        status: null,
+        duration_ms: 0.48,
+        exception: {
+          class: "ActionDispatch::RemoteIp::IpSpoofAttackError",
+          message: "IP spoofing attack?!",
+          backtrace: [],
+        },
+      }),
+    )
+
+    expect(cells(table)[1]).toBe("none")
+    expect(table.querySelector(".state-dot")).toBeNull()
+    const mark = table.querySelector(".cell-status .no-status")
+    expect(mark?.getAttribute("title")).toBe("Raised before it had a response")
+  })
+
   test("marks a Partial request, and keeps it marked once its finish promotes it", async () => {
     const run = aRun("srv-1")
     const table = await theActivityTable(
