@@ -61,3 +61,39 @@ export function runDescription(row: Pick<RunRow, "runKind" | "pid">) {
     facts: row.pid === null ? [] : [`pid ${row.pid}`],
   }
 }
+
+/**
+ * The one lookup #50 asks for: the Activity table's method cell and the Detail heading's
+ * method share it, so a verb renders the same colour in both places or a colour drifting
+ * between them would be a bug this function alone could have caught. GET keeps the accent
+ * already used for it; POST, PUT/PATCH — read as one bucket, both "modify" — and DELETE each
+ * get one of their own. Everything else — HEAD, OPTIONS, a verb this Reader has never heard
+ * of, or no method at all — is `"other"`, which is plain neutral text and never GET's colour
+ * by accident.
+ */
+export function methodClassName(method: string | null) {
+  switch (method) {
+    case "GET":
+      return "method-get"
+    case "POST":
+      return "method-post"
+    case "PUT":
+    case "PATCH":
+      return "method-put-patch"
+    case "DELETE":
+      return "method-delete"
+    default:
+      return "method-other"
+  }
+}
+
+/**
+ * Grouped by class and not by exact code: a 404 and a 422 read the same colour. Only 4xx and
+ * 5xx are ever coloured — 1xx, 2xx and 3xx render unchanged, so this returns `""` for them
+ * rather than a class the stylesheet would have to define as a no-op.
+ */
+export function statusClassName(status: number) {
+  if (status >= 400 && status < 500) return "status-4xx"
+  if (status >= 500 && status < 600) return "status-5xx"
+  return ""
+}

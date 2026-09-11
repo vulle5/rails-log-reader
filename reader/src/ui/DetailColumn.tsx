@@ -1,6 +1,6 @@
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../shared/wire"
-import { controllerAction, ms, runDescription } from "./format"
+import { controllerAction, methodClassName, ms, runDescription } from "./format"
 import { Highlight, Marked, useMatches } from "./search"
 import { tokenizeSql } from "./sql-highlight"
 
@@ -46,7 +46,7 @@ function RequestDetail({ row }: { row: RequestRow }) {
   return (
     <article className="detail">
       <header className="detail-heading">
-        <span className="detail-method">
+        <span className={`detail-method ${methodClassName(row.method)}`}>
           <Highlight text={row.method ?? ""} />
         </span>
         <span className="detail-path">
