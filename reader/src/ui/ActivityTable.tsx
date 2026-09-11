@@ -1,6 +1,7 @@
 import type { ActivityRow } from "../shared/activity"
 import { useClimbingElapsed } from "./elapsed"
 import { clock, controllerAction, count, elapsed, ms, runDescription } from "./format"
+import { Highlight } from "./search"
 
 /**
  * The Activity table: one dense, fixed-height row per thing that owns events — a *Request
@@ -132,12 +133,18 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
           clock(row.startedAtWall)
         )}
       </td>
-      <td className="cell-status">{row.status ?? <StateDot state={row.state} />}</td>
-      <td className="cell-method">{row.method ?? ""}</td>
-      <td className="cell-path" title={row.path ?? undefined}>
-        {row.path ?? ""}
+      <td className="cell-status">
+        {row.status === null ? <StateDot state={row.state} /> : <Highlight text={String(row.status)} />}
       </td>
-      <td className="cell-action">{controllerAction(row)}</td>
+      <td className="cell-method">
+        <Highlight text={row.method ?? ""} />
+      </td>
+      <td className="cell-path" title={row.path ?? undefined}>
+        <Highlight text={row.path ?? ""} />
+      </td>
+      <td className="cell-action">
+        <Highlight text={controllerAction(row)} />
+      </td>
       <td className="cell-count">{count(row.sqlCount)}</td>
       <td className="cell-count">{count(row.logCount)}</td>
       <td className="cell-ms">{ms(row.dbRuntimeMs)}</td>
@@ -183,7 +190,7 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
         {row.marker && <span className="run-marker-label">Run started</span>}
         {[runDescription(row).kind, ...runDescription(row).facts].map((said) => (
           <span key={said} className="run-said">
-            {said}
+            <Highlight text={said} />
           </span>
         ))}
       </td>

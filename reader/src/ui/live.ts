@@ -19,6 +19,11 @@ export type WireStatus = {
   lines: readonly ConsoleLine[]
   liveWireVersion: number | null
   liveRunId: string | null
+  /**
+   * The server has said the load-on-open history is all here — so rows that are not here are
+   * not coming, and an empty table is an empty Sidecar rather than one still being read.
+   */
+  historyLoaded: boolean
   /** Whether there is anything before the loaded history, and whether a pull is in flight. */
   earlier: EarlierState
   loadEarlier: () => void
@@ -62,6 +67,9 @@ export function useSidecar(): WireStatus {
     liveRunId: string | null
   }>({ rows: [], lines: [], liveWireVersion: null, liveRunId: null })
   const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
+  // Never set back: a reconnection re-reads a history the folds already hold, so what it
+  // would be waiting for is already on screen.
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   /**
    * The offset the loaded history begins at. `null` until the server says — nothing has been
    * attached to yet, so there is nothing to be earlier *than*.
@@ -99,6 +107,10 @@ export function useSidecar(): WireStatus {
       setEarlier((current) => ({ ...current, available: history.from > 0 }))
     })
 
+    // Sent once the history's envelopes have been, which is what makes it the moment an
+    // empty fold means an empty Sidecar.
+    sidecar.addEventListener("loaded", () => setHistoryLoaded(true))
+
     return () => sidecar.close()
   }, [activity, stream])
 
@@ -131,5 +143,5 @@ export function useSidecar(): WireStatus {
     }
   }
 
-  return { ...status, earlier, loadEarlier }
+  return { ...status, historyLoaded, earlier, loadEarlier }
 }

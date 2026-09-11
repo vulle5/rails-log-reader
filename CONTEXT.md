@@ -334,6 +334,25 @@ different thing to be at the bottom of, rather than the same stream thinned.
 _Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
 is the control).
 
+**Search** — one global, case-insensitive substring, typed once and lit wherever the Reader
+renders log text: *Console* lines, SQL, paths, `Controller#action`, and the rest of what the
+*Detail column* reads out of an Event. It **highlights and never hides**: v1 filters the
+*Activity table* by row kind and nothing else, and a text box that thinned rows or lines would
+be that exclusion returning through the one control nobody would think to check it against.
+So it is not a filter, it reaches no *Auto-scroll*, and it has neither a regex — a query
+language — nor next/prev — navigation. A match is found on the text as rendered, so SQL is
+matched whole and lit across the highlighter's own tokens, and never edited to do it.
+_Avoid_: filter, find (implies stepping through matches).
+
+**Empty state** — what an *Activity table* with no rows says about why, told apart by reads of
+the two fixed-contract paths alone: **not installed** (no Initializer), **not enabled** (no
+*Marker file*), or **idle** (both present, nothing written yet). Each names the one command
+that resolves it, and they chain — copy the Initializer in, `touch` the Marker file, restart
+Rails — because the last step writes a `run_header`, which is a row, which ends the state. Said
+only once the load-on-open history has all arrived, so a Sidecar with rows on the way never
+flashes a cause it is about to take back; and re-read when the Reader's window regains focus,
+since the command is always run somewhere else.
+
 ## Standing constraints
 
 1. **`log/development.log` stays pristine.** A collaborator running `tail -f` must see
@@ -348,4 +367,6 @@ is the control).
    capture mechanism that keeps constraint 1 and the one thing Rails 7.0 lacks. Rails 8
    is what gets tested; 7.1 and 7.2 are accepted, with their absent `sql.active_record`
    fields treated as absent rather than as an error. Development environment only.
-5. **Dark and light mode** both required.
+5. **Dark and light mode** both required. The OS's by default, a remembered override
+   otherwise, and set before the first paint — so the Reader never opens on a frame of the
+   wrong one.

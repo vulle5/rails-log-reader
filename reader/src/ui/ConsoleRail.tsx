@@ -1,4 +1,5 @@
 import type { ConsoleLine } from "../shared/console"
+import { Highlight } from "./search"
 
 /**
  * The **Console rail**: the leftmost of the Reader's three columns, and a global stream of
@@ -101,11 +102,11 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
           its identity, and a request tagged twice with one word is two chips. */}
       {tags.map((tag, at) => (
         <span key={at} className="console-tag">
-          {tag}
+          <Highlight text={tag} />
         </span>
       ))}
       <span className="console-message" title={message}>
-        {message}
+        <Highlight text={message} />
       </span>
     </li>
   )

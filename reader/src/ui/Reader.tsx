@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import type { ActivityRow } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
-import type { Mismatch } from "../shared/initializer-status"
+import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./ActivityTable"
@@ -10,12 +10,15 @@ import { useAutoScroll, type ColumnAutoScroll } from "./auto-scroll"
 import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
 import { ConsoleRail } from "./ConsoleRail"
 import { detailItems, DetailColumn } from "./DetailColumn"
+import { EmptyReader } from "./EmptyReader"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
 import type { EarlierState } from "./live"
 import { LoadEarlier } from "./LoadEarlier"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
+import { SearchBox, SearchContext, useSearch } from "./search"
+import { ThemeSwitch, useTheme } from "./theme"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and
@@ -59,6 +62,8 @@ type ReaderProps = {
   /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
+  /** Why there is nothing to show, from `detectEmptyState` — `null` while that is not known. */
+  emptyState?: EmptyState | null
 }
 
 export function Reader({
@@ -71,6 +76,7 @@ export function Reader({
   onDismissRepair = () => {},
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
+  emptyState = null,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -84,6 +90,15 @@ export function Reader({
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
+
+  // The search is here for the reason the filters are, and is the one thing here that is not
+  // one: it reaches every column through context and changes what they *mark*, never what
+  // they show — so it is handed to none of the auto-scrolls below, which follow what is shown.
+  const [term, setTerm] = useState("")
+  const search = useSearch(term)
+  // Up here with the other hooks, and not only where its switch is drawn: the refusal screen
+  // below returns before the bar exists, and the theme still has to follow the OS behind it.
+  const theme = useTheme()
 
   // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
   // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
@@ -187,51 +202,63 @@ export function Reader({
         onRepair={onRepair}
         onDismiss={onDismissRepair}
       />
-      <div className="reader" ref={reader}>
-        <Column
-          place="console"
-          name="Console"
-          scroll={consoleScroll}
-          controls={
-            <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
-          }
-        >
-          <ConsoleRail
-            lines={showingLines}
-            pinned={pinned?.owner ?? null}
-            hovered={hovered?.owner ?? null}
-            onHover={setHovered}
-            onPick={pick}
+      {/* Above the three columns rather than in any one of them, because neither belongs to
+          one: a term lights every column at once, and a theme paints them. */}
+      <header className="reader-bar">
+        <SearchBox term={term} onChange={setTerm} />
+        <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
+      </header>
+      <SearchContext value={search}>
+        <div className="reader" ref={reader}>
+          <Column
+            place="console"
+            name="Console"
+            scroll={consoleScroll}
+            controls={
+              <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+            }
+          >
+            <ConsoleRail
+              lines={showingLines}
+              pinned={pinned?.owner ?? null}
+              hovered={hovered?.owner ?? null}
+              onHover={setHovered}
+              onPick={pick}
+            />
+          </Column>
+          <Column
+            place="activity"
+            name="Activity table"
+            scroll={activityScroll}
+            controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
+          >
+            <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
+            <ActivityTable
+              rows={showingRows}
+              selected={selected}
+              pinned={pinned?.owner ?? null}
+              lit={hovered?.owner ?? null}
+              onSelect={selectRow}
+            />
+            {/* Under the headings rather than in place of the table, so the first row of the
+                session replaces this and moves nothing else. Empty means the Reader holds no
+                rows — not that a tab is showing none of the ones it holds. */}
+            {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
+          </Column>
+          <Column place="detail" name="Detail column" scroll={detailScroll}>
+            <DetailColumn row={showing} />
+          </Column>
+          {/* Over all three, because the rule belongs to none of them: it leaves the Console's
+              gutter and lands on a row in the table beside it. `layoutKey` is everything that
+              could have moved an end without changing which two ends they are. */}
+          <HoverGrouping
+            reader={reader}
+            line={drawnFrom?.id ?? null}
+            row={drawnFrom?.owner ?? null}
+            layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
           />
-        </Column>
-        <Column
-          place="activity"
-          name="Activity table"
-          scroll={activityScroll}
-          controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
-        >
-          <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
-          <ActivityTable
-            rows={showingRows}
-            selected={selected}
-            pinned={pinned?.owner ?? null}
-            lit={hovered?.owner ?? null}
-            onSelect={selectRow}
-          />
-        </Column>
-        <Column place="detail" name="Detail column" scroll={detailScroll}>
-          <DetailColumn row={showing} />
-        </Column>
-        {/* Over all three, because the rule belongs to none of them: it leaves the Console's
-            gutter and lands on a row in the table beside it. `layoutKey` is everything that
-            could have moved an end without changing which two ends they are. */}
-        <HoverGrouping
-          reader={reader}
-          line={drawnFrom?.id ?? null}
-          row={drawnFrom?.owner ?? null}
-          layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
-        />
-      </div>
+        </div>
+      </SearchContext>
     </div>
   )
 }

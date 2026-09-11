@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { detectMismatch, type InitializerFileStatus } from "../src/shared/initializer-status"
+import { detectEmptyState, detectMismatch, type InitializerFileStatus } from "../src/shared/initializer-status"
 import { WIRE_VERSION } from "../src/shared/wire"
 import { isWireVersionUnderstood } from "../src/shared/wire-compatibility"
 
@@ -10,9 +10,11 @@ import { isWireVersionUnderstood } from "../src/shared/wire-compatibility"
  * is driven from here the same way Seam 1 drives the fold from a fixture Sidecar.
  */
 
-const CURRENT: InitializerFileStatus = { installed: true, current: true }
-const STALE: InitializerFileStatus = { installed: true, current: false }
-const NOT_INSTALLED: InitializerFileStatus = { installed: false, current: false }
+const MASTER = "/home/dev/rails-log-reader/reader/rails/rails_log_reader.rb"
+
+const CURRENT: InitializerFileStatus = { installed: true, current: true, enabled: true, masterPath: MASTER }
+const STALE: InitializerFileStatus = { installed: true, current: false, enabled: true, masterPath: MASTER }
+const NOT_INSTALLED: InitializerFileStatus = { installed: false, current: false, enabled: false, masterPath: MASTER }
 
 describe("detectMismatch", () => {
   test("says nothing is wrong once the file matches the master and no process disagrees", () => {
@@ -46,6 +48,45 @@ describe("detectMismatch", () => {
     // What `GET /initializer-status` looks like before it has answered — nothing to flash a
     // banner about ahead of the read that would justify one.
     expect(detectMismatch(null, WIRE_VERSION - 1)).toEqual({ kind: "none" })
+  })
+})
+
+describe("detectEmptyState (#28)", () => {
+  const NOT_ENABLED: InitializerFileStatus = { ...CURRENT, enabled: false }
+
+  test("names *not installed* when there is no Initializer, and carries the copy to install", () => {
+    expect(detectEmptyState(NOT_INSTALLED, true)).toEqual({ kind: "not_installed", masterPath: MASTER })
+  })
+
+  test("names *not installed* even with a Marker file already waiting for it", () => {
+    // Touched first and copied second is an order people do things in; the file that is
+    // missing is still the one to name.
+    expect(detectEmptyState({ ...NOT_INSTALLED, enabled: true }, true)).toEqual({
+      kind: "not_installed",
+      masterPath: MASTER,
+    })
+  })
+
+  test("names *not enabled* when the Initializer is there and the Marker file is not", () => {
+    expect(detectEmptyState(NOT_ENABLED, true)).toEqual({ kind: "not_enabled" })
+  })
+
+  test("names *enabled but idle* when both are there and the history held nothing", () => {
+    expect(detectEmptyState(CURRENT, true)).toEqual({ kind: "idle" })
+  })
+
+  test("is *enabled but idle* for a copy that has drifted, too — the mismatch banner is what says that", () => {
+    expect(detectEmptyState(STALE, true)).toEqual({ kind: "idle" })
+  })
+
+  test("says nothing before the history has all arrived, however the files read", () => {
+    // Rows may be on their way: a Sidecar left over from before the Marker file was removed
+    // still has a history to show, and a cause named over it would flash and vanish.
+    for (const file of [NOT_INSTALLED, NOT_ENABLED, CURRENT]) expect(detectEmptyState(file, false)).toBeNull()
+  })
+
+  test("says nothing before the files have been read", () => {
+    expect(detectEmptyState(null, true)).toBeNull()
   })
 })
 

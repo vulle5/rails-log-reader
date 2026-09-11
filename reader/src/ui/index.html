@@ -4,6 +4,27 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rails log reader</title>
+    <!-- The theme, decided before the stylesheet applies and long before React mounts: a
+         classic, synchronous script, so the first paint is already the right one and opening
+         the Reader at night is not a white flash. The same decision `theme.ts` makes, written
+         out again because this runs before any module can — the stored choice when there is
+         one, and the OS's otherwise. Guarded, because `localStorage` throws outright in a
+         browser with site data blocked, and a Reader that cannot remember a theme must still
+         paint one. -->
+    <script>
+      (function () {
+        var chosen = null
+        try {
+          chosen = window.localStorage.getItem("rails-log-reader.theme")
+        } catch (blocked) {}
+        document.documentElement.dataset.theme =
+          chosen === "light" || chosen === "dark"
+            ? chosen
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+      })()
+    </script>
     <link rel="stylesheet" href="./reader.css" />
   </head>
   <body>

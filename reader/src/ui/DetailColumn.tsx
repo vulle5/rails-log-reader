@@ -1,6 +1,7 @@
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../shared/wire"
 import { controllerAction, ms, runDescription } from "./format"
+import { Highlight, Marked, useMatches } from "./search"
 import { tokenizeSql } from "./sql-highlight"
 
 /**
@@ -45,9 +46,15 @@ function RequestDetail({ row }: { row: RequestRow }) {
   return (
     <article className="detail">
       <header className="detail-heading">
-        <span className="detail-method">{row.method ?? ""}</span>
-        <span className="detail-path">{row.path ?? ""}</span>
-        <span className="detail-action">{controllerAction(row)}</span>
+        <span className="detail-method">
+          <Highlight text={row.method ?? ""} />
+        </span>
+        <span className="detail-path">
+          <Highlight text={row.path ?? ""} />
+        </span>
+        <span className="detail-action">
+          <Highlight text={controllerAction(row)} />
+        </span>
       </header>
 
       <Timeline events={row.timeline} />
@@ -72,9 +79,15 @@ function RunDetail({ row }: { row: RunRow }) {
   return (
     <article className="detail">
       <header className="detail-heading">
-        <span className="detail-method">{kind}</span>
-        <span className="detail-path">{row.appName ?? ""}</span>
-        <span className="detail-action">{facts.join(" · ")}</span>
+        <span className="detail-method">
+          <Highlight text={kind} />
+        </span>
+        <span className="detail-path">
+          <Highlight text={row.appName ?? ""} />
+        </span>
+        <span className="detail-action">
+          <Highlight text={facts.join(" · ")} />
+        </span>
       </header>
 
       <Timeline events={row.timeline} />
@@ -109,21 +122,45 @@ function Query({ event }: { event: SqlEvent }) {
         {async && <span className="sql-marker">ASYNC</span>}
         {/* `nil` on a raw `connection.execute`, which is then a query with no name rather
             than a query with a blank one. */}
-        {name !== null && <span className="sql-name">{name}</span>}
+        {name !== null && (
+          <span className="sql-name">
+            <Highlight text={name} />
+          </span>
+        )}
         <span className="sql-duration">{ms(duration_ms)}</span>
       </div>
-      <code className="sql">
-        {/* The tokens partition one string in order, so a token's position is its identity. */}
-        {tokenizeSql(sql).map((token, at) => (
-          <span key={at} className={`sql-${token.kind}`}>
-            {token.text}
-          </span>
-        ))}
-      </code>
+      <Statement sql={sql} />
       <Cut field="sql" original={event.truncated?.sql} />
       <Binds values={binds} />
       <Cut field="binds" original={event.truncated?.binds} />
     </li>
+  )
+}
+
+/**
+ * One statement, coloured and searched. The search is matched on the statement whole and
+ * never token by token, because the tokens are the highlighter's idea and not the reader's:
+ * `posts"."id` is three of them in three colours, and one thing typed. Each token then marks
+ * its own share of the matches, so a match keeps the colours it crosses.
+ */
+function Statement({ sql }: { sql: string }) {
+  const matches = useMatches(sql)
+  let from = 0
+
+  return (
+    <code className="sql">
+      {/* The tokens partition one string in order, so a token's position is its identity —
+          and the running length of the ones before it is where it starts in the statement. */}
+      {tokenizeSql(sql).map((token, at) => {
+        const start = from
+        from += token.text.length
+        return (
+          <span key={at} className={`sql-${token.kind}`}>
+            <Marked text={token.text} from={start} matches={matches} />
+          </span>
+        )
+      })}
+    </code>
   )
 }
 
@@ -168,7 +205,7 @@ function Binds({ values }: { values: readonly BindValue[] }) {
         {/* Binds are positional — `$1` is the first — so a bind's position is its identity. */}
         {values.map((value, at) => (
           <li key={at} className={`bind bind-${bindKind(value)}`}>
-            {value === null ? "NULL" : String(value)}
+            <Highlight text={value === null ? "NULL" : String(value)} />
           </li>
         ))}
       </ul>
@@ -197,10 +234,12 @@ function LogLine({ event }: { event: AppLogEvent }) {
       <span className="log-severity">{severity}</span>
       {tags.map((tag) => (
         <span key={tag} className="log-tag">
-          {tag}
+          <Highlight text={tag} />
         </span>
       ))}
-      <span className="log-message">{message}</span>
+      <span className="log-message">
+        <Highlight text={message} />
+      </span>
       <Cut field="message" original={event.truncated?.message} />
     </li>
   )
@@ -210,14 +249,19 @@ function Exception({ exception, cutFrom }: { exception: RequestException; cutFro
   return (
     <section className="exception" aria-label="Exception">
       <p className="exception-message">
-        <span className="exception-class">{exception.class}</span> {exception.message}
+        <span className="exception-class">
+          <Highlight text={exception.class} />
+        </span>{" "}
+        <Highlight text={exception.message} />
       </p>
       {/* Full and uncleaned, gem frames and all, so "the bug was in a gem" stays an answer
           the Reader can give. Nothing here drops a frame for looking like someone else's —
           and on the one occasion the wire itself had to, it says so underneath. */}
       <ol className="backtrace">
         {exception.backtrace.map((frame, at) => (
-          <li key={at}>{frame}</li>
+          <li key={at}>
+            <Highlight text={frame} />
+          </li>
         ))}
       </ol>
       <Cut field="backtrace" original={cutFrom ?? undefined} />

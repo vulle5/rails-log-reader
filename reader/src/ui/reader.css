@@ -1,6 +1,11 @@
-/* Tokens for both themes. Following the OS is the whole story until the manual
-   override lands; nothing here reads a preference. */
+/* Tokens for both themes, keyed on `data-theme` and never on `prefers-color-scheme`: whether
+   to follow the OS is the developer's choice, so the OS's preference is read in script — by
+   `index.html` before the first paint, and by `theme.tsx` after — and what lands here is only
+   ever the theme that choice came to. `color-scheme` is what brings the scrollbars and the
+   search box's own chrome along with it. */
 :root {
+  color-scheme: light;
+
   --bg: #ffffff;
   --bg-sunken: #f4f5f7;
   --bg-raised: #ffffff;
@@ -25,36 +30,42 @@
   --warn: #9a6700;
   --error: #cf222e;
 
+  /* A search match: a background and nothing else, so the text it lights keeps whatever
+     colour it was already saying something with — a keyword, a warning, a Rails line. */
+  --match: #ffe58f;
+
   /* The one thing in the Reader that floats over its own column, and the only place a shadow
      is what says so. Darker in the dark theme, where a light pill on a dark column needs more
      under it to lift, not less. */
   --shadow: rgb(0 0 0 / 18%);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1216;
-    --bg-sunken: #0a0c0f;
-    --bg-raised: #171b21;
-    --border: #262d36;
-    --fg: #e4e8ee;
-    --fg-muted: #9aa5b1;
-    --fg-faint: #6b7682;
-    --accent: #6ea0ff;
-    --selected: #1c2432;
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --sql-keyword: #c792ea;
-    --sql-identifier: #79c0ff;
-    --sql-string: #7ee787;
-    --sql-number: #ffab70;
-    --sql-placeholder: #ff7b9c;
-    --sql-comment: #6b7682;
+  --bg: #0f1216;
+  --bg-sunken: #0a0c0f;
+  --bg-raised: #171b21;
+  --border: #262d36;
+  --fg: #e4e8ee;
+  --fg-muted: #9aa5b1;
+  --fg-faint: #6b7682;
+  --accent: #6ea0ff;
+  --selected: #1c2432;
 
-    --warn: #e3b341;
-    --error: #ff7b72;
+  --sql-keyword: #c792ea;
+  --sql-identifier: #79c0ff;
+  --sql-string: #7ee787;
+  --sql-number: #ffab70;
+  --sql-placeholder: #ff7b9c;
+  --sql-comment: #6b7682;
 
-    --shadow: rgb(0 0 0 / 45%);
-  }
+  --warn: #e3b341;
+  --error: #ff7b72;
+
+  --match: rgb(187 128 9 / 55%);
+
+  --shadow: rgb(0 0 0 / 45%);
 }
 
 * {
@@ -185,6 +196,74 @@ body {
   color: var(--fg-muted);
 }
 
+/* The bar over all three columns: what belongs to none of them — the search, which lights
+   every column at once — sits here rather than in any one column's heading. Present from the
+   first paint like everything else, so it never arrives and pushes the columns down. */
+.reader-bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.search-box {
+  width: 320px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.search-box:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+/* Styled as the Activity table's row-kind tabs are, because it is the same kind of control:
+   one of a few, exactly one of them in force. */
+.theme-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.theme-choice {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.theme-choice:hover {
+  background: var(--bg-raised);
+}
+
+.theme-choice-chosen {
+  border-color: var(--border);
+  background: var(--selected);
+  color: var(--fg);
+}
+
+/* Lit, never hidden: a background under the characters that matched, and nothing done to
+   anything that did not. `color: inherit` is what keeps a matched keyword a keyword. */
+mark.search-match {
+  border-radius: 2px;
+  background: var(--match);
+  color: inherit;
+}
+
 /* `min-height: 0` for the same reason as `min-width: 0` beside it: a grid item's automatic
    minimum size is its content, so without this a column would overflow the track the line
    above just constrained, and hand the overflow back to the page. */
@@ -274,6 +353,46 @@ body {
   padding: 20px;
   color: var(--fg-faint);
   text-align: center;
+}
+
+/* #28: why the Activity table is empty. Under the headings, where the first row will land, and
+   quiet — none of the three causes is an error, each is a step not taken yet. The command is
+   the thing on it worth reading, so it is the one thing set apart, and selectable whole. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 64ch;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.empty-state h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.empty-state p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.empty-command {
+  display: block;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
 }
 
 /* The *load-earlier* control, above the oldest row the Reader holds, which is where what it
