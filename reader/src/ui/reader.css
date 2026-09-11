@@ -25,6 +25,10 @@
   --warn: #9a6700;
   --error: #cf222e;
 
+  /* A search match: a background and nothing else, so the text it lights keeps whatever
+     colour it was already saying something with — a keyword, a warning, a Rails line. */
+  --match: #ffe58f;
+
   /* The one thing in the Reader that floats over its own column, and the only place a shadow
      is what says so. Darker in the dark theme, where a light pill on a dark column needs more
      under it to lift, not less. */
@@ -52,6 +56,8 @@
 
     --warn: #e3b341;
     --error: #ff7b72;
+
+    --match: rgb(187 128 9 / 55%);
 
     --shadow: rgb(0 0 0 / 45%);
   }
@@ -183,6 +189,45 @@ body {
 .unsupported-wire p {
   margin: 0;
   color: var(--fg-muted);
+}
+
+/* The bar over all three columns: what belongs to none of them — the search, which lights
+   every column at once — sits here rather than in any one column's heading. Present from the
+   first paint like everything else, so it never arrives and pushes the columns down. */
+.reader-bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.search-box {
+  width: 320px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.search-box:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+/* Lit, never hidden: a background under the characters that matched, and nothing done to
+   anything that did not. `color: inherit` is what keeps a matched keyword a keyword. */
+mark.search-match {
+  border-radius: 2px;
+  background: var(--match);
+  color: inherit;
 }
 
 /* `min-height: 0` for the same reason as `min-width: 0` beside it: a grid item's automatic

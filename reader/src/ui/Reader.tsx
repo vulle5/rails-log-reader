@@ -16,6 +16,7 @@ import type { RepairState } from "./initializer-repair"
 import type { EarlierState } from "./live"
 import { LoadEarlier } from "./LoadEarlier"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
+import { SearchBox, SearchContext, useSearch } from "./search"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and
@@ -84,6 +85,12 @@ export function Reader({
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
+
+  // The search is here for the reason the filters are, and is the one thing here that is not
+  // one: it reaches every column through context and changes what they *mark*, never what
+  // they show — so it is handed to none of the auto-scrolls below, which follow what is shown.
+  const [term, setTerm] = useState("")
+  const search = useSearch(term)
 
   // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
   // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
@@ -187,51 +194,58 @@ export function Reader({
         onRepair={onRepair}
         onDismiss={onDismissRepair}
       />
-      <div className="reader" ref={reader}>
-        <Column
-          place="console"
-          name="Console"
-          scroll={consoleScroll}
-          controls={
-            <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
-          }
-        >
-          <ConsoleRail
-            lines={showingLines}
-            pinned={pinned?.owner ?? null}
-            hovered={hovered?.owner ?? null}
-            onHover={setHovered}
-            onPick={pick}
+      {/* Above the three columns rather than in any one of them, because the search belongs
+          to none of them: a term lights every column at once. */}
+      <header className="reader-bar">
+        <SearchBox term={term} onChange={setTerm} />
+      </header>
+      <SearchContext value={search}>
+        <div className="reader" ref={reader}>
+          <Column
+            place="console"
+            name="Console"
+            scroll={consoleScroll}
+            controls={
+              <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+            }
+          >
+            <ConsoleRail
+              lines={showingLines}
+              pinned={pinned?.owner ?? null}
+              hovered={hovered?.owner ?? null}
+              onHover={setHovered}
+              onPick={pick}
+            />
+          </Column>
+          <Column
+            place="activity"
+            name="Activity table"
+            scroll={activityScroll}
+            controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
+          >
+            <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
+            <ActivityTable
+              rows={showingRows}
+              selected={selected}
+              pinned={pinned?.owner ?? null}
+              lit={hovered?.owner ?? null}
+              onSelect={selectRow}
+            />
+          </Column>
+          <Column place="detail" name="Detail column" scroll={detailScroll}>
+            <DetailColumn row={showing} />
+          </Column>
+          {/* Over all three, because the rule belongs to none of them: it leaves the Console's
+              gutter and lands on a row in the table beside it. `layoutKey` is everything that
+              could have moved an end without changing which two ends they are. */}
+          <HoverGrouping
+            reader={reader}
+            line={drawnFrom?.id ?? null}
+            row={drawnFrom?.owner ?? null}
+            layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
           />
-        </Column>
-        <Column
-          place="activity"
-          name="Activity table"
-          scroll={activityScroll}
-          controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
-        >
-          <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
-          <ActivityTable
-            rows={showingRows}
-            selected={selected}
-            pinned={pinned?.owner ?? null}
-            lit={hovered?.owner ?? null}
-            onSelect={selectRow}
-          />
-        </Column>
-        <Column place="detail" name="Detail column" scroll={detailScroll}>
-          <DetailColumn row={showing} />
-        </Column>
-        {/* Over all three, because the rule belongs to none of them: it leaves the Console's
-            gutter and lands on a row in the table beside it. `layoutKey` is everything that
-            could have moved an end without changing which two ends they are. */}
-        <HoverGrouping
-          reader={reader}
-          line={drawnFrom?.id ?? null}
-          row={drawnFrom?.owner ?? null}
-          layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
-        />
-      </div>
+        </div>
+      </SearchContext>
     </div>
   )
 }
