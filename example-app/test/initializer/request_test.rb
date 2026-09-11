@@ -220,11 +220,64 @@ class RequestTest < ActiveSupport::TestCase
     assert_operator finish["payload"]["duration_ms"], :>, 0,
       "the reset runs after the finish on this path too, not before it"
     assert_nil finish["payload"]["status"],
-      "the status is read off what `@app.call` returned, and it returned nothing"
+      "no response is an explicit absence (#47): the Initializer never saw a status, so it names none"
+    assert_equal "ActiveRecord::RecordNotFound", finish["payload"]["exception"]["class"]
 
     after = run.events_of("app_log").find { |event| event["payload"]["message"].include?("after the raising") }
     assert after, "the line was written, so it is somewhere in the file"
     assert_nil after["request_id"], "the Executor's `ensure` cleared the context the raise blew past"
+  end
+
+  # #47: the raise the test above needs `show_exceptions: :none` for, reached on default
+  # development settings. `Rails::Rack::Logger` sits above ShowExceptions and DebugExceptions,
+  # and its `Started GET` line asks for `request.remote_ip` — which is where RemoteIp's lazy
+  # check actually runs, and raises on a request carrying two headers that disagree about the
+  # client. No controller is ever entered, so `process_action.action_controller` never hands
+  # an exception over, and the finish is emitted from Logger's own `rescue` before the raise
+  # reaches anything of ours.
+  test "a request that raises above ShowExceptions finishes with no status, and says what raised" do
+    spoofed = { "X-Forwarded-For" => "1.1.1.1", "Client-IP" => "2.2.2.2" }
+    run = DevelopmentRun.boot(script: <<~RUBY)
+      begin
+        #{DevelopmentRun.real_request("/posts", headers: spoofed)}
+      rescue ActionDispatch::RemoteIp::IpSpoofAttackError
+        puts "the exception left the middleware stack"
+      end
+    RUBY
+
+    assert run.booted?, run.output
+    assert_includes run.output, "the exception left the middleware stack",
+      "default settings, no override: nothing below Logger ever got to render this"
+    assert_empty run.events_of("request_route"), "routing was never reached"
+
+    start = run.events_of("request_start").sole
+    finish = run.events_of("request_finish").sole
+    assert_equal start["request_id"], finish["request_id"]
+    assert_nil finish["payload"]["status"]
+    assert_operator finish["payload"]["duration_ms"], :>, 0
+
+    exception = finish["payload"]["exception"]
+    assert exception, "the one fact that explains the row is the one it has to carry"
+    assert_equal "ActionDispatch::RemoteIp::IpSpoofAttackError", exception["class"]
+    assert_match(/IP spoofing attack/, exception["message"])
+    assert_operator exception["backtrace"].size, :>, 0
+  end
+
+  # The other side of reading `$!`: a request that returned is not handed an exception it
+  # never raised, even when its finish happens to fire while some other one is being handled.
+  test "a request that returned is not reported with an exception that merely happened to be in flight" do
+    run = DevelopmentRun.boot(script: <<~RUBY)
+      begin
+        raise "unrelated, and being handled"
+      rescue
+        #{DevelopmentRun.real_request("/posts")}
+      end
+    RUBY
+
+    assert run.booted?, run.output
+    finish = run.events_of("request_finish").sole
+    assert_equal 200, finish["payload"]["status"]
+    assert_nil finish["payload"]["exception"]
   end
 
   # Puma's own C extension hands `request.request_method` over BINARY-tagged

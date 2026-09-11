@@ -134,7 +134,7 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
         )}
       </td>
       <td className="cell-status">
-        {row.status === null ? <StateDot state={row.state} /> : <Highlight text={String(row.status)} />}
+        <Status row={row} />
       </td>
       <td className="cell-method">
         <Highlight text={row.method ?? ""} />
@@ -217,14 +217,29 @@ function rowClassName(classes: readonly string[], selected: boolean, pinned: boo
 }
 
 /**
+ * A status when the finish carried one, and otherwise whichever of the three reasons it has
+ * none. A finished request with no status is one that raised before it had a response (#47) —
+ * its exception is in the *Detail column* — and a blank there would read the same as a cell
+ * with nothing to say, on the row that most needs to read as an error.
+ */
+function Status({ row }: { row: Request }) {
+  if (row.status !== null) return <Highlight text={String(row.status)} />
+  if (row.state !== "finished") return <StateDot state={row.state} />
+
+  return (
+    <span className="no-status" title="Raised before it had a response">
+      none
+    </span>
+  )
+}
+
+/**
  * The whole of what an in-flight row says about itself, beside the elapsed: a dot, pulsing
  * while the request runs and still once its Run has ended under it. Labelled rather than
  * left to colour — the two states differ by whether the dot is moving, which a screen reader
  * cannot see and a still screenshot cannot show.
  */
-function StateDot({ state }: { state: Request["state"] }) {
-  if (state === "finished") return null
-
+function StateDot({ state }: { state: Exclude<Request["state"], "finished"> }) {
   const label = state === "in-flight" ? "In flight" : "Interrupted"
   return (
     <span

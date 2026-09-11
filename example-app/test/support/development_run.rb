@@ -88,11 +88,11 @@ class DevelopmentRun
     # and subscriber stack rather than calling RailsLogReader.emit as its own front door.
     # `host!` sidesteps ActionDispatch::HostAuthorization, which blocks the Integration
     # session's default host otherwise.
-    def real_request(path, params: {})
+    def real_request(path, params: {}, headers: {})
       <<~RUBY
         session = ActionDispatch::Integration::Session.new(Rails.application)
         session.host! "localhost"
-        session.get(#{path.inspect}, params: #{params.inspect})
+        session.get(#{path.inspect}, params: #{params.inspect}, headers: #{headers.inspect})
       RUBY
     end
 

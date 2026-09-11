@@ -607,6 +607,12 @@ mark.search-match {
   }
 }
 
+/* A finished request that never had a status: it raised before there was a response to read
+   one off (#47). In the error colour, unlike the dot above, because this one did fail. */
+.no-status {
+  color: var(--error);
+}
+
 /* The climbing elapsed, in the column a finished request shows its total in: the same
    question, asked of a request that has not answered it yet. */
 .elapsed {
