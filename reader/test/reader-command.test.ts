@@ -124,6 +124,17 @@ describe("starting the Reader", () => {
     expect(await response.text()).toContain('<div id="root">')
   })
 
+  test("serves a page that sets its theme before its stylesheet applies", async () => {
+    const page = await (await reachReader(run(await railsRoot()))).text()
+
+    // Bun bundles `index.html` on the way out, so the page it serves is the one that has to
+    // keep the order: an inline script that runs after the stylesheet has painted is the
+    // white flash it exists to prevent.
+    const theme = page.indexOf("dataset.theme")
+    expect(theme).toBeGreaterThan(-1)
+    expect(theme).toBeLessThan(page.indexOf('rel="stylesheet"'))
+  })
+
   test("finds the Rails root from a directory inside the app", async () => {
     const root = await railsRoot()
     await mkdir(join(root, "app", "models"), { recursive: true })

@@ -1,6 +1,11 @@
-/* Tokens for both themes. Following the OS is the whole story until the manual
-   override lands; nothing here reads a preference. */
+/* Tokens for both themes, keyed on `data-theme` and never on `prefers-color-scheme`: whether
+   to follow the OS is the developer's choice, so the OS's preference is read in script — by
+   `index.html` before the first paint, and by `theme.tsx` after — and what lands here is only
+   ever the theme that choice came to. `color-scheme` is what brings the scrollbars and the
+   search box's own chrome along with it. */
 :root {
+  color-scheme: light;
+
   --bg: #ffffff;
   --bg-sunken: #f4f5f7;
   --bg-raised: #ffffff;
@@ -35,32 +40,32 @@
   --shadow: rgb(0 0 0 / 18%);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1216;
-    --bg-sunken: #0a0c0f;
-    --bg-raised: #171b21;
-    --border: #262d36;
-    --fg: #e4e8ee;
-    --fg-muted: #9aa5b1;
-    --fg-faint: #6b7682;
-    --accent: #6ea0ff;
-    --selected: #1c2432;
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    --sql-keyword: #c792ea;
-    --sql-identifier: #79c0ff;
-    --sql-string: #7ee787;
-    --sql-number: #ffab70;
-    --sql-placeholder: #ff7b9c;
-    --sql-comment: #6b7682;
+  --bg: #0f1216;
+  --bg-sunken: #0a0c0f;
+  --bg-raised: #171b21;
+  --border: #262d36;
+  --fg: #e4e8ee;
+  --fg-muted: #9aa5b1;
+  --fg-faint: #6b7682;
+  --accent: #6ea0ff;
+  --selected: #1c2432;
 
-    --warn: #e3b341;
-    --error: #ff7b72;
+  --sql-keyword: #c792ea;
+  --sql-identifier: #79c0ff;
+  --sql-string: #7ee787;
+  --sql-number: #ffab70;
+  --sql-placeholder: #ff7b9c;
+  --sql-comment: #6b7682;
 
-    --match: rgb(187 128 9 / 55%);
+  --warn: #e3b341;
+  --error: #ff7b72;
 
-    --shadow: rgb(0 0 0 / 45%);
-  }
+  --match: rgb(187 128 9 / 55%);
+
+  --shadow: rgb(0 0 0 / 45%);
 }
 
 * {
@@ -220,6 +225,35 @@ body {
 .search-box:focus {
   outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
   outline-offset: -1px;
+}
+
+/* Styled as the Activity table's row-kind tabs are, because it is the same kind of control:
+   one of a few, exactly one of them in force. */
+.theme-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.theme-choice {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.theme-choice:hover {
+  background: var(--bg-raised);
+}
+
+.theme-choice-chosen {
+  border-color: var(--border);
+  background: var(--selected);
+  color: var(--fg);
 }
 
 /* Lit, never hidden: a background under the characters that matched, and nothing done to

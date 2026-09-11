@@ -17,6 +17,7 @@ import type { EarlierState } from "./live"
 import { LoadEarlier } from "./LoadEarlier"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
 import { SearchBox, SearchContext, useSearch } from "./search"
+import { ThemeSwitch, useTheme } from "./theme"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and
@@ -91,6 +92,9 @@ export function Reader({
   // they show — so it is handed to none of the auto-scrolls below, which follow what is shown.
   const [term, setTerm] = useState("")
   const search = useSearch(term)
+  // Up here with the other hooks, and not only where its switch is drawn: the refusal screen
+  // below returns before the bar exists, and the theme still has to follow the OS behind it.
+  const theme = useTheme()
 
   // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
   // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
@@ -194,10 +198,11 @@ export function Reader({
         onRepair={onRepair}
         onDismiss={onDismissRepair}
       />
-      {/* Above the three columns rather than in any one of them, because the search belongs
-          to none of them: a term lights every column at once. */}
+      {/* Above the three columns rather than in any one of them, because neither belongs to
+          one: a term lights every column at once, and a theme paints them. */}
       <header className="reader-bar">
         <SearchBox term={term} onChange={setTerm} />
+        <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
       </header>
       <SearchContext value={search}>
         <div className="reader" ref={reader}>
