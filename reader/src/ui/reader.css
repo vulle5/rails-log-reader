@@ -355,6 +355,46 @@ mark.search-match {
   text-align: center;
 }
 
+/* #28: why the Activity table is empty. Under the headings, where the first row will land, and
+   quiet — none of the three causes is an error, each is a step not taken yet. The command is
+   the thing on it worth reading, so it is the one thing set apart, and selectable whole. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 64ch;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.empty-state h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.empty-state p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.empty-command {
+  display: block;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 /* The *load-earlier* control, above the oldest row the Reader holds, which is where what it
    goes and gets will appear. Inside the scrollport rather than in the heading beside the
    tabs: reaching further back is a thing you go looking for, and it is exactly where you

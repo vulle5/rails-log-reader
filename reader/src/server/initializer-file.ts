@@ -1,19 +1,20 @@
-import { readFile, rename, writeFile } from "node:fs/promises"
+import { access, readFile, rename, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import type { InitializerFileStatus } from "../shared/initializer-status"
 
 /**
  * The two fixed-contract paths ADR-0004 relies on to tell *not installed* from *not
- * enabled* from *enabled but idle* using only reads: this file is the half of that contract
- * that reads and writes `config/initializers/rails_log_reader.rb` itself. The Marker file
- * next door, `log/rails_log_reader.enabled`, is not read or written by anything here —
- * creating and removing it stays the developer's own act (#29).
+ * enabled* from *enabled but idle* using only reads. This file reads both, and writes only
+ * the first: `config/initializers/rails_log_reader.rb` is what #29's repair overwrites, and
+ * the Marker file, `log/rails_log_reader.enabled`, is only ever checked for — creating and
+ * removing it stays the developer's own act.
  *
- * Exported so the tests that exercise this contract read the path from here rather than
- * spelling it out a second time.
+ * Exported so the tests that exercise this contract read the paths from here rather than
+ * spelling them out a second time.
  */
 export const INITIALIZER_RELATIVE_PATH = join("config", "initializers", "rails_log_reader.rb")
+export const MARKER_RELATIVE_PATH = join("log", "rails_log_reader.enabled")
 
 /**
  * The Reader's own master copy. Resolved from this file's own location rather than from
@@ -28,20 +29,37 @@ function initializerPath(railsRoot: string) {
 }
 
 /**
- * `GET /initializer-status`'s whole implementation: two reads and a byte comparison. No
- * parsing, no version sniffing inside the file — a diff is the only thing that can answer
- * "is the file on disk current?" honestly, because the file's own `WIRE_VERSION` constant
- * only says what a *correctly copied* file would say about itself.
+ * `GET /initializer-status`'s whole implementation: two reads and a byte comparison, and a
+ * check that the Marker file is there. No parsing, no version sniffing inside the file — a
+ * diff is the only thing that can answer "is the file on disk current?" honestly, because
+ * the file's own `WIRE_VERSION` constant only says what a *correctly copied* file would say
+ * about itself.
  */
 export async function initializerFileStatus(railsRoot: string): Promise<InitializerFileStatus> {
+  const enabled = await markerExists(railsRoot)
   const workCopy = await readFile(initializerPath(railsRoot)).catch((failure: NodeJS.ErrnoException) => {
     if (failure.code !== "ENOENT") throw failure
     return null
   })
-  if (workCopy === null) return { installed: false, current: false }
+  if (workCopy === null) return { installed: false, current: false, enabled, master: MASTER_PATH }
 
   const master = await readFile(MASTER_PATH)
-  return { installed: true, current: workCopy.equals(master) }
+  return { installed: true, current: workCopy.equals(master), enabled, master: MASTER_PATH }
+}
+
+/**
+ * Presence, and nothing else: the Marker file's content is never read (ADR-0004), so this
+ * asks the one question the Initializer's own gate asks. Whether the running process has
+ * seen it is another matter — that is read once, at boot — and not one a file can answer.
+ */
+async function markerExists(railsRoot: string) {
+  return access(join(railsRoot, MARKER_RELATIVE_PATH)).then(
+    () => true,
+    (failure: NodeJS.ErrnoException) => {
+      if (failure.code !== "ENOENT" && failure.code !== "ENOTDIR") throw failure
+      return false
+    },
+  )
 }
 
 /**

@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import type { ActivityRow } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
-import type { Mismatch } from "../shared/initializer-status"
+import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./ActivityTable"
@@ -10,6 +10,7 @@ import { useAutoScroll, type ColumnAutoScroll } from "./auto-scroll"
 import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
 import { ConsoleRail } from "./ConsoleRail"
 import { detailItems, DetailColumn } from "./DetailColumn"
+import { EmptyReader } from "./EmptyReader"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
 import type { RepairState } from "./initializer-repair"
@@ -61,6 +62,8 @@ type ReaderProps = {
   /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
+  /** Why there is nothing to show, from `detectEmptyState` — `null` while that is not known. */
+  emptyState?: EmptyState | null
 }
 
 export function Reader({
@@ -73,6 +76,7 @@ export function Reader({
   onDismissRepair = () => {},
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
+  emptyState = null,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -236,6 +240,10 @@ export function Reader({
               lit={hovered?.owner ?? null}
               onSelect={selectRow}
             />
+            {/* Under the headings rather than in place of the table, so the first row of the
+                session replaces this and moves nothing else. Empty means the Reader holds no
+                rows — not that a tab is showing none of the ones it holds. */}
+            {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
           </Column>
           <Column place="detail" name="Detail column" scroll={detailScroll}>
             <DetailColumn row={showing} />

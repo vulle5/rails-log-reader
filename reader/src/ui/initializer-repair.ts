@@ -3,9 +3,17 @@ import { useEffect, useRef, useState } from "react"
 import type { InitializerFileStatus } from "../shared/initializer-status"
 
 /**
- * `GET /initializer-status`, fetched once on mount. `null` until it answers, which
- * `detectMismatch` reads the same way it reads *not installed* — nothing to compare yet, so
- * no banner flashes on a fresh page load ahead of the read that would justify one.
+ * `GET /initializer-status`, fetched on mount and again whenever the window comes back into
+ * focus. `null` until it answers, which `detectMismatch` reads the same way it reads *not
+ * installed* — nothing to compare yet, so no banner flashes on a fresh page load ahead of the
+ * read that would justify one.
+ *
+ * Re-read on focus because #28's empty states each name a command, and the command is run
+ * somewhere else — in the terminal beside the Reader, or an editor that just touched the
+ * Initializer. Coming back to the tab is the moment the answer may have changed, and a screen
+ * still saying *not installed* after the file was copied in would be the tool looking broken
+ * in exactly the way the screen exists to prevent. Focus, not a timer: nothing on disk moves
+ * while the developer is looking at the Reader instead of at their terminal.
  *
  * `markRepaired` stands in for a second round trip: a `POST /initializer-repair` that
  * resolved is a write this same process just made, so there is nothing left to learn by
@@ -14,26 +22,43 @@ import type { InitializerFileStatus } from "../shared/initializer-status"
  */
 export function useInitializerFileStatus() {
   const [status, setStatus] = useState<InitializerFileStatus | null>(null)
+  /**
+   * Moved on by every repair, so a read that set out before one lands as the stale answer it
+   * is and is dropped — clicking Repair in an unfocused window focuses it first, and the read
+   * that starts can see the file before the repair wrote it.
+   */
+  const repairs = useRef(0)
 
   useEffect(() => {
     let cancelled = false
 
-    fetch("/initializer-status")
-      .then((response) => response.json() as Promise<InitializerFileStatus>)
-      .then((body) => {
-        if (!cancelled) setStatus(body)
-      })
-      .catch(() => {
-        /* Left `null`: a failed read is nothing to compare yet, the same as one never made. */
-      })
+    function read() {
+      const startedAfter = repairs.current
+
+      fetch("/initializer-status")
+        .then((response) => response.json() as Promise<InitializerFileStatus>)
+        .then((body) => {
+          if (!cancelled && startedAfter === repairs.current) setStatus(body)
+        })
+        .catch(() => {
+          /* Left as it was: a failed read is nothing new to compare, the same as one never made. */
+        })
+    }
+
+    read()
+    window.addEventListener("focus", read)
 
     return () => {
       cancelled = true
+      window.removeEventListener("focus", read)
     }
   }, [])
 
   function markRepaired() {
-    setStatus({ installed: true, current: true })
+    repairs.current += 1
+    // The two facts a repair produces, and nothing else: the Marker file is not the repair's
+    // to have touched, so whatever was read about it stands.
+    setStatus((read) => read && { ...read, installed: true, current: true })
   }
 
   return { status, markRepaired }

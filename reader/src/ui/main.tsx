@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client"
 
-import { detectMismatch } from "../shared/initializer-status"
+import { detectEmptyState, detectMismatch } from "../shared/initializer-status"
 import { useInitializerFileStatus, useInitializerRepair } from "./initializer-repair"
 import { useSidecar } from "./live"
 import { Reader } from "./Reader"
@@ -13,10 +13,12 @@ if (container === null) throw new Error("index.html is missing its #root element
  * `useInitializerFileStatus` and `useInitializerRepair` are the same idea for #29: the fetch
  * to `GET /initializer-status` and the `POST /initializer-repair` that follows a click both
  * live here, and `detectMismatch` folds the file status together with whatever `v` the live
- * Sidecar last reported into the one thing `Reader` actually renders.
+ * Sidecar last reported into the one thing `Reader` actually renders. `detectEmptyState` is
+ * #28's half of the same read: the same file status, with whether the Sidecar's history has
+ * all arrived, into why an empty Reader is empty.
  */
 function LiveReader() {
-  const { rows, lines, liveWireVersion, liveRunId, earlier, loadEarlier } = useSidecar()
+  const { rows, lines, liveWireVersion, liveRunId, historyLoaded, earlier, loadEarlier } = useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
 
@@ -40,6 +42,7 @@ function LiveReader() {
       onDismissRepair={dismiss}
       earlier={earlier}
       onLoadEarlier={loadEarlier}
+      emptyState={detectEmptyState(fileStatus, historyLoaded)}
     />
   )
 }

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { INITIALIZER_RELATIVE_PATH } from "../src/server/initializer-file"
+import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
 import type { Envelope } from "../src/shared/wire"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
@@ -81,17 +81,21 @@ async function reachReader(reader: Bun.Subprocess) {
   return await Bun.fetch(await readerUrl(reader))
 }
 
+type MessageKind = "envelopes" | "history" | "loaded"
+
 /**
- * The first SSE message of a given kind, decoded. The stream carries two: the envelopes
- * themselves, which have no `event:` line, and `history`, which says where the load-on-open
- * history the Reader attached on begins — so a reader of this stream has to tell them apart
- * rather than take the first `data:` it sees.
+ * Every SSE message up to and including the first of a given kind, decoded, in the order
+ * they were sent. The stream carries three: the envelopes themselves, which have no `event:`
+ * line; `history`, which says where the load-on-open history the Reader attached on begins;
+ * and `loaded`, which says that history has all been sent — so a reader of this stream has
+ * to tell them apart rather than take the first `data:` it sees.
  */
-async function firstMessage<T>(response: Response, kind: "envelopes" | "history") {
+async function messagesThrough(response: Response, kind: MessageKind) {
   const stream = response.body?.getReader()
   if (stream === undefined) throw new Error("the Reader answered /events with no body")
 
   const decoder = new TextDecoder()
+  const seen: { kind: string; data: unknown }[] = []
   let received = ""
 
   try {
@@ -103,7 +107,10 @@ async function firstMessage<T>(response: Response, kind: "envelopes" | "history"
       for (const message of messages) {
         const named = /^event: (\S+)$/m.exec(message)?.[1] ?? "envelopes"
         const data = /^data: (.*)$/m.exec(message)?.[1]
-        if (data !== undefined && named === kind) return JSON.parse(data) as T
+        if (data === undefined) continue
+
+        seen.push({ kind: named, data: JSON.parse(data) })
+        if (named === kind) return seen
       }
 
       const { value, done } = await stream.read()
@@ -113,6 +120,10 @@ async function firstMessage<T>(response: Response, kind: "envelopes" | "history"
   } finally {
     await stream.cancel()
   }
+}
+
+async function firstMessage<T>(response: Response, kind: MessageKind) {
+  return (await messagesThrough(response, kind)).at(-1)?.data as T
 }
 
 describe("starting the Reader", () => {
@@ -186,6 +197,29 @@ describe("starting the Reader", () => {
     expect(await firstMessage<{ from: number }>(response, "history")).toEqual({ from: 0 })
   })
 
+  test("says when the history it attached on has all been sent, and only after sending it", async () => {
+    const root = await railsRoot()
+    const rails = aRun("srv-1")
+    await appendToSidecar(join(root, "log"), rails.header(), rails.start("req-1"), rails.log("req-1"))
+    const url = await readerUrl(run(root))
+
+    const sent = await messagesThrough(await Bun.fetch(new URL("events", url)), "loaded")
+
+    // What lets the browser tell "nothing has happened yet" from "has not arrived yet": every
+    // envelope of the history is already in hand by the time this is.
+    const envelopes = sent.filter((message) => message.kind === "envelopes").flatMap((message) => message.data as Envelope[])
+    expect(envelopes.map((envelope) => envelope.type)).toEqual(["run_header", "request_start", "app_log"])
+    expect(sent.at(-1)?.kind).toBe("loaded")
+  })
+
+  test("says the history has all been sent when there is no Sidecar at all", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    const sent = await messagesThrough(await Bun.fetch(new URL("events", url)), "loaded")
+
+    expect(sent.map((message) => message.kind)).toEqual(["loaded"])
+  })
+
   test("GET /earlier answers the load-earlier control from wherever it is asked to scan", async () => {
     const root = await railsRoot()
     const rails = aRun("srv-1")
@@ -211,12 +245,17 @@ describe("starting the Reader", () => {
 /** The Reader's own master copy, read the same way `initializerFileStatus` reads it. */
 const MASTER_INITIALIZER = join(import.meta.dir, "..", "rails", "rails_log_reader.rb")
 
+/** What `GET /initializer-status` answers, with the Marker file absent unless a test says otherwise. */
+function answer(said: { installed: boolean; current: boolean; enabled?: boolean }) {
+  return { enabled: false, master: MASTER_INITIALIZER, ...said }
+}
+
 describe("the Initializer's version-mismatch surface (#29)", () => {
   test("GET /initializer-status says not installed when the Work app has no copy at all", async () => {
     const url = await readerUrl(run(await railsRoot()))
     const response = await Bun.fetch(new URL("initializer-status", url))
 
-    expect(await response.json()).toEqual({ installed: false, current: false })
+    expect(await response.json()).toEqual(answer({ installed: false, current: false }))
   })
 
   test("GET /initializer-status says current once the copy matches the Reader's own master", async () => {
@@ -227,7 +266,7 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
 
     const response = await Bun.fetch(new URL("initializer-status", url))
 
-    expect(await response.json()).toEqual({ installed: true, current: true })
+    expect(await response.json()).toEqual(answer({ installed: true, current: true }))
   })
 
   test("GET /initializer-status says not current when the copy has drifted", async () => {
@@ -238,7 +277,17 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
 
     const response = await Bun.fetch(new URL("initializer-status", url))
 
-    expect(await response.json()).toEqual({ installed: true, current: false })
+    expect(await response.json()).toEqual(answer({ installed: true, current: false }))
+  })
+
+  test("GET /initializer-status says enabled once the Marker file exists (#28)", async () => {
+    const root = await railsRoot()
+    await writeFile(join(root, MARKER_RELATIVE_PATH), "")
+    const url = await readerUrl(run(root))
+
+    const response = await Bun.fetch(new URL("initializer-status", url))
+
+    expect(await response.json()).toEqual(answer({ installed: false, current: false, enabled: true }))
   })
 
   test("POST /initializer-repair overwrites the copy in place and touches nothing else", async () => {
@@ -255,7 +304,7 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
     expect(await Bun.file(join(root, "log", "rails_log_reader.enabled")).exists()).toBe(false)
 
     const status = await Bun.fetch(new URL("initializer-status", url))
-    expect(await status.json()).toEqual({ installed: true, current: true })
+    expect(await status.json()).toEqual(answer({ installed: true, current: true }))
   })
 })
 

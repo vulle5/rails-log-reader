@@ -75,6 +75,13 @@ function envelopeStream() {
         // back the developer had asked to see.
         (from) => send(`event: history\ndata: ${JSON.stringify({ from })}\n\n`),
       )
+
+      // The load-on-open history has all been sent by the time `openSidecar` resolves, and
+      // this says so. Without it an empty Activity table is two things the browser cannot tell
+      // apart — a Sidecar with nothing in it, and one whose history is still on its way — and
+      // #28's *enabled but idle* would flash over every page load that had rows coming.
+      // Empty data, because a message with none is one `EventSource` never dispatches.
+      send("event: loaded\ndata: {}\n\n")
     },
     cancel() {
       attached?.close()
@@ -108,10 +115,10 @@ async function earlier(request: Request) {
 
 /**
  * #29: is the Work app's copy of the Initializer the Reader's own master copy, byte for
- * byte? A GET because it only ever reads — the two fixed-contract paths ADR-0004 relies on
- * are read here exactly as they are for the Marker file check that never made it into this
- * file at all, because the Reader only ever reads the Work app's files outside this one
- * repair action.
+ * byte? And #28: is it there at all, and is the Marker file beside it? A GET because it only
+ * ever reads — ADR-0004's two fixed-contract paths are what tell *not installed* from *not
+ * enabled* from *enabled but idle*, and the Reader only ever reads the Work app's files
+ * outside the one repair action below.
  */
 async function initializerStatus() {
   return Response.json(await initializerFileStatus(railsRoot))
