@@ -9,7 +9,7 @@ const REQUEST_ID = "b3d9f0c2-71a4-4f2d-8f2a-1c6e0d5b7a93"
  */
 export const SAMPLE_ENVELOPES: Envelope[] = [
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 1,
     at_mono: 118_492_300_000,
@@ -25,7 +25,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 2,
     at_mono: 118_492_400_000,
@@ -35,7 +35,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     payload: { method: "GET", path: "/posts/12" },
   },
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 3,
     at_mono: 118_493_100_000,
@@ -45,7 +45,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     payload: { controller: "PostsController", action: "show", format: "html", params: { id: "12" } },
   },
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 4,
     at_mono: 118_494_050_000,
@@ -63,7 +63,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 5,
     at_mono: 118_494_900_000,
@@ -78,7 +78,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 6,
     at_mono: 118_501_700_000,
@@ -88,7 +88,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     payload: { status: 200, duration_ms: 78.3, view_runtime_ms: 61.2, db_runtime_ms: 1.4 },
   },
   {
-    v: 2,
+    v: 3,
     run_id: RUN_ID,
     seq: 7,
     at_mono: 902_118_400_000,

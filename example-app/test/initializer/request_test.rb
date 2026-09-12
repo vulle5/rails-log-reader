@@ -195,7 +195,13 @@ class RequestTest < ActiveSupport::TestCase
   # `ActionDispatch::DebugExceptions` otherwise renders the exception and hands the middleware
   # above it an ordinary 500 to return — a raise that never leaves the stack. A raise from
   # anything above DebugExceptions needs no override at all, which is the next test's (#47).
-  # What is left either way is a request that ended without a response.
+  # What is left either way is a request that ended without a response — but not, since #53,
+  # without a status: `ActionController::Instrumentation#process_action` rescues the very
+  # exception this test forces past the stack, maps it to 404 with the same
+  # `ActionDispatch::ExceptionWrapper.status_code_for_exception` `ActionController::LogSubscriber`
+  # uses, and stamps `process_action.action_controller`'s payload with it before re-raising —
+  # so development.log says `Completed 404 Not Found` for this request whether or not the
+  # client ever saw a response, and the row now says the same thing it does.
   test "a request whose exception escapes the whole stack still finishes, and still clears its context" do
     run = DevelopmentRun.boot(script: <<~RUBY)
       Rails.application.env_config["action_dispatch.show_exceptions"] = :none
@@ -220,8 +226,9 @@ class RequestTest < ActiveSupport::TestCase
       "the finish is emitted from below the Executor, so the context is still there for it"
     assert_operator finish["payload"]["duration_ms"], :>, 0,
       "the reset runs after the finish on this path too, not before it"
-    assert_nil finish["payload"]["status"],
-      "no response is an explicit absence (#47): the Initializer never saw a status, so it names none"
+    assert_equal 404, finish["payload"]["status"],
+      "process_action.action_controller fired — a controller was reached — and its own " \
+      "rescue clause mapped the exception to the same status development.log's Completed line names"
     assert_equal "ActiveRecord::RecordNotFound", finish["payload"]["exception"]["class"]
 
     after = run.events_of("app_log").find { |event| event["payload"]["message"].include?("after the raising") }
@@ -298,5 +305,46 @@ class RequestTest < ActiveSupport::TestCase
 
     assert run.booted?, run.output
     assert_equal "GET", run.events_of("request_start").sole["payload"]["method"]
+  end
+
+  # #53: `Rack::ConditionalGet` and `Rack::ETag` sit below the Initializer's own middleware in
+  # the default stack, so `Middleware`'s `@app.call` wraps them both. A client sending a
+  # matching `If-None-Match` — which needs no `fresh_when`/`stale?` in the controller at all,
+  # since `Rack::ETag` digests a cacheable body into an ETag for free — gets `ConditionalGet`'s
+  # empty 304 back, *after* `process_action.action_controller` already told the Initializer the
+  # controller's real status.
+  #
+  # A real routed action, not a stand-in: Scenario 7's `raw_sql` (`render plain:`, no view, no
+  # CSRF token in the body) gives the same ETag on both requests, which is exactly what a real
+  # HTML page's `authenticity_token` would defeat — that page's body, and so its ETag, differs
+  # on every render, and `ConditionalGet` never finds one to match. `fresh_when`/`stale?` was
+  # the acceptance criteria's other suggested route and does not reproduce this: it checks
+  # freshness *inside* the action, so a fresh request already renders `head :not_modified`
+  # itself — `process_action.action_controller`'s own status is 304 there too, and the two
+  # numbers never disagree in the first place. Only the automatic path — the one no controller
+  # code asked for — does.
+  test "a response Rack::ConditionalGet downgrades to 304 still reports the status Rails logged as Completed" do
+    run = DevelopmentRun.boot(script: <<~'RUBY')
+      warm_up = ActionDispatch::Integration::Session.new(Rails.application)
+      warm_up.host! "localhost"
+      warm_up.get("/scenarios/raw_sql")
+      etag = warm_up.response.headers["ETag"]
+
+      # The request under test: the same ETag sent back as If-None-Match — exactly what a
+      # client that honours ETags (a browser fetch, a caching proxy) does on its next poll.
+      session = ActionDispatch::Integration::Session.new(Rails.application)
+      session.host! "localhost"
+      session.get("/scenarios/raw_sql", headers: { "If-None-Match" => etag })
+      puts "downgraded_status=#{session.response.status}"
+    RUBY
+
+    assert run.booted?, run.output
+    assert_includes run.output, "downgraded_status=304",
+      "the mismatch this reproduces only exists if Rack::ConditionalGet actually downgraded the response"
+
+    finish = run.events_of("request_finish").last
+    assert_equal 200, finish["payload"]["status"],
+      "Rails logged Completed 200 OK from process_action.action_controller; " \
+      "Rack::ConditionalGet's 304 must not overwrite that"
   end
 end
