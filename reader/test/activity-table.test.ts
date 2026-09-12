@@ -1010,12 +1010,20 @@ describe("the Memory bound", () => {
     const run = aRun("srv-1")
     const reader = await theReaderReads(log)
 
+    // Attached on a small, already-finished request first — under the bound — so the burst
+    // below is read incrementally by the in-memory ring rather than through the load-on-open
+    // backward scan a first read over an already-oversized file would take instead: that scan
+    // would trim it to the ceiling on disk, before `evictToBound` ever ran to report it (#62).
+    await appendToSidecar(log, run.start("req-attach"), run.finish("req-attach"))
+    await reader.caughtUp()
+
     await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10))
     await reader.caughtUp()
 
-    expect(reader.evicted).toEqual(
-      Array.from({ length: 10 }, (_, index) => ({ id: `request req-${index}`, requestId: `req-${index}` })),
-    )
+    expect(reader.evicted).toEqual([
+      { id: "request req-attach", requestId: "req-attach" },
+      ...Array.from({ length: 10 }, (_, index) => ({ id: `request req-${index}`, requestId: `req-${index}` })),
+    ])
   })
 
   test("never evicts a request that is still in flight, however much arrives after it", async () => {
