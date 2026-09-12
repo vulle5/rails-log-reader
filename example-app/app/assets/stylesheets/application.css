@@ -55,6 +55,14 @@ h2 { font-size: 1.125rem; margin-top: 2rem; }
 .scenarios button { font: inherit; padding: 0.5rem 0.875rem; }
 #scenario-output { color: var(--muted); min-height: 1.5em; }
 
+.scenario-commands pre {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border-radius: 0.25rem;
+}
+
 .errors { color: crimson; }
 
 .field { margin-bottom: 0.75rem; }

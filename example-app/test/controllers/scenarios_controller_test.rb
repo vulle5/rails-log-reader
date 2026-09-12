@@ -20,6 +20,21 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
     assert_select "button[data-scenario=?]", scenario_dual_homing_path
     assert_select "button[data-scenario=?]", scenario_raw_sql_path
     assert_select "button[data-scenario=?]", scenario_flood_path
+    assert_select "button[data-scenario=?]", scenario_partial_request_path
+    assert_select "button[data-scenario=?]", scenario_trailing_event_path
+  end
+
+  # 8, 10 (twice) 12 and 14 get no button — none of them is a path a browser can fetch — so
+  # this is the one place their reachability is actually checked at all.
+  test "the index page also shows a copy-pasteable command for every Scenario that has no button" do
+    get scenarios_path
+
+    assert_response :success
+    assert_select "pre code", text: /bin\/rake scenarios:rake_burst/
+    assert_select "pre code", text: /kill -9 \$SERVER_PID/
+    assert_select "pre code", text: /kill -TERM \$SERVER_PID/
+    assert_select "pre code", text: /WEB_CONCURRENCY=2 bin\/dev/
+    assert_select "pre code", text: /bin\/rake scenarios:long_task/
   end
 
   test "scenario 1: parallel — a plain request, ready to be fired several at once" do
@@ -76,6 +91,24 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
 
   test "scenario 9: flood — a single cheap query, meant to be fired ~20 at once" do
     get scenario_flood_path
+
+    assert_response :success
+  end
+
+  # The 2-second pause between its two queries is the point — see the README for what
+  # happens to the Sidecar in that window against a real Run — but this test only has this
+  # app's own database to talk to, so all it can prove is that the request itself completes.
+  test "scenario 11: partial_request — two queries either side of a pause" do
+    assert_queries_count(2) { get scenario_partial_request_path }
+
+    assert_response :success
+  end
+
+  # TrailingEventMiddleware's own close-block work happens after the response is sent, which
+  # an integration test that never inspects the Sidecar cannot observe — TrailingTest does.
+  # This is the routing-and-response half only.
+  test "scenario 13: trailing_event — routes and responds; TrailingTest proves what its close block does" do
+    get scenario_trailing_event_path
 
     assert_response :success
   end

@@ -20,6 +20,8 @@ Rails.application.routes.draw do
     get "dual_homing"
     get "raw_sql"
     get "flood"
+    get "partial_request"
+    get "trailing_event"
   end
 
   root "posts#index"
