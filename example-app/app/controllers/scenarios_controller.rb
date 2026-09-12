@@ -8,12 +8,55 @@
 # Numbered 1–7, 9, 11 and 13. Scenario 8 (a rake-task burst) and Scenario 14 (a long-lived
 # rake task) are `rake` tasks — see lib/tasks/scenarios.rake — and Scenario 10 (an
 # Interrupted request, twice) and Scenario 12 (clustered Puma) are signal- and env-var-driven
-# rather than a path of their own. All six are documented in the Example app README beside
-# the endpoints below, per #31.
+# rather than a path of their own. None of those four gets a button — there is no path, or
+# no server yet, to fire one at — but all four are still shown on the page as a
+# copy-pasteable command, per #31, so the whole set lives in one place rather than sending a
+# reader over to the README for a third of them. The README carries the same commands too,
+# for the `curl`-only reading — an agent driving the app has no terminal of the page's own to
+# read from.
 class ScenariosController < ApplicationController
   # One row per button on the index page. `count` is how many times the page's own JS fires
   # `path` at once — 1 for everything but the two Scenarios that are about concurrency itself.
   Scenario = Data.define(:path, :label, :description, :count)
+
+  # One row per non-HTTP Scenario: `command` is a shell snippet to copy, never wired to
+  # anything on the page — this is the "no launcher" rule (#15) drawn precisely: showing a
+  # command is documentation, firing one from a click would be a launcher.
+  ScenarioCommand = Data.define(:label, :description, :command)
+
+  RAKE_BURST_COMMAND = <<~SH
+    bin/rake scenarios:rake_burst &
+    for i in 1 2 3 4; do curl -s http://localhost:3000/scenarios/parallel & done; wait
+  SH
+
+  SIGKILL_COMMAND = <<~SH
+    bin/dev & SERVER_PID=$!
+    sleep 1
+    curl -s http://localhost:3000/scenarios/hang &
+    sleep 1
+    kill -9 $SERVER_PID
+    bin/dev & SERVER_PID=$!
+    sleep 1
+    kill -TERM $SERVER_PID
+    wait $SERVER_PID
+  SH
+
+  TERM_FORCE_SHUTDOWN_COMMAND = <<~SH
+    bin/dev & SERVER_PID=$!
+    sleep 1
+    curl -s http://localhost:3000/scenarios/hang &
+    sleep 1
+    kill -TERM $SERVER_PID
+    wait $SERVER_PID
+  SH
+
+  CLUSTERED_COMMAND = <<~SH
+    WEB_CONCURRENCY=2 bin/dev &
+    sleep 2
+    for i in $(seq 20); do curl -s http://localhost:3000/scenarios/flood & done; wait
+  SH
+
+  LONG_TASK_COMMAND = "bin/rake scenarios:long_task\n"
 
   def index
     @scenarios = [
@@ -39,6 +82,33 @@ class ScenariosController < ApplicationController
       Scenario.new(path: scenario_trailing_event_path, count: 1, label: "13 — Trailing event",
         description: "A middleware outside Rails::Rack::Logger logs a line and runs a " \
           "query in its Rack::BodyProxy close block, after the request has already finished.")
+    ]
+
+    @scenario_commands = [
+      ScenarioCommand.new(label: "8 — Rake-task burst",
+        description: "Bulk unattributed queries from a second concurrent Run sharing the " \
+          "Sidecar with the server — the only Scenario that tests ADR-0003's O_APPEND claim.",
+        command: RAKE_BURST_COMMAND),
+      ScenarioCommand.new(label: "10a — Interrupted via SIGKILL",
+        description: "No at_exit runs, so no run_end is ever written for the killed Run — " \
+          "the Reader has to conclude the interruption from the next Run's own run_header, " \
+          "which is why this restarts the server once more.",
+        command: SIGKILL_COMMAND),
+      ScenarioCommand.new(label: "10b — Interrupted via TERM, the clean path",
+        description: "config/puma.rb's force_shutdown_after 5 forces the hanging request's " \
+          "thread rather than a plain TERM deadlocking forever; the process then exits " \
+          "normally, so its at_exit still writes a real run_end.",
+        command: TERM_FORCE_SHUTDOWN_COMMAND),
+      ScenarioCommand.new(label: "12 — Clustered Puma",
+        description: "WEB_CONCURRENCY=2 at launch, the only test of the pid-keyed run_id: " \
+          "Puma preloads by default in cluster mode, so the boot run_header belongs to the " \
+          "master, and each worker gets a run_id of its own the first time it handles anything.",
+        command: CLUSTERED_COMMAND),
+      ScenarioCommand.new(label: "14 — Long-lived rake task",
+        description: "Outlives a server restart: start it, restart the server beside it " \
+          "however you like, and it keeps its own run_id and its own climbing seq " \
+          "throughout. Runs until you stop it.",
+        command: LONG_TASK_COMMAND)
     ]
   end
 

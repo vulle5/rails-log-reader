@@ -24,6 +24,19 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
     assert_select "button[data-scenario=?]", scenario_trailing_event_path
   end
 
+  # 8, 10 (twice) 12 and 14 get no button — none of them is a path a browser can fetch — so
+  # this is the one place their reachability is actually checked at all.
+  test "the index page also shows a copy-pasteable command for every Scenario that has no button" do
+    get scenarios_path
+
+    assert_response :success
+    assert_select "pre code", text: /bin\/rake scenarios:rake_burst/
+    assert_select "pre code", text: /kill -9 \$SERVER_PID/
+    assert_select "pre code", text: /kill -TERM \$SERVER_PID/
+    assert_select "pre code", text: /WEB_CONCURRENCY=2 bin\/dev/
+    assert_select "pre code", text: /bin\/rake scenarios:long_task/
+  end
+
   test "scenario 1: parallel — a plain request, ready to be fired several at once" do
     get scenario_parallel_path
 

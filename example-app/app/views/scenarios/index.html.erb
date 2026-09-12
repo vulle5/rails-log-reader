@@ -23,3 +23,21 @@
 </ul>
 
 <p id="scenario-output" role="status"></p>
+
+<h2>Process lifecycle Scenarios</h2>
+
+<p class="lede">
+  These press on process lifetime rather than traffic shape (#31), so none of them is a
+  button: each one starts or kills the server itself, or needs an env var set before it
+  boots, rather than sending it one more request. Copy a command into a terminal from
+  inside the Example app root.
+</p>
+
+<ul class="scenarios scenario-commands">
+  <% @scenario_commands.each do |scenario| %>
+    <li>
+      <p class="meta"><strong><%= scenario.label %></strong> — <%= scenario.description %></p>
+      <pre><code><%= scenario.command %></code></pre>
+    </li>
+  <% end %>
+</ul>
