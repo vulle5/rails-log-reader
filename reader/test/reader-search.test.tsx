@@ -42,8 +42,9 @@ afterAll(async () => {
 async function theReader(...envelopes: Parameters<ReturnType<typeof activityTable>["fold"]>[0]) {
   const activity = activityTable()
   const stream = consoleStream()
-  activity.fold(envelopes)
+  const evicted = activity.fold(envelopes)
   stream.fold(envelopes)
+  stream.evict(evicted)
 
   const container = document.createElement("div")
   document.body.append(container)

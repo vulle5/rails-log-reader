@@ -15,7 +15,11 @@ import type { Envelope } from "../shared/wire"
  */
 export type WireStatus = {
   rows: readonly ActivityRow[]
-  /** The *Console*'s own fold of the same envelopes: every App log event, in append order. */
+  /**
+   * The *Console*'s own fold of the same envelopes: every App log event, in append order,
+   * that its owning row still holds — a line's retention borrows the Activity fold's own
+   * eviction rather than counting its own (#63).
+   */
   lines: readonly ConsoleLine[]
   liveWireVersion: number | null
   liveRunId: string | null
@@ -49,8 +53,12 @@ export type EarlierState = {
  *
  * Two folds over one stream, not one fold read twice: the *Console* is every App log event
  * in append order, *Echoes* included, and the Activity table's rows are the same events
- * grouped by what owns them, *Echoes* dropped. Neither is derivable from the other, which is
- * why the envelopes go to both.
+ * grouped by what owns them, *Echoes* dropped. Neither's *content* is derivable from the
+ * other, which is why the envelopes go to both — but the Console's *retention* is: every row
+ * `activity.fold` hands back is one it just evicted under the *Memory bound*, and
+ * `stream.evict` is what lets the Console's lines go with it — and its attribution horizon
+ * close behind a Request row the same way `activityTable`'s own does — rather than the
+ * Console counting a bound of its own (#63).
  *
  * Both folds and the cursor outlive that effect, in `useState` initialisers and a ref, for
  * the same reason: a reconnection is not a new Reader. What the folds hold — including
@@ -81,8 +89,11 @@ export function useSidecar(): WireStatus {
 
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
-      activity.fold(envelopes)
+      const evicted = activity.fold(envelopes)
       stream.fold(envelopes)
+      // The Console's retention borrowed from the fold's own eviction (#63): whatever rows
+      // this batch's fold just took, the Console lets go of what belonged to them.
+      stream.evict(evicted)
       const latest = envelopes.at(-1)
 
       setStatus((previous) => ({
@@ -129,11 +140,14 @@ export function useSidecar(): WireStatus {
       const block = (await response.json()) as Earlier
 
       from.current = block.from
-      // The Activity fold only. The *Console* is append order, and this block belongs before
-      // every line it holds rather than after them — appending it there would put the oldest
-      // lines of the session at the bottom of the rail, under the newest.
-      activity.foldEarlier(block.envelopes)
-      setStatus((previous) => ({ ...previous, rows: [...activity.rows] }))
+      // The Activity fold only — the *Console* is append order, and this block belongs before
+      // every line it holds rather than after them, so appending it there would put the
+      // oldest lines of the session at the bottom of the rail, under the newest. But a pull
+      // this large can still evict: it can give the *last row standing* company and make it
+      // evictable again, so the Console still has to hear about whatever that takes.
+      const evicted = activity.foldEarlier(block.envelopes)
+      stream.evict(evicted)
+      setStatus((previous) => ({ ...previous, rows: [...activity.rows], lines: [...stream.lines] }))
       setEarlier({ available: block.from > 0, loading: false })
     } catch {
       // The read failed and the cursor has not moved, so the control stays exactly as it

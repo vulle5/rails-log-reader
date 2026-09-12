@@ -223,18 +223,48 @@ export function runRowId(runId: string) {
   return `run ${runId}`
 }
 
+/**
+ * A row the *Memory bound* just took, as `fold` or `foldEarlier` reports it. `id` is what a
+ * Console line's `owner` names while the row is held, and what `ConsoleStream.evict` matches
+ * lines against. `requestId` is the second thing a caller needs and cannot derive from `id`
+ * alone: for a Request row, `requestId` is what falls *past the attribution horizon* the
+ * instant this row is taken — the same horizon `foldOne`'s own `evicted.has(requestId)` check
+ * enforces here — so a line for that request printed *after* this eviction is not this row's
+ * to reclaim, the same reading a Trailing event past the horizon already gets. `null` for a
+ * Run row, which has no horizon of its own: a Run can reopen, and `runRowId` names the
+ * reopened row exactly as it named the one taken, so nothing further needs remembering.
+ */
+export type EvictedRow = {
+  id: string
+  requestId: string | null
+}
+
 export type ActivityTable = {
   /** The same array throughout, mutated in place: rows are appended and never reordered. */
   readonly rows: readonly ActivityRow[]
-  /** Fold a batch of envelopes, in append order. Safe to hand the same bytes twice. */
-  fold: (envelopes: readonly Envelope[]) => void
+  /**
+   * Fold a batch of envelopes, in append order. Safe to hand the same bytes twice.
+   *
+   * Returns every row the *Memory bound* evicted while folding this batch — empty far more
+   * often than not. This is the fold's own report of what it just let go of, for the one
+   * caller (the *Console*, #63) whose retention derives from this bound rather than counting
+   * its own: handing the rows over is what lets that caller drop what depended on one the
+   * instant this fold does, and keep attributing correctly for whatever a Request row's
+   * eviction closes the horizon on next.
+   */
+  fold: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
   /**
    * Fold a block of envelopes that sits *before* everything the fold holds: what the
    * *load-earlier* control went and got. The rows it opens go in above the rows already
    * there, because that is where their earliest event sits — which is the same rule the
    * live fold keeps, read from the other end.
+   *
+   * Reports evictions the same way `fold` does, for the same reason — ordinarily empty,
+   * because the ceiling rises by exactly what the pull brought in, but not *always* empty:
+   * a pull large enough to give the *last row standing* company can make it evictable again,
+   * and that eviction is exactly as real as one the live fold triggers.
    */
-  foldEarlier: (envelopes: readonly Envelope[]) => void
+  foldEarlier: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
 }
 
 /**
@@ -526,7 +556,7 @@ export function activityTable(): ActivityTable {
 
   function fold(envelopes: readonly Envelope[]) {
     for (const envelope of envelopes) foldOne(envelope)
-    evictToBound()
+    return evictToBound()
   }
 
   /**
@@ -552,7 +582,7 @@ export function activityTable(): ActivityTable {
     rows.splice(0, 0, ...block.opened.map((owner) => owner.row))
     pulled += block.opened.length
     ceiling += held - heldBefore
-    evictToBound()
+    return evictToBound()
   }
 
   function foldOne(envelope: Envelope) {
@@ -685,9 +715,15 @@ export function activityTable(): ActivityTable {
    * bound stops being one, and it is the honest place to stop — though never silently:
    * `updateOverBound` marks whichever row that leaves standing over the ceiling, so the
    * table says so rather than just quietly exceeding it.
+   *
+   * Returns every row taken, oldest first — the fold's own report of what it let go of,
+   * which is how a caller with no bound of its own (the *Console*, #63) learns to let go of
+   * the same thing at the same moment, rather than being handed a second ring to keep in
+   * step by hand.
    */
-  function evictToBound() {
+  function evictToBound(): readonly EvictedRow[] {
     const taken = new Set<ActivityRow>()
+    const takenRows: EvictedRow[] = []
     let standing = rows.length
 
     for (let index = pulled; index < rows.length && held > ceiling && standing > 1; index++) {
@@ -696,6 +732,7 @@ export function activityTable(): ActivityTable {
 
       held -= forget(row)
       taken.add(row)
+      takenRows.push({ id: row.id, requestId: row.kind === "request" ? row.requestId : null })
       standing -= 1
     }
     compact(taken)
@@ -710,6 +747,7 @@ export function activityTable(): ActivityTable {
     keepLatest(evictedRuns, ceiling)
 
     updateOverBound()
+    return takenRows
   }
 
   /**
