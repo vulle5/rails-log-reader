@@ -5,8 +5,11 @@
 # controller's own traffic from the Sidecar: an exclusion option would be a product feature
 # invented to tidy a test double, and the Initializer does not know a Scenario exists.
 #
-# Numbered 1–7, then 9: Scenario 8, a rake-task query burst, has no HTTP endpoint for a
-# button or a `curl` line to hit, and belongs to a different issue.
+# Numbered 1–7, 9, 11 and 13. Scenario 8 (a rake-task burst) and Scenario 14 (a long-lived
+# rake task) are `rake` tasks — see lib/tasks/scenarios.rake — and Scenario 10 (an
+# Interrupted request, twice) and Scenario 12 (clustered Puma) are signal- and env-var-driven
+# rather than a path of their own. All six are documented in the Example app README beside
+# the endpoints below, per #31.
 class ScenariosController < ApplicationController
   # One row per button on the index page. `count` is how many times the page's own JS fires
   # `path` at once — 1 for everything but the two Scenarios that are about concurrency itself.
@@ -29,7 +32,13 @@ class ScenariosController < ApplicationController
       Scenario.new(path: scenario_raw_sql_path, count: 1, label: "7 — Raw SQL",
         description: "A bare connection.execute: no model, no binds, a nil name."),
       Scenario.new(path: scenario_flood_path, count: 20, label: "9 — Request flood",
-        description: "The same cheap query, fired about twenty times at once.")
+        description: "The same cheap query, fired about twenty times at once."),
+      Scenario.new(path: scenario_partial_request_path, count: 1, label: "11 — Partial request",
+        description: "Two queries with a pause between them — see the README for how to " \
+          "replace the Sidecar mid-flight and turn this into a genuine Partial request."),
+      Scenario.new(path: scenario_trailing_event_path, count: 1, label: "13 — Trailing event",
+        description: "A middleware outside Rails::Rack::Logger logs a line and runs a " \
+          "query in its Rack::BodyProxy close block, after the request has already finished.")
     ]
   end
 
@@ -119,5 +128,28 @@ class ScenariosController < ApplicationController
   # `WEB_CONCURRENCY=2 bin/dev` (see the README) is how to watch a wider one.
   def flood
     render plain: "posts=#{Post.count}"
+  end
+
+  # Scenario 11 — a Partial request: attach the Reader mid-flight. The two queries either
+  # side of the pause exist so something real can be done to the Sidecar between them — the
+  # README's recipe replaces the file out from under this request while it sleeps, the same
+  # as ADR-0003's boot-time truncation firing under a live Run. The first query, and the
+  # request_start ahead of it, land before that swap and are gone once it happens; the
+  # second query lands after, with a request_id the Reader can never trace back to a start —
+  # a genuine Partial request rather than a race reproduced by hand.
+  def partial_request
+    Post.count
+    sleep 2
+    comments = Comment.count
+
+    render plain: "comments=#{comments}"
+  end
+
+  # Scenario 13 — a middleware outside Rails::Rack::Logger, wrapping the response body in
+  # its own Rack::BodyProxy, logging one line and running one query in the close block. This
+  # action itself does nothing: everything that makes this Scenario what it is happens in
+  # TrailingEventMiddleware, once the response below has already been sent.
+  def trailing_event
+    render plain: "ok"
   end
 end

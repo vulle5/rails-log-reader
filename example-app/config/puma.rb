@@ -22,6 +22,14 @@ workers Integer(ENV.fetch("WEB_CONCURRENCY", 0))
 # Specifies the `port` that Puma will listen on to receive requests; default is 3000.
 port ENV.fetch("PORT", 3000)
 
+# Puma's own default is to wait forever for an in-flight request when asked to stop, which
+# means a plain TERM deadlocks against Scenario 4's hang rather than demonstrating anything
+# (#31's Scenario 10). Set, TERM instead forces the hung request's thread after this many
+# seconds and the process exits normally afterward — this app's own at_exit still runs, so
+# the Reader reads a clean run_end for that Run rather than having to conclude the
+# interruption from the next Run's header alone, the way a SIGKILL leaves it.
+force_shutdown_after 5
+
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart
 

@@ -1,6 +1,7 @@
 require "fileutils"
 require "json"
-require "open3"
+require "securerandom"
+require "socket"
 require "tmpdir"
 
 # Boots the Example app as a real development Run and hands back what a developer would
@@ -24,15 +25,20 @@ class DevelopmentRun
 
   # Large, and identical for every Run. `bin/` is deliberately absent: `bin/rails` reaches
   # its boot file with `require_relative`, which resolves symlinks, so a symlinked `bin/`
-  # would boot the real app root instead of this one.
-  SYMLINKED = %w[app db lib public storage vendor Gemfile Gemfile.lock Rakefile].freeze
+  # would boot the real app root instead of this one. `Rakefile` is absent for the same
+  # reason and gets the same fix as `config.ru` below: copied, not symlinked.
+  SYMLINKED = %w[app db lib public storage vendor Gemfile Gemfile.lock].freeze
 
   # How the Run is started. `:environment` is the plainest boot there is. `:config_ru` is the
   # rack entry point a server comes in through — both `rails s` and puma-dev, which is how
-  # the app this was written for actually runs.
+  # the app this was written for actually runs. `:rake` boots nothing itself: the script is
+  # trusted to do what `bin/rake` does, and has to — `Rake.application.top_level_tasks` is
+  # what tells the Initializer this Run's `kind` is "rake", and it has to be populated
+  # *before* `config/environment` loads, which `:environment`'s own eager require cannot do.
   ENTRY_POINTS = {
     environment: %(require_relative "config/environment"),
-    config_ru: %(require "rack"\nRack::Builder.parse_file("config.ru"))
+    config_ru: %(require "rack"\nRack::Builder.parse_file("config.ru")),
+    rake: ""
   }.freeze
 
   SIDECAR = "log/rails_log_reader.jsonl"
@@ -59,28 +65,90 @@ class DevelopmentRun
     def booted? = status.success?
   end
 
+  # A Run started in the background rather than waited on — the shape a test needs in order
+  # to act on a Run while it is still alive: send it a signal (#31's Scenario 10), or start a
+  # second Run beside it in the same root before the first is done (#31's Scenarios 8 and 14).
+  # `finish` hands back the same `Result` a blocking `boot` would, once the caller has
+  # collected the exit status itself — `Process.wait2`, or a signal handler's own.
+  Spawned = Struct.new(:root, :pid, :output_path, keyword_init: true) do
+    def finish(status) = DevelopmentRun.result_for(root:, output_path:, status:)
+  end
+
+  # A real Puma, listening on a real port. Scenario 10's TERM case turns on Puma's own
+  # `force_shutdown_after`, and Scenario 12 turns on Puma's own clustering — neither is
+  # anything `spawn`'s bare `ruby run.rb` ever invokes, so this shells out to `puma` itself.
+  Served = Struct.new(:root, :pid, :port, :output_path, keyword_init: true) do
+    def finish(status) = DevelopmentRun.result_for(root:, output_path:, status:)
+  end
+
   class << self
     # `script` is Ruby evaluated after boot, in the booted Run. The block, if given, gets the
     # root before the Run starts, for tests that need to shape it further.
     def boot(script: "", initializer: true, marker: true, env: "development", through: :environment)
+      shared_root(initializer:, marker:) do |root|
+        yield root if block_given?
+        spawned = spawn(root:, script:, env:, through:)
+        _, status = Process.wait2(spawned.pid)
+        spawned.finish(status)
+      end
+    end
+
+    # A throwaway root, built once and handed to the block, for a Scenario that needs more
+    # than one Run appending to one Sidecar rather than the one `boot` gives every call of
+    # its own. Built and torn down exactly as `boot`'s always was.
+    def shared_root(initializer: true, marker: true)
       Dir.mktmpdir("rails-log-reader") do |root|
         build(root, initializer:, marker:)
-        yield root if block_given?
-        File.write(File.join(root, "run.rb"), "#{ENTRY_POINTS.fetch(through)}\n#{script}\n")
-
-        output, status = run(root, env)
-
-        Result.new(
-          # Resolved, because Rails.root is: on macOS the temp dir sits under /var, which
-          # is a symlink to /private/var, and the Run only ever knows itself by the latter.
-          root: File.realpath(root), output:, status:,
-          sidecar_bytes: read(File.join(root, SIDECAR)),
-          development_log: read(File.join(root, "log/development.log")).to_s
-        )
+        # Resolved, because Rails.root is: on macOS the temp dir sits under /var, which is a
+        # symlink to /private/var, and a Run only ever knows itself by the latter.
+        yield File.realpath(root)
       ensure
         # A test may have made `log/` unwritable; the temp root still has to be removable.
         FileUtils.chmod_R("u+rwX", root, force: true)
       end
+    end
+
+    # Starts a Run and returns immediately, without waiting for it to exit — what `boot`
+    # itself is built on, plus an immediate wait. Each call gets its own `run.rb` and its own
+    # output file, named apart, so two calls sharing one `root` never collide mid-boot.
+    def spawn(root:, script: "", env: "development", through: :environment)
+      id = SecureRandom.hex(4)
+      run_path = File.join(root, "run-#{id}.rb")
+      output_path = File.join(root, "output-#{id}.log")
+      File.write(run_path, "#{ENTRY_POINTS.fetch(through)}\n#{script}\n")
+
+      pid = Bundler.with_unbundled_env do
+        Process.spawn(
+          # SECRET_KEY_BASE_DUMMY is what lets a Run boot in `production` without
+          # credentials, which is how the environments this refuses get driven at all.
+          { "RAILS_ENV" => env, "BUNDLE_GEMFILE" => File.join(root, "Gemfile"),
+            "SECRET_KEY_BASE_DUMMY" => "1" },
+          RbConfig.ruby, run_path, chdir: root, out: output_path, err: output_path
+        )
+      end
+
+      Spawned.new(root:, pid:, output_path:)
+    end
+
+    # A real Puma server, booted from the root's own config/puma.rb on an ephemeral port and
+    # confirmed listening before this returns. The caller owns its lifetime from here —
+    # signal it, curl it, wait on it — the same as a developer's own terminal would.
+    def serve(root:, env: "development", web_concurrency: 0)
+      port = free_port
+      output_path = File.join(root, "puma-#{port}.log")
+
+      pid = Bundler.with_unbundled_env do
+        Process.spawn(
+          { "RAILS_ENV" => env, "BUNDLE_GEMFILE" => File.join(root, "Gemfile"),
+            "SECRET_KEY_BASE_DUMMY" => "1", "WEB_CONCURRENCY" => web_concurrency.to_s,
+            "PORT" => port.to_s },
+          "bundle", "exec", "puma", "-C", "config/puma.rb",
+          chdir: root, out: output_path, err: output_path
+        )
+      end
+
+      wait_for_port(port)
+      Served.new(root:, pid:, port:, output_path:)
     end
 
     # The one real HTTP request the request-event tests drive: an in-process Integration
@@ -96,14 +164,25 @@ class DevelopmentRun
       RUBY
     end
 
+    # What `boot`, `Spawned#finish` and `Served#finish` all hand back: the Sidecar and
+    # `log/development.log` a root ended up with, whatever wrote them and however many Runs
+    # they hold — a shared root's file is one Sidecar same as a throwaway one's.
+    def result_for(root:, output_path:, status:)
+      Result.new(root:, output: read(output_path).to_s, status:,
+        sidecar_bytes: read(File.join(root, SIDECAR)),
+        development_log: read(File.join(root, "log/development.log")).to_s)
+    end
+
     private
       def build(root, initializer:, marker:)
         SYMLINKED.each { |entry| File.symlink(File.join(EXAMPLE_APP, entry), File.join(root, entry)) }
 
-        # Copied rather than symlinked, both of them, because `require_relative` resolves
-        # symlinks: reached through one, config.ru and config/ would boot the real app root.
+        # Copied rather than symlinked, all three, because `require_relative` resolves
+        # symlinks: reached through one, config.ru, config/ and the Rakefile would boot the
+        # real app root instead of this one.
         FileUtils.cp_r(File.join(EXAMPLE_APP, "config"), File.join(root, "config"))
         FileUtils.cp(File.join(EXAMPLE_APP, "config.ru"), File.join(root, "config.ru"))
+        FileUtils.cp(File.join(EXAMPLE_APP, "Rakefile"), File.join(root, "Rakefile"))
         FileUtils.rm_f(File.join(root, "config/initializers/rails_log_reader.rb")) unless initializer
 
         FileUtils.mkdir_p(File.join(root, "log"))
@@ -114,15 +193,19 @@ class DevelopmentRun
         FileUtils.touch(File.join(root, MARKER)) if marker
       end
 
-      def run(root, env)
-        Bundler.with_unbundled_env do
-          Open3.capture2e(
-            # SECRET_KEY_BASE_DUMMY is what lets a Run boot in `production` without
-            # credentials, which is how the environments this refuses get driven at all.
-            { "RAILS_ENV" => env, "BUNDLE_GEMFILE" => File.join(root, "Gemfile"),
-              "SECRET_KEY_BASE_DUMMY" => "1" },
-            RbConfig.ruby, "run.rb", chdir: root
-          )
+      def free_port
+        TCPServer.open("127.0.0.1", 0) { |server| server.addr[1] }
+      end
+
+      def wait_for_port(port, timeout: 20)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+        begin
+          TCPSocket.new("127.0.0.1", port).close
+        rescue Errno::ECONNREFUSED, Errno::EADDRNOTAVAIL, Errno::ECONNRESET
+          raise "puma never opened port #{port}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+          sleep 0.1
+          retry
         end
       end
 
