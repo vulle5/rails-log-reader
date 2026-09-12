@@ -132,13 +132,19 @@ bin/rake scenarios:rake_burst &
 for i in 1 2 3 4; do curl -s http://localhost:3000/scenarios/parallel & done
 wait
 
-# 10a — Interrupted via SIGKILL: no at_exit runs, so no run_end is ever written — the
-# Reader has to conclude the interruption from the next Run's run_header alone.
+# 10a — Interrupted via SIGKILL: no at_exit runs, so no run_end is ever written for the
+# killed Run. Nothing on the wire says so directly — the Reader has to conclude the
+# interruption from the next Run's own run_header, so this restarts the server once more:
+# that second run_header is the evidence, not a separate step to remember later.
 bin/dev & SERVER_PID=$!
 sleep 1
 curl -s http://localhost:3000/scenarios/hang &
 sleep 1
 kill -9 $SERVER_PID
+bin/dev & SERVER_PID=$!
+sleep 1
+kill -TERM $SERVER_PID
+wait $SERVER_PID
 
 # 10b — Interrupted via TERM, the "clean" path: config/puma.rb sets `force_shutdown_after 5`,
 # so a plain TERM — which would otherwise deadlock forever against a hanging request — instead

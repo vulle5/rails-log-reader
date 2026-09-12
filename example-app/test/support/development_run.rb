@@ -119,11 +119,7 @@ class DevelopmentRun
 
       pid = Bundler.with_unbundled_env do
         Process.spawn(
-          # SECRET_KEY_BASE_DUMMY is what lets a Run boot in `production` without
-          # credentials, which is how the environments this refuses get driven at all.
-          { "RAILS_ENV" => env, "BUNDLE_GEMFILE" => File.join(root, "Gemfile"),
-            "SECRET_KEY_BASE_DUMMY" => "1" },
-          RbConfig.ruby, run_path, chdir: root, out: output_path, err: output_path
+          base_env(root:, env:), RbConfig.ruby, run_path, chdir: root, out: output_path, err: output_path
         )
       end
 
@@ -136,15 +132,11 @@ class DevelopmentRun
     def serve(root:, env: "development", web_concurrency: 0)
       port = free_port
       output_path = File.join(root, "puma-#{port}.log")
+      env_vars = base_env(root:, env:).merge("WEB_CONCURRENCY" => web_concurrency.to_s, "PORT" => port.to_s)
 
       pid = Bundler.with_unbundled_env do
-        Process.spawn(
-          { "RAILS_ENV" => env, "BUNDLE_GEMFILE" => File.join(root, "Gemfile"),
-            "SECRET_KEY_BASE_DUMMY" => "1", "WEB_CONCURRENCY" => web_concurrency.to_s,
-            "PORT" => port.to_s },
-          "bundle", "exec", "puma", "-C", "config/puma.rb",
-          chdir: root, out: output_path, err: output_path
-        )
+        Process.spawn(env_vars, "bundle", "exec", "puma", "-C", "config/puma.rb",
+          chdir: root, out: output_path, err: output_path)
       end
 
       wait_for_port(port)
@@ -191,6 +183,13 @@ class DevelopmentRun
         File.symlink(File.join(EXAMPLE_APP, "tmp/cache"), File.join(root, "tmp/cache"))
 
         FileUtils.touch(File.join(root, MARKER)) if marker
+      end
+
+      # What every subprocess this file starts needs regardless of how it is started.
+      # SECRET_KEY_BASE_DUMMY is what lets a Run boot in `production` without credentials,
+      # which is how the environments this refuses get driven at all.
+      def base_env(root:, env:)
+        { "RAILS_ENV" => env, "BUNDLE_GEMFILE" => File.join(root, "Gemfile"), "SECRET_KEY_BASE_DUMMY" => "1" }
       end
 
       def free_port
