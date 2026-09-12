@@ -13,6 +13,7 @@ const { createRoot } = await import("react-dom/client")
 const { Reader } = await import("../src/ui/Reader")
 const { activityTable, requestRowId } = await import("../src/shared/activity")
 const { consoleStream } = await import("../src/shared/console")
+const { LOAD_ON_OPEN_EVENTS } = await import("../src/shared/bounds")
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean
@@ -127,12 +128,19 @@ async function openTheReader(...envelopes: Envelope[]) {
   document.body.append(container)
   const root = createRoot(container)
   mounted.push(root)
+  // Cumulative, the way `useSidecar` counts it — `WireStatus.evictedRows` — so a test that
+  // fills the *Memory bound* over more than one `arrive` still says the same thing `main.tsx`
+  // would.
+  let evictedRows = 0
 
   async function arrive(...arriving: Envelope[]) {
     const evicted = activity.fold(arriving)
     stream.fold(arriving)
     stream.evict(evicted)
-    await act(async () => root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} />))
+    evictedRows += evicted.length
+    await act(async () =>
+      root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} evictedRows={evictedRows} />),
+    )
   }
 
   /**
@@ -145,7 +153,10 @@ async function openTheReader(...envelopes: Envelope[]) {
   async function pullEarlier(...pulled: Envelope[]) {
     const evicted = activity.foldEarlier(pulled)
     stream.evict(evicted)
-    await act(async () => root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} />))
+    evictedRows += evicted.length
+    await act(async () =>
+      root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} evictedRows={evictedRows} />),
+    )
   }
 
   await arrive(...envelopes)
@@ -383,6 +394,77 @@ describe("resuming", () => {
 
     expect(pinnedToBottom(container, "Console")).toBe(true)
     expect(pill(container, "Console")).toBeNull()
+  })
+})
+
+describe("the Memory bound's cap (#64)", () => {
+  // Two events to a row, exactly as `activity-table.test.ts`'s own `finishedRequests` counts
+  // it, so a test can say how many rows a number of events comes to.
+  function finishedRequests(server: ReturnType<typeof aRun>, count: number, from = 0) {
+    return Array.from({ length: count }, (_, index) => [
+      server.start(`bound-${from + index}`, "GET", `/bound/${from + index}`),
+      server.finish(`bound-${from + index}`),
+    ]).flat()
+  }
+
+  test("stays an exact count while the table has not yet reached the cap", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+
+    // Short of the cap: nothing has been evicted, so nothing here has to be a floor.
+    await arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 - 20, 100))
+
+    expect(pill(container, "Activity table")?.textContent).toMatch(/^↓ \d+ new$/)
+  })
+
+  test("switches to a floor once the table is at the cap and evicting", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+
+    // The first batch pushes the table past the cap, and its own eviction still leaves the
+    // rendered length ahead of where it started. It is the *next* batch, folded once every
+    // row taken already evicts one, whose rendered length holds still — which is the stall
+    // the pill has to say something about.
+    await arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 20, 100))
+    await arrive(...finishedRequests(run, 2, 100_000))
+
+    expect(pill(container, "Activity table")?.textContent).toMatch(/^↓ \d+\+ new$/)
+  })
+
+  test("shows the floor on the Console too, since #63 ties its retention to the same eviction", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Console")
+
+    await arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 20, 100))
+    await arrive(...finishedRequests(run, 2, 100_000))
+
+    expect(pill(container, "Console")?.textContent).toMatch(/\+ new$/)
+  })
+
+  test("leaves the Detail column an exact count, since the Memory bound does not apply to it as a fold", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await selectRow(container, HANGS)
+    await scrollUp(container, "Detail column")
+
+    await arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 20, 100))
+    await arrive(...finishedRequests(run, 2, 100_000), run.log(HANGS, "still aggregating"))
+
+    expect(pill(container, "Detail column")?.textContent).toContain("1 new")
+    expect(pill(container, "Detail column")?.textContent).not.toContain("+")
+  })
+
+  test("resuming a floored pill returns the column to following, unchanged", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Activity table")
+    await arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 20, 100))
+    await arrive(...finishedRequests(run, 2, 100_000))
+
+    const clicked = pill(container, "Activity table")
+    if (clicked === null) throw new Error("the paused, floored table has no pill to click")
+    await click(clicked)
+
+    expect(pinnedToBottom(container, "Activity table")).toBe(true)
+    expect(pill(container, "Activity table")).toBeNull()
   })
 })
 

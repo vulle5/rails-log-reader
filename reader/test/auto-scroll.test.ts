@@ -44,15 +44,19 @@ describe("where the port is", () => {
 
 describe("scrolling", () => {
   test("pauses a following column when it leaves the bottom", () => {
-    expect(scrolled(FOLLOWING, false)).toEqual({ following: false, unseen: 0 })
+    expect(scrolled(FOLLOWING, false)).toEqual({ following: false, unseen: 0, floor: false })
   })
 
   test("resumes silently when it comes back to the bottom, dropping the count with it", () => {
-    expect(scrolled({ following: false, unseen: 12 }, true)).toEqual(FOLLOWING)
+    expect(scrolled({ following: false, unseen: 12, floor: false }, true)).toEqual(FOLLOWING)
+  })
+
+  test("resuming drops a floor too, exactly as it drops an exact count", () => {
+    expect(scrolled({ following: false, unseen: 5_012, floor: true }, true)).toEqual(FOLLOWING)
   })
 
   test("leaves a paused column exactly as it was while it is still away from the bottom", () => {
-    const paused = { following: false, unseen: 12 }
+    const paused = { following: false, unseen: 12, floor: false }
 
     // Identity, not just equality: a scroll that changes nothing must not re-render the
     // column it is scrolling — this fires on every frame of a drag.
@@ -70,13 +74,66 @@ describe("things arriving", () => {
   })
 
   test("are counted for a paused column, which is the whole of what the pill says", () => {
-    expect(arrived({ following: false, unseen: 2 }, 3)).toEqual({ following: false, unseen: 5 })
+    expect(arrived({ following: false, unseen: 2, floor: false }, 3)).toEqual({
+      following: false,
+      unseen: 5,
+      floor: false,
+    })
   })
 
   test("never resume a paused column, whatever arrived — a Run boundary included", () => {
     // There is no event in the Sidecar the rule reads: a `run_header` arriving is one more
     // thing that arrived, and a restart may not yank a reader away from what they were
     // reading.
-    expect(arrived({ following: false, unseen: 0 }, 1).following).toBe(false)
+    expect(arrived({ following: false, unseen: 0, floor: false }, 1).following).toBe(false)
+  })
+
+  test("stays exact while nothing is being evicted", () => {
+    expect(arrived({ following: false, unseen: 2, floor: false }, 3, 0)).toEqual({
+      following: false,
+      unseen: 5,
+      floor: false,
+    })
+  })
+
+  test("becomes a floor once the Memory bound starts evicting, even where the rendered count stalled", () => {
+    // The Activity table's own case: a row taken for every row admitted holds `howMany` at
+    // zero, so the eviction count is the only thing left saying anything arrived.
+    expect(arrived({ following: false, unseen: 0, floor: false }, 0, 1)).toEqual({
+      following: false,
+      unseen: 1,
+      floor: true,
+    })
+  })
+
+  test("adds an eviction on top of what still arrived, for a Console whose own count can run either way", () => {
+    expect(arrived({ following: false, unseen: 4, floor: false }, 2, 3)).toEqual({
+      following: false,
+      unseen: 9,
+      floor: true,
+    })
+  })
+
+  test("never lets a negative rendered count subtract from what a floor already holds", () => {
+    // The Console's own rendered length can fall at the cap — an evicted row can take more
+    // lines than a quiet batch adds — and that fall is not the pill giving anything back.
+    expect(arrived({ following: false, unseen: 4, floor: false }, -6, 2)).toEqual({
+      following: false,
+      unseen: 6,
+      floor: true,
+    })
+  })
+
+  test("stays a floor once it has become one, even through a batch with nothing evicted", () => {
+    expect(arrived({ following: false, unseen: 5, floor: true }, 1, 0)).toEqual({
+      following: false,
+      unseen: 6,
+      floor: true,
+    })
+  })
+
+  test("does nothing for a batch with neither an arrival nor an eviction", () => {
+    const paused = { following: false, unseen: 5, floor: true }
+    expect(arrived(paused, 0, 0)).toBe(paused)
   })
 })

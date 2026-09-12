@@ -53,6 +53,11 @@ type ReaderProps = {
   rows?: readonly ActivityRow[]
   /** Every App log event, in append order: the *Console*'s own fold, not this one's rows. */
   lines?: readonly ConsoleLine[]
+  /**
+   * How many rows the *Memory bound* has evicted, ever. Fed to the Activity table's and the
+   * Console's auto-scrolls, and to neither of the other two — see `AutoScrollOptions.evicted`.
+   */
+  evictedRows?: number
   /** File-on-disk vs. process-still-running, from `detectMismatch`. */
   mismatch?: Mismatch
   /** `v` off the most recently observed envelope, whichever process wrote it. */
@@ -70,6 +75,7 @@ type ReaderProps = {
 export function Reader({
   rows = [],
   lines = [],
+  evictedRows = 0,
   mismatch = { kind: "none" },
   liveWireVersion = null,
   repairState = { phase: "idle" },
@@ -130,7 +136,11 @@ export function Reader({
   // `refollowsWhen` change: the chip thins the same timeline, the same "same stream thinned"
   // case a Console chip already is, and a reader who scrolled up in it is still reading where
   // they were.
-  const consoleScroll = useAutoScroll({ items: showingLines.length, listing: consoleFilterKey(filter) })
+  const consoleScroll = useAutoScroll({
+    items: showingLines.length,
+    listing: consoleFilterKey(filter),
+    evicted: evictedRows,
+  })
   // The Activity table's listing is its tab *and* the row it starts at, because it is the one
   // column whose list can change at the top rather than only at the bottom: a *load-earlier*
   // prepends history above the oldest row, and the *Memory bound* takes rows off the same end.
@@ -139,6 +149,7 @@ export function Reader({
   const activityScroll = useAutoScroll({
     items: showingRows.length,
     listing: `${showingKind} ${showingRows[0]?.id ?? ""}`,
+    evicted: evictedRows,
   })
   const detailScroll = useAutoScroll({
     items: detailItems(showing, detailFilter),
@@ -306,7 +317,11 @@ function Column({ place, name, controls, scroll, children }: ColumnProps) {
           of a pause either way; the pill is what the count is for. */}
       {!scroll.following && scroll.unseen > 0 && (
         <button type="button" className="new-pill" onClick={scroll.resume} title="Follow new activity again">
-          <span aria-hidden="true">↓</span> {scroll.unseen} new
+          {/* `floor`: the Memory bound is evicting one row for every row it takes, so the
+              count below has stalled rather than stopped — "+" says so rather than reading
+              like a number that quietly froze. */}
+          <span aria-hidden="true">↓</span> {scroll.unseen}
+          {scroll.floor ? "+" : ""} new
         </button>
       )}
     </section>

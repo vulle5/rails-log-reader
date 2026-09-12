@@ -21,6 +21,14 @@ export type WireStatus = {
    * eviction rather than counting its own (#63).
    */
   lines: readonly ConsoleLine[]
+  /**
+   * How many rows the *Memory bound* has evicted, ever. Cumulative rather than per-batch, so
+   * the Activity table's and the Console's own auto-scrolls can each read it as one more thing
+   * to watch grow — the signal `arrived` turns into a floor once a paused column's rendered
+   * count stalls at the cap (#64). One number for both columns, because it is one bound: the
+   * Console has none of its own to report (#63).
+   */
+  evictedRows: number
   liveWireVersion: number | null
   liveRunId: string | null
   /**
@@ -71,9 +79,10 @@ export function useSidecar(): WireStatus {
   const [status, setStatus] = useState<{
     rows: readonly ActivityRow[]
     lines: readonly ConsoleLine[]
+    evictedRows: number
     liveWireVersion: number | null
     liveRunId: string | null
-  }>({ rows: [], lines: [], liveWireVersion: null, liveRunId: null })
+  }>({ rows: [], lines: [], evictedRows: 0, liveWireVersion: null, liveRunId: null })
   const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
   // Never set back: a reconnection re-reads a history the folds already hold, so what it
   // would be waiting for is already on screen.
@@ -104,6 +113,7 @@ export function useSidecar(): WireStatus {
         // Console lines never mutate at all — a line is one envelope — so this array is
         // copied for the one reason the rows' is: React is told by identity.
         lines: [...stream.lines],
+        evictedRows: previous.evictedRows + evicted.length,
         liveWireVersion: latest?.v ?? previous.liveWireVersion,
         liveRunId: latest?.run_id ?? previous.liveRunId,
       }))
@@ -147,7 +157,12 @@ export function useSidecar(): WireStatus {
       // evictable again, so the Console still has to hear about whatever that takes.
       const evicted = activity.foldEarlier(block.envelopes)
       stream.evict(evicted)
-      setStatus((previous) => ({ ...previous, rows: [...activity.rows], lines: [...stream.lines] }))
+      setStatus((previous) => ({
+        ...previous,
+        rows: [...activity.rows],
+        lines: [...stream.lines],
+        evictedRows: previous.evictedRows + evicted.length,
+      }))
       setEarlier({ available: block.from > 0, loading: false })
     } catch {
       // The read failed and the cursor has not moved, so the control stays exactly as it

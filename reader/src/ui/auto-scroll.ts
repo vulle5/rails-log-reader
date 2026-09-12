@@ -24,16 +24,27 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "
  * the port and letting the scroll it caused be read like any other.
  */
 
-/** The state of one column's auto-scroll. `unseen` is 0 whenever `following`, always. */
+/**
+ * The state of one column's auto-scroll. `unseen` is 0 whenever `following`, always, and so
+ * is `floor`.
+ */
 export type AutoScroll = {
   /** Stuck to the bottom of what it is showing. */
   following: boolean
   /** What has arrived below since it stopped. The number the pill says. */
   unseen: number
+  /**
+   * Whether `unseen` is a lower bound rather than an exact count — see `arrived`. Sticky once
+   * set, for the same reason the count it replaces was never made exact in the first place: a
+   * caller that starts feeding `arrived` an eviction count has already reached the one case
+   * `unseen` cannot count past, and going back to exact would need the very ledger the pill
+   * was built to avoid keeping.
+   */
+  floor: boolean
 }
 
 /** Where every column opens: pinned to the bottom of the loaded history, with nothing missed. */
-export const FOLLOWING: AutoScroll = { following: true, unseen: 0 }
+export const FOLLOWING: AutoScroll = { following: true, unseen: 0, floor: false }
 
 /** The parts of a scrollport this file reads, as the DOM hands them over. */
 export type Port = { scrollTop: number; scrollHeight: number; clientHeight: number }
@@ -58,17 +69,29 @@ export function atBottom(port: Port) {
  */
 export function scrolled(state: AutoScroll, bottom: boolean): AutoScroll {
   if (bottom) return state.following ? state : FOLLOWING
-  return state.following ? { following: false, unseen: 0 } : state
+  return state.following ? { following: false, unseen: 0, floor: false } : state
 }
 
 /**
  * Things were appended below. A following column shows them and counts nothing; a paused one
  * counts them and moves nothing — including a Run boundary, which is one more thing that
  * arrived and never a reason to yank a reader back from what they were reading.
+ *
+ * `evicted` is the *Memory bound*'s own report of what it just took while this batch folded —
+ * rows, for the Activity table, and the same rows again for the Console, whose retention
+ * borrows that eviction rather than counting one of its own (#63). Zero everywhere below the
+ * cap, where `howMany` is exact on its own. Once the bound is evicting one row for every row
+ * it takes, `howMany` stalls at zero for the Activity table — the length it counts holds
+ * still — or can even run negative for the Console, whose own rendered count is lines rather
+ * than rows and can drop as evicted lines outnumber a quiet batch's arrivals. Either way
+ * `howMany` alone has stopped saying anything true about what arrived, so `evicted` is what
+ * keeps the pill moving from there, and `floor` is what tells the caller the number on it is
+ * a lower bound and not the exact count it a moment ago was.
  */
-export function arrived(state: AutoScroll, howMany: number): AutoScroll {
-  if (state.following || howMany <= 0) return state
-  return { following: false, unseen: state.unseen + howMany }
+export function arrived(state: AutoScroll, howMany: number, evicted = 0): AutoScroll {
+  if (state.following) return state
+  if (howMany <= 0 && evicted <= 0) return state
+  return { following: false, unseen: state.unseen + Math.max(howMany, 0) + evicted, floor: state.floor || evicted > 0 }
 }
 
 /** What a column needs to follow: the port to attach, and what the pill renders from. */
@@ -127,26 +150,34 @@ type AutoScrollOptions = {
    * already is.
    */
   refollowsWhen?: string
+  /**
+   * How many rows the *Memory bound* has evicted, ever — cumulative, counted the same way
+   * `items` is, so a rising delta between two renders is what tells `arrived` a batch was
+   * capped rather than counting one of its own. Left unset by the Detail column, which the
+   * bound does not apply to as a fold (#63, #64): a Selection's timeline is never evicted out
+   * from under it, so it has nothing to turn into a floor.
+   */
+  evicted?: number
 }
 
-export function useAutoScroll({ items, listing, refollowsWhen }: AutoScrollOptions): ColumnAutoScroll {
+export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: AutoScrollOptions): ColumnAutoScroll {
   const port = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<AutoScroll>(FOLLOWING)
-  const rendered = useRef({ items, listing, refollowsWhen })
+  const rendered = useRef({ items, listing, refollowsWhen, evicted })
 
   // A layout effect, so the port is put back on the bottom in the same frame the thing that
   // pushed it off was added: after the DOM has the new rows and before anything is painted,
   // which is what makes following look like the column never moved at all.
   useLayoutEffect(() => {
     const previous = rendered.current
-    rendered.current = { items, listing, refollowsWhen }
+    rendered.current = { items, listing, refollowsWhen, evicted }
     const relisted = listing !== previous.listing
     const refollows = refollowsWhen !== undefined && refollowsWhen !== previous.refollowsWhen
 
     if (relisted) {
       if (refollows) setState(FOLLOWING)
     } else if (!state.following) {
-      setState((current) => arrived(current, items - previous.items))
+      setState((current) => arrived(current, items - previous.items, evicted - previous.evicted))
     }
 
     // Read off `state` and not off what was just set: a column that was following is
@@ -154,7 +185,7 @@ export function useAutoScroll({ items, listing, refollowsWhen }: AutoScrollOptio
     // the bottom is where it belongs, and the render that state change causes changes nothing
     // about that.
     if (state.following || refollows) stickToBottom(port.current)
-  }, [items, listing, refollowsWhen, state.following])
+  }, [items, listing, refollowsWhen, evicted, state.following])
 
   const onScroll = useCallback(() => {
     const measuring = port.current

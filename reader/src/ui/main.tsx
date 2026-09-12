@@ -18,7 +18,7 @@ if (container === null) throw new Error("index.html is missing its #root element
  * all arrived, into why an empty Reader is empty.
  */
 function LiveReader() {
-  const { rows, lines, liveWireVersion, liveRunId, historyLoaded, earlier, loadEarlier } = useSidecar()
+  const { rows, lines, evictedRows, liveWireVersion, liveRunId, historyLoaded, earlier, loadEarlier } = useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
 
@@ -35,6 +35,7 @@ function LiveReader() {
     <Reader
       rows={rows}
       lines={lines}
+      evictedRows={evictedRows}
       mismatch={detectMismatch(fileStatus, liveWireVersion)}
       liveWireVersion={liveWireVersion}
       repairState={repairState}
