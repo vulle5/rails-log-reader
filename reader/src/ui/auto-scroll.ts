@@ -114,44 +114,47 @@ type AutoScrollOptions = {
    */
   listing: string
   /**
-   * Whether a new `listing` also puts the column back to following. True for the Detail column
-   * alone, where a new listing is a new *Selection* — a different row's timeline, which opens
-   * at its newest activity rather than inheriting the last one's scroll position. The other
-   * two are listing the same stream, thinned, and a reader who scrolled up in it is still
-   * reading where they were.
+   * A narrower key than `listing`, watched the same way, whose own change alone puts the
+   * column back to following. Left unset by two of the three columns, which never resume on
+   * a relist: a tab or a chip re-derives the same stream thinned, and a reader who scrolled
+   * up in it is still reading where they were.
+   *
+   * The Detail column alone supplies one, and supplies *Selection* — not its own filter
+   * chip, for the same reason the other columns' chips are not `refollowsWhen` either. A new
+   * Selection is a different row's timeline, which opens at its newest activity rather than
+   * inheriting the last one's scroll position; the schema chip thins that same timeline, so
+   * it is `listing`'s concern only, exactly the "same stream thinned" case a Console chip
+   * already is.
    */
-  refollowsOnNewListing?: boolean
+  refollowsWhen?: string
 }
 
-export function useAutoScroll({
-  items,
-  listing,
-  refollowsOnNewListing = false,
-}: AutoScrollOptions): ColumnAutoScroll {
+export function useAutoScroll({ items, listing, refollowsWhen }: AutoScrollOptions): ColumnAutoScroll {
   const port = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<AutoScroll>(FOLLOWING)
-  const rendered = useRef({ items, listing })
+  const rendered = useRef({ items, listing, refollowsWhen })
 
   // A layout effect, so the port is put back on the bottom in the same frame the thing that
   // pushed it off was added: after the DOM has the new rows and before anything is painted,
   // which is what makes following look like the column never moved at all.
   useLayoutEffect(() => {
     const previous = rendered.current
-    rendered.current = { items, listing }
+    rendered.current = { items, listing, refollowsWhen }
     const relisted = listing !== previous.listing
+    const refollows = refollowsWhen !== undefined && refollowsWhen !== previous.refollowsWhen
 
     if (relisted) {
-      if (refollowsOnNewListing) setState(FOLLOWING)
+      if (refollows) setState(FOLLOWING)
     } else if (!state.following) {
       setState((current) => arrived(current, items - previous.items))
     }
 
     // Read off `state` and not off what was just set: a column that was following is
-    // following, and the one that was just handed a new Selection is about to be. Either way
+    // following, and the one whose `refollowsWhen` just changed is about to be. Either way
     // the bottom is where it belongs, and the render that state change causes changes nothing
     // about that.
-    if (state.following || (relisted && refollowsOnNewListing)) stickToBottom(port.current)
-  }, [items, listing, refollowsOnNewListing, state.following])
+    if (state.following || refollows) stickToBottom(port.current)
+  }, [items, listing, refollowsWhen, state.following])
 
   const onScroll = useCallback(() => {
     const measuring = port.current

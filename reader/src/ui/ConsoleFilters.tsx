@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 
 import type { ConsoleLine } from "../shared/console"
 import { SEVERITIES, type Severity } from "../shared/wire"
+import { Chip } from "./Chip"
 
 /**
  * Everything that thins the *Console*, in one place — so "what is the rail showing?" has one
@@ -129,29 +130,6 @@ export function ConsoleFilters({ filter, onToggleLevel, onToggleRails }: Console
         />
       </div>
     </div>
-  )
-}
-
-type ChipProps = {
-  named: string
-  /** What the stylesheet answers for, keyed rather than slugged from the label. */
-  kind: string
-  showing: boolean
-  title: string
-  onToggle: () => void
-}
-
-function Chip({ named, kind, showing, title, onToggle }: ChipProps) {
-  return (
-    <button
-      type="button"
-      aria-pressed={showing}
-      className={showing ? `chip chip-${kind}` : `chip chip-${kind} chip-off`}
-      title={title}
-      onClick={onToggle}
-    >
-      {named}
-    </button>
   )
 }
 

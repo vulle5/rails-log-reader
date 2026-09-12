@@ -477,3 +477,54 @@ describe("the Detail column", () => {
     expect(pinnedToBottom(container, "Activity table")).toBe(true)
   })
 })
+
+/**
+ * #54's chip is folded into the Detail column's `listing`, exactly as a Console chip is into
+ * the Console's, but it is never by itself a `refollowsWhen` change: it thins the selected
+ * row's own timeline rather than opening a different one, the same "same stream thinned" case
+ * a Console chip already is. Only a new *Selection* refollows.
+ */
+describe("the Detail column's schema chip", () => {
+  function schemaChip(container: HTMLElement) {
+    const found = [...container.querySelectorAll("[aria-label='Filter by query kind'] button")].find(
+      (candidate) => candidate.textContent === "schema",
+    )
+    if (found === undefined) throw new Error("no schema chip")
+    return found
+  }
+
+  test("re-derives what the Detail column is showing rather than adding to it", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY)
+    await selectRow(container, HANGS)
+    await scrollUp(container, "Detail column")
+    await arrive(run.log(HANGS, "still aggregating"))
+
+    await click(schemaChip(container))
+
+    // Neither disturbed by the toggle: a paused column stays paused, and the count is what
+    // arrived while away — not old queries the chip has just revealed.
+    expect(pinnedToBottom(container, "Detail column")).toBe(false)
+    expect(pill(container, "Detail column")?.textContent).toContain("1 new")
+  })
+
+  test("never pauses or resumes the column on its own", async () => {
+    const { container } = await openTheReader(...HISTORY)
+    await selectRow(container, HANGS)
+
+    await click(schemaChip(container))
+
+    expect(pinnedToBottom(container, "Detail column")).toBe(true)
+    expect(pill(container, "Detail column")).toBeNull()
+  })
+
+  test("leaves the other two columns exactly as they were when it does", async () => {
+    const { container } = await openTheReader(...HISTORY)
+    await scrollUp(container, "Console")
+    await selectRow(container, HANGS)
+
+    await click(schemaChip(container))
+
+    expect(pinnedToBottom(container, "Console")).toBe(false)
+    expect(pinnedToBottom(container, "Activity table")).toBe(true)
+  })
+})

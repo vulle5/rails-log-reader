@@ -1,5 +1,6 @@
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../shared/wire"
+import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { controllerAction, methodClassName, ms, runDescription } from "./format"
 import { Highlight, Marked, useMatches } from "./search"
 import { tokenizeSql } from "./sql-highlight"
@@ -13,7 +14,10 @@ import { tokenizeSql } from "./sql-highlight"
  *
  * Nothing here reformats: a query is rendered as the Initializer emitted it, comment and
  * all, tokenized into spans that put the text back together character for character. What
- * is read is what `development.log` showed and what pastes into a console.
+ * is read is what `development.log` showed and what pastes into a console — SCHEMA and
+ * EXPLAIN queries included, unless `DetailFilters`' one chip is hiding them, which is #54's
+ * fix for the one respect in which that promise used to overshoot: `development.log` never
+ * shows them at all.
  *
  * The column is present from the first paint whether or not anything is selected — the
  * placeholder is what pins it — so selecting a row changes what this holds and nothing
@@ -23,14 +27,18 @@ import { tokenizeSql } from "./sql-highlight"
  * How much this column is rendering, which is what its *auto-scroll* counts arrivals by. Here
  * rather than where the hook is called, because it is a fact about what this file draws: a Run
  * row has no trailing section to add, and a column that stopped rendering one would otherwise
- * leave the pill quietly counting things nobody can scroll to.
+ * leave the pill quietly counting things nobody can scroll to. Filtered the same way the
+ * timeline itself is, for the same reason `showingLines.length` and not `lines.length` is what
+ * the Console's own auto-scroll counts: a query the chip is hiding is not one the reader would
+ * find by scrolling down.
  */
-export function detailItems(row: ActivityRow | null) {
+export function detailItems(row: ActivityRow | null, filter: DetailFilter) {
   if (row === null) return 0
-  return row.timeline.length + (row.kind === "request" ? row.trailing.length : 0)
+  const trailing = row.kind === "request" ? row.trailing : []
+  return eventsShown(row.timeline, filter).length + eventsShown(trailing, filter).length
 }
 
-export function DetailColumn({ row }: { row: ActivityRow | null }) {
+export function DetailColumn({ row, filter }: { row: ActivityRow | null; filter: DetailFilter }) {
   if (row === null) {
     return (
       <p className="placeholder">
@@ -39,10 +47,15 @@ export function DetailColumn({ row }: { row: ActivityRow | null }) {
     )
   }
 
-  return row.kind === "request" ? <RequestDetail row={row} /> : <RunDetail row={row} />
+  return row.kind === "request" ? <RequestDetail row={row} filter={filter} /> : <RunDetail row={row} filter={filter} />
 }
 
-function RequestDetail({ row }: { row: RequestRow }) {
+function RequestDetail({ row, filter }: { row: RequestRow; filter: DetailFilter }) {
+  // Filtered once each, rather than where they are rendered: `trailing` is read twice below —
+  // once for whether the section exists at all, once for what it holds — and a second pass
+  // over the same array for the same filter would say nothing a first pass had not already.
+  const trailing = eventsShown(row.trailing, filter)
+
   return (
     <article className="detail">
       <header className="detail-heading">
@@ -57,9 +70,13 @@ function RequestDetail({ row }: { row: RequestRow }) {
         </span>
       </header>
 
-      <Timeline events={row.timeline} />
+      <Timeline events={eventsShown(row.timeline, filter)} />
       {row.exception !== null && <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} />}
-      {row.trailing.length > 0 && <Trailing events={row.trailing} />}
+      {/* Checked on the filtered length rather than `row.trailing.length`: a trailing block of
+          nothing but SCHEMA queries, hidden, must not leave an empty "After the request
+          finished" section behind — the section is about there being something to show
+          under it. */}
+      {trailing.length > 0 && <Trailing events={trailing} />}
     </article>
   )
 }
@@ -73,7 +90,7 @@ function RequestDetail({ row }: { row: RequestRow }) {
  * No trailing section and no exception: a Run has no finish for anything to trail, and an
  * exception on the wire belongs to a request.
  */
-function RunDetail({ row }: { row: RunRow }) {
+function RunDetail({ row, filter }: { row: RunRow; filter: DetailFilter }) {
   const { kind, facts } = runDescription(row)
 
   return (
@@ -90,11 +107,14 @@ function RunDetail({ row }: { row: RunRow }) {
         </span>
       </header>
 
-      <Timeline events={row.timeline} />
+      <Timeline events={eventsShown(row.timeline, filter)} />
     </article>
   )
 }
 
+/** Renders whatever it is handed — filtering is each caller's own job, done exactly once,
+ * because this is reused from three call sites and a filter applied here would run again for
+ * every one of them. */
 function Timeline({ events }: { events: readonly TimelineEvent[] }) {
   return (
     <ol className="timeline">
