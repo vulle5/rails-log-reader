@@ -831,6 +831,14 @@ mark.search-match {
   align-items: center;
 }
 
+/* The Detail column's one thinning (#54): a single chip, so no second group and no separator
+   are needed the way the Console's two axes need one. */
+.detail-filters {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

@@ -28,6 +28,9 @@ afterEach(() => {
     for (const root of mounted.splice(0)) root.unmount()
   })
   document.body.innerHTML = ""
+  // The schema chip persists by design, which between tests is one test writing another's
+  // filter.
+  localStorage.clear()
 })
 
 afterAll(async () => {
@@ -320,6 +323,104 @@ describe("a query", () => {
     expect(query.querySelector(".sql")?.textContent).toBe("PRAGMA foreign_keys")
     expect(query.querySelector(".sql-name")).toBeNull()
     expect(query.querySelector(".sql-duration")?.textContent).toBe("0.4ms")
+  })
+})
+
+/**
+ * #54: `development.log` never shows a SCHEMA or EXPLAIN query — Rails' own log subscriber
+ * drops them by name before a line is ever written — so the Detail column hides them the same
+ * way on open, with one chip to bring them back for the reload-diagnosis case they exist for.
+ */
+describe("the schema chip", () => {
+  async function click(element: Element) {
+    await act(async () => element.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  }
+
+  function chip(container: HTMLElement) {
+    const found = [...container.querySelectorAll("[aria-label='Filter by query kind'] button")].find(
+      (candidate) => candidate.textContent === "schema",
+    )
+    if (found === undefined) throw new Error("no schema chip")
+    return found
+  }
+
+  test("hides SCHEMA and EXPLAIN queries on open, among a request's ordinary ones", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+      run.sql("req-1", "EXPLAIN SELECT 1", { name: "EXPLAIN" }),
+      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+    )
+
+    await select(container, "/posts/12")
+
+    expect(timeline(container)).toEqual(["SELECT 1"])
+    expect(chip(container).getAttribute("aria-pressed")).toBe("false")
+  })
+
+  test("brings them back, interleaved where they were emitted, once the chip is on", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+    )
+
+    await select(container, "/posts/12")
+    await click(chip(container))
+
+    expect(timeline(container)).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1"])
+    expect(chip(container).getAttribute("aria-pressed")).toBe("true")
+  })
+
+  test("leaves a query named anything else alone", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+      run.sql("req-1", "PRAGMA foreign_keys", { name: null }),
+    )
+
+    await select(container, "/posts/12")
+
+    expect(timeline(container)).toEqual(["SELECT 1", "PRAGMA foreign_keys"])
+  })
+
+  test("hides an all-SCHEMA trailing section rather than leaving it empty", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.finish("req-1"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+    )
+
+    await select(container, "/posts/12")
+
+    expect(detail(container).querySelector('[aria-label="After the request finished"]')).toBeNull()
+  })
+
+  test("persists the choice, like the Console's chips", async () => {
+    const run = aRun("srv-1")
+    const envelopes = [
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+    ] as const
+
+    const first = await theReader(...envelopes)
+    await select(first, "/posts/12")
+    await click(chip(first))
+
+    act(() => {
+      for (const root of mounted.splice(0)) root.unmount()
+    })
+    document.body.innerHTML = ""
+
+    const second = await theReader(...envelopes)
+    await select(second, "/posts/12")
+
+    expect(timeline(second)).toEqual(["SELECT sql FROM sqlite_master"])
+    expect(chip(second).getAttribute("aria-pressed")).toBe("true")
   })
 })
 

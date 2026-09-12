@@ -262,6 +262,14 @@ Pinned once opened, so selecting never reflows the layout. Renders what the Init
 emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
 cut says so where it is read rather than passing as whole.
 
+`SCHEMA` and `EXPLAIN` queries are hidden by default too, for the mirror-image reason the
+Console's `rails` chip is: `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops them
+before `development.log` is ever written to, while `SqlSubscriber` forwards them
+anyway — the rare "why was the first request after a restart the slow one" question only
+the dropped ones answer. One chip brings them back, persisted the same way the Console's
+chips are. Hidden is never dropped: the timeline still holds every one, and a hidden query
+is one click away rather than in the way of the ordinary request beside it.
+
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed
 one, which selects its *Run row*. If a tab filter hides the row being selected, the click
@@ -330,7 +338,9 @@ second record of what the reader has seen that the pill is deliberately not.
 
 All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
-different thing to be at the bottom of, rather than the same stream thinned.
+different thing to be at the bottom of, rather than the same stream thinned. Its own SCHEMA
+chip is the same stream thinned, exactly the case a Console chip already is, so toggling it
+never refollows on its own — only a new Selection does.
 _Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
 is the control).
 

@@ -10,6 +10,7 @@ import { useAutoScroll, type ColumnAutoScroll } from "./auto-scroll"
 import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
 import { ConsoleRail } from "./ConsoleRail"
 import { detailItems, DetailColumn } from "./DetailColumn"
+import { DetailFilters, detailFilterKey, useDetailFilter } from "./DetailFilters"
 import { EmptyReader } from "./EmptyReader"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
@@ -90,6 +91,7 @@ export function Reader({
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
+  const { filter: detailFilter, toggleSchema } = useDetailFilter()
 
   // The search is here for the reason the filters are, and is the one thing here that is not
   // one: it reaches every column through context and changes what they *mark*, never what
@@ -117,13 +119,17 @@ export function Reader({
   const showingLines = linesShown(lines, filter)
 
   // The three auto-scrolls. Each is handed how much its column is rendering and what it is
-  // listing — a Console filter, a row-kind tab, a Selection — and nothing else: there is no
-  // event and no state anywhere else in the Reader that may pause or resume one of them.
+  // listing — a Console filter, a row-kind tab, a Selection and a Detail filter — and nothing
+  // else: there is no event and no state anywhere else in the Reader that may pause or resume
+  // one of them.
   //
-  // Only the Detail column refollows on a new listing, because only there is that a different
-  // thing entirely: another row's timeline, which opens at its newest activity rather than
-  // inheriting the last one's scroll position. A tab or a chip is the same stream thinned, and
-  // a reader who scrolled up in it is still reading where they were.
+  // Only the Detail column ever refollows on its own, and only on a new *Selection*
+  // (`refollowsWhen`) — another row's timeline is a different thing entirely to be at the
+  // bottom of. Its schema chip is folded into `listing` alongside `selected`, so toggling it
+  // is still a relist and not a pile of "arrived" queries, but is never by itself a
+  // `refollowsWhen` change: the chip thins the same timeline, the same "same stream thinned"
+  // case a Console chip already is, and a reader who scrolled up in it is still reading where
+  // they were.
   const consoleScroll = useAutoScroll({ items: showingLines.length, listing: consoleFilterKey(filter) })
   // The Activity table's listing is its tab *and* the row it starts at, because it is the one
   // column whose list can change at the top rather than only at the bottom: a *load-earlier*
@@ -135,9 +141,9 @@ export function Reader({
     listing: `${showingKind} ${showingRows[0]?.id ?? ""}`,
   })
   const detailScroll = useAutoScroll({
-    items: detailItems(showing),
-    listing: selected ?? "",
-    refollowsOnNewListing: true,
+    items: detailItems(showing, detailFilter),
+    listing: `${selected ?? ""} ${detailFilterKey(detailFilter)}`,
+    refollowsWhen: selected ?? "",
   })
 
   // A jump is asked for rather than done on the spot: the same click can clear a tab filter,
@@ -245,8 +251,13 @@ export function Reader({
                 rows — not that a tab is showing none of the ones it holds. */}
             {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
           </Column>
-          <Column place="detail" name="Detail column" scroll={detailScroll}>
-            <DetailColumn row={showing} />
+          <Column
+            place="detail"
+            name="Detail column"
+            scroll={detailScroll}
+            controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
+          >
+            <DetailColumn row={showing} filter={detailFilter} />
           </Column>
           {/* Over all three, because the rule belongs to none of them: it leaves the Console's
               gutter and lands on a row in the table beside it. `layoutKey` is everything that
