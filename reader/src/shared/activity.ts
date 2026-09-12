@@ -53,10 +53,14 @@ export type RequestRow = {
   runId: string
   state: RequestState
   /**
-   * A *Partial request*: the Reader has this request's children but never saw its start,
-   * because it attached mid-flight. Set when the row is created by anything other than a
-   * `request_start`, and **never cleared** — later events promote the row without making the
-   * events emitted before the Reader attached any less lost, and their number unknowable.
+   * A *Partial request*: the Reader does not currently hold this request's start, because it
+   * attached mid-flight or started after the request did. Set when the row is created by
+   * anything other than a `request_start`. Cleared only by a *load-earlier* pull turning up
+   * that same `request_start` — the one thing that changes what the mark records, from "the
+   * Reader never saw this" to "the Reader does not currently hold this." A `request_start`
+   * arriving through the ordinary live fold never clears it: within one append-ordered batch a
+   * child arriving before its own start is not a recovery, it is the wire out of order, and
+   * the events emitted before the Reader attached are exactly as lost as they were.
    */
   partial: boolean
   /**
@@ -568,6 +572,12 @@ export function activityTable(): ActivityTable {
         row.path = envelope.payload.path
         folding.startedAtMono = envelope.at_mono
         row.provenElapsed ??= { ms: 0, atWall: envelope.at_wall }
+        // Only a load-earlier pull recovers a start: this one is being folded into a block
+        // that sits before everything already held, which is what makes it a start turning
+        // up rather than the wire's own order. Live, a child always arrives before its
+        // request's own later start only by being out of order, not by the Reader recovering
+        // anything, so the mark stays exactly as true as it was.
+        if (earlier !== null) row.partial = false
         break
       case "request_route":
         row.controller = envelope.payload.controller

@@ -755,8 +755,9 @@ describe("what the fold concludes about a request", () => {
 
 /**
  * A *Partial request*: the Reader attached mid-flight, so it has the children and not the
- * parent. Marked for its whole life, because the events emitted before it attached are lost
- * and their number is unknowable.
+ * parent. Stays marked through the live fold — a start arriving there is the wire out of
+ * order, not a recovery — and clears only when a *load-earlier* pull turns up the start
+ * itself; see the "load-earlier" describe block below for that half.
  */
 describe("a request whose start the Reader never saw", () => {
   test("is a Partial request", async () => {
@@ -1070,6 +1071,9 @@ describe("load-earlier", () => {
 
     const before = reader.rows.indexOf(theOnlyRequest(reader.rows))
     expect(theOnlyRequest(reader.rows).path).toBeNull()
+    // Cut in half by the window: the fold met its finish and not its start, so it opened
+    // Partial — the mark this test exists to watch clear.
+    expect(theOnlyRequest(reader.rows).partial).toBe(true)
 
     await reader.loadEarlier()
 
@@ -1078,6 +1082,24 @@ describe("load-earlier", () => {
     // The query it ran before the history opened, in front of a timeline it was not in.
     expect(timeline(request)).toEqual(["SELECT 'the query before the history'"])
     expect(reader.rows.indexOf(request)).toBe(before + 1)
+    // The pull recovered the very `request_start` the row was missing: not lost, recovered.
+    expect(request.partial).toBe(false)
+  })
+
+  test("leaves a request Partial when the pull does not reach its start", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS }, (_, index) => server.log(null, `filler ${index}`))
+    // The start sits before even the earlier block reaches: nothing here ever turns it up.
+    await appendToSidecar(log, server.header(), server.sql("req-1"), ...filler, server.finish("req-1"))
+    const reader = await theReaderReads(log)
+    expect(theOnlyRequest(reader.rows).partial).toBe(true)
+
+    await reader.loadEarlier()
+
+    // The header is the oldest event in the file, so the pull stops there — genuinely gone,
+    // and the mark says so.
+    expect(theOnlyRequest(reader.rows).partial).toBe(true)
   })
 
   test("keeps what it was asked for rather than evicting it under the next request", async () => {
