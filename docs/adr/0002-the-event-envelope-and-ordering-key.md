@@ -260,3 +260,47 @@ band that raises eagerly or answers without calling `@app`. It just no longer ha
 - **The Reader shows `none` in the error colour** where a finished request has no status, so
   the cell cannot read as one that simply has nothing to say. The row's exception is in the
   *Detail column*, the same as any other.
+
+### From #53 (`Rack::ConditionalGet`'s 304): `status` moves to controller time
+
+`Rack::ConditionalGet` and `Rack::ETag` sit below the Initializer's own middleware in the
+default stack — position 90–91 against `Middleware`'s `insert_after ActionDispatch::RequestId`
+at 54 — so `Middleware`'s `@app.call(env)` wraps them both. On a client request carrying a
+matching `If-None-Match`, which needs no `fresh_when`/`stale?` in the controller at all —
+`Rack::ETag` digests a cacheable body into one for free — `ConditionalGet` swaps a controller's
+200 for an empty 304 on the way back out, after `ActionController::LogSubscriber` has already
+logged `Completed 200 OK` from `process_action.action_controller`'s payload. `Middleware` reads
+the later of the two moments, so the row disagreed with development.log about a request that
+never raised and rendered exactly what the controller asked for.
+
+Same reasoning as #45's own amendment above: no event moves, and `status` is still
+`number | null` — but which moment it names changes for a request that reached a controller,
+and that is a meaning change from the reading half's side even though the field says what it
+always did.
+
+- **`Current` gains `controller_status`**, written from `process_action.action_controller`'s
+  `payload[:status]` alongside the view/db runtime it already read off the same payload.
+  `payload[:status]` is not only `response.status` on the ordinary path: this installed
+  actionpack's `ActionController::Instrumentation#process_action` rescues whatever the action
+  raises, maps it to a status with the same `ActionDispatch::ExceptionWrapper.
+  status_code_for_exception` `ActionController::LogSubscriber` reads to print `Completed`, and
+  stamps the payload with it before re-raising. So a raise inside a reached controller does
+  not leave `controller_status` `nil` either — it ends up whatever development.log's own
+  `Completed` line already claimed, matching it even though the exception goes on to escape
+  the whole stack. `controller_status` is `nil` only where `process_action.action_controller`
+  never fires at all: no controller was reached, and there was nothing to rescue.
+- **`request_finish`'s `status` prefers `controller_status` over `Middleware`'s**, falling back
+  to `Middleware`'s Rack-final one only for that no-controller-reached case. That is #47's own
+  band, untouched: a routing failure or a raise above `ShowExceptions` never fires
+  `process_action.action_controller`, so `controller_status` stays `nil` and the fallback is the
+  only status there ever was. One #47 regression test moves out of that band as a result: a
+  controller-reached exception forced past the whole stack with `show_exceptions: :none` used
+  to read `status: null` under the old reasoning ("no response, so no status observed"), and
+  now reads the mapped status instead — because development.log already said `Completed 404
+  Not Found` for it, whether or not a response ever reached the client, and the row saying
+  anything else was the bug this amendment exists to close.
+- **`WIRE_VERSION` goes to 3.** A Reader built before this amendment has no reason to expect
+  `status` to mean anything but the Rack-final moment, and while nothing here would make it
+  render wrong the way an absent `duration_ms` once did, the rule this file bumps under is
+  "when a field changes meaning" rather than "when a field could crash an older Reader" — and
+  the moment `status` names is exactly what changed.

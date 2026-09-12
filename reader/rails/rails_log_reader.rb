@@ -52,7 +52,12 @@ module RailsLogReader
   # the process is not".
   #
   # 2: `duration_ms` became optional on a `request_finish` (#45).
-  WIRE_VERSION = 2
+  # 3: `status` on a `request_finish` now names the controller's own status when one was
+  #    reached — `process_action.action_controller`'s, read before `Rack::ConditionalGet`
+  #    or `Rack::ETag` get a chance to rewrite it further down the stack — and only falls
+  #    back to the Rack-final status `Middleware` reads when no controller was reached at
+  #    all (#47's cases, untouched). Same field, same `number | null`, a different moment (#53).
+  WIRE_VERSION = 3
 
   SIDECAR = Rails.root.join("log/rails_log_reader.jsonl")
 
@@ -97,7 +102,8 @@ module RailsLogReader
   # leaking across requests stays a failure mode with exactly one place to look.
   module Current
     KEY = :rails_log_reader_request
-    ATTRIBUTES = %i[request_id started_at_mono status view_runtime_ms db_runtime_ms exception_object].freeze
+    ATTRIBUTES = %i[request_id started_at_mono status controller_status view_runtime_ms db_runtime_ms
+                    exception_object].freeze
 
     class << self
       # A pair of accessors per attribute, over one Hash. Reading never creates it, so the
@@ -164,9 +170,18 @@ module RailsLogReader
       # gap (#47): it is a request whose `@app.call` never returned, so there was no response
       # to read a status off. Puma will answer the client with a 500 of its own, but this file
       # never sees that, and a status it did not observe would be one it made up.
+      #
+      # `Current.controller_status`, when there is one, wins over `Current.status` — the
+      # Rack-final status `Middleware` reads off `@app.call`'s own return. The two can disagree
+      # (#53): `Rack::ConditionalGet` and `Rack::ETag` sit below `Middleware` in the default
+      # stack, and swap a controller's 200 for an empty 304 on a matching `If-None-Match` —
+      # after `ActionController::LogSubscriber` has already logged `Completed 200 OK` from the
+      # same payload `controller_status` is read from. `Middleware`'s status is the fallback
+      # rather than the discard: a request that never reached a controller (#47's cases) never
+      # gets a `controller_status` at all, and its Rack-final status is the only one there is.
       def build_payload
         duration = duration_ms
-        payload = { status: Current.status }
+        payload = { status: Current.controller_status || Current.status }
         payload[:duration_ms] = duration if duration
         payload[:view_runtime_ms] = Current.view_runtime_ms if Current.view_runtime_ms
         payload[:db_runtime_ms] = Current.db_runtime_ms if Current.db_runtime_ms
@@ -613,11 +628,25 @@ module RailsLogReader
           end
         end
 
-        # The only source for view/db runtime and the exception object with its backtrace —
-        # `request.action_dispatch` never carries them. Handed off through Current because
-        # this fires, and is gone, well before that finish does.
+        # The only source for view/db runtime, the exception object with its backtrace, and
+        # now the status the controller actually produced (#53) — `request.action_dispatch`
+        # never carries any of them. Handed off through Current because this fires, and is
+        # gone, well before that finish does.
+        #
+        # `payload[:status]` is `response.status` on the ordinary path, but not only there:
+        # `ActionController::Instrumentation#process_action` rescues whatever the action
+        # raises, maps it to a status with the same `ActionDispatch::ExceptionWrapper.
+        # status_code_for_exception` `ActionController::LogSubscriber` reads to print
+        # `Completed`, stamps the payload with it, and only then re-raises — so a raise inside
+        # a reached controller does not leave this `nil`, and `Current.controller_status` ends
+        # up set to whatever development.log's own `Completed` line would say, matching it even
+        # though the exception goes on past this notification. `build_payload` falls back to
+        # `Middleware`'s Rack-final status only for the request this notification never fired
+        # for at all — #47's routing-failure and raised-above-`ShowExceptions` cases, where
+        # no controller was ever reached to rescue anything.
         ActiveSupport::Notifications.subscribe("process_action.action_controller") do |*, payload|
           guard do
+            Current.controller_status = payload[:status]
             Current.view_runtime_ms = payload[:view_runtime]
             Current.db_runtime_ms = payload[:db_runtime]
             Current.exception_object = payload[:exception_object]

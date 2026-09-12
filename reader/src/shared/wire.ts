@@ -14,8 +14,12 @@
  * through it, which is the exact failure `isWireVersionUnderstood` exists to refuse.
  *
  * 2: `duration_ms` became optional on a `request_finish` (#45).
+ * 3: `status` on a `request_finish` names the controller's own status when one was reached,
+ *    rather than the Rack-final one `Rack::ConditionalGet`/`Rack::ETag` can rewrite further
+ *    down the middleware stack. Same field, same `number | null` — the moment it names
+ *    changed (#53).
  */
-export const WIRE_VERSION = 2
+export const WIRE_VERSION = 3
 
 export const EVENT_TYPES = [
   "run_header",
@@ -101,13 +105,20 @@ export type RequestException = {
 
 export type RequestFinishPayload = {
   /**
-   * `null` where the request raised its way out of the whole middleware stack: the
-   * Initializer's own middleware reads the status off what `@app.call` returned, and on that
-   * path it returned nothing. An explicit absence, decided in #47 — the client gets its
-   * server's 500, but the Initializer never sees it, so it names no status it did not observe.
-   * Not rare: `Rails::Rack::Logger` sits above `DebugExceptions`, so a raise there escapes on
-   * default settings, and a spoofed `Client-IP` header is enough. The finish is emitted either
-   * way, and `exception` below says what raised.
+   * The controller's own status — read from `process_action.action_controller`'s payload —
+   * when a controller was reached, and only the Rack-final one otherwise. The two can
+   * disagree: `Rack::ConditionalGet`/`Rack::ETag` sit below the Initializer's middleware in
+   * the default stack and can swap a controller's 200 for an empty 304 on a matching
+   * `If-None-Match`, after Rails has already logged `Completed 200 OK` from the same payload
+   * this reads (#53). Before #53, this was always the Rack-final status.
+   *
+   * `null` where the request raised its way out of the whole middleware stack: no controller
+   * was reached, and the Initializer's own middleware reads the status off what `@app.call`
+   * returned — which, on that path, returned nothing. An explicit absence, decided in #47 —
+   * the client gets its server's 500, but the Initializer never sees it, so it names no status
+   * it did not observe. Not rare: `Rails::Rack::Logger` sits above `DebugExceptions`, so a
+   * raise there escapes on default settings, and a spoofed `Client-IP` header is enough. The
+   * finish is emitted either way, and `exception` below says what raised.
    */
   status: number | null
   /**
