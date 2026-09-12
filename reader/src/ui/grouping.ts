@@ -39,11 +39,12 @@ export const OFF_SCREEN_CAPTION = "row is off screen — click to jump"
 
 /**
  * The row is not rendered: a tab filter is hiding it, which the click clears on its way
- * there. Since #27 there is a second way to be missing and this caption does not yet tell
- * them apart — a row evicted under the *Memory bound* is gone rather than hidden, so the
- * caption reads "filtered out" for a row no filter is holding back and the click it invites
- * lands nowhere. The Console outlives the fold's rows, which is what makes this reachable at
- * all; it still needs its own answer rather than this caption (#44).
+ * there. Between #27 and #63 there was a second way to be missing that this caption could
+ * not tell apart from a filter — a row evicted under the *Memory bound*, gone rather than
+ * hidden — because the Console outlived the fold's rows and could still hand this a line
+ * pointing at one. Since #63 a line's lifetime is exactly its owning row's, so a line naming
+ * a `row` this caption's caller cannot find can only mean a tab filter: the row was evicted
+ * and its line went with it, or it is still held and simply not shown.
  */
 export const NOT_SHOWN_CAPTION = "row is filtered out — click to jump"
 

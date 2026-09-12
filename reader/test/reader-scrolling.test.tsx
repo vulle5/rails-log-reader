@@ -129,8 +129,9 @@ async function openTheReader(...envelopes: Envelope[]) {
   mounted.push(root)
 
   async function arrive(...arriving: Envelope[]) {
-    activity.fold(arriving)
+    const evicted = activity.fold(arriving)
     stream.fold(arriving)
+    stream.evict(evicted)
     await act(async () => root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} />))
   }
 
@@ -138,10 +139,12 @@ async function openTheReader(...envelopes: Envelope[]) {
    * What a *load-earlier* click puts into the fold: a block of history that happened before
    * everything the fold holds, so its rows open above them. The Console is not given it, for
    * the reason `useSidecar` does not give it either — the Console is append order, and this
-   * block belongs before the lines it already has rather than after them.
+   * block belongs before the lines it already has rather than after them. It can still evict
+   * — see `useSidecar` — so the Console still hears about whatever that takes.
    */
   async function pullEarlier(...pulled: Envelope[]) {
-    activity.foldEarlier(pulled)
+    const evicted = activity.foldEarlier(pulled)
+    stream.evict(evicted)
     await act(async () => root.render(<Reader rows={[...activity.rows]} lines={[...stream.lines]} />))
   }
 

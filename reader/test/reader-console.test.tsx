@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:tes
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
 import { NOT_SHOWN_CAPTION } from "../src/ui/grouping"
+import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 
 const { act } = await import("react")
 const { createRoot } = await import("react-dom/client")
@@ -58,8 +59,9 @@ afterAll(async () => {
 async function theReader(...envelopes: Parameters<ReturnType<typeof activityTable>["fold"]>[0]) {
   const activity = activityTable()
   const stream = consoleStream()
-  activity.fold(envelopes)
+  const evicted = activity.fold(envelopes)
   stream.fold(envelopes)
+  stream.evict(evicted)
 
   const container = document.createElement("div")
   document.body.append(container)
@@ -525,5 +527,42 @@ describe("pinning a Console line", () => {
 
     expect(container.querySelector(".console-line-pinned")).toBeNull()
     expect(rule(container)).toBeNull()
+  })
+})
+
+/**
+ * #63: a Console line's lifetime is exactly its owning row's, borrowed from the *Memory
+ * bound* rather than a second, independently-counted ring. `theReader` above already wires
+ * `stream.evict` the way `useSidecar` does, so this is the same seam every other test in this
+ * file uses — just enough traffic past the row this one cares about to push it out.
+ */
+describe("Console retention under the Memory bound", () => {
+  test("removes a line the instant the row it belongs to is evicted", async () => {
+    const run = aRun("srv-1")
+    const doomed = [
+      run.start("req-old", "GET", "/posts/1"),
+      run.log("req-old", "the doomed log line"),
+      run.finish("req-old"),
+    ]
+    // Enough finished requests after it to push the oldest row — this one — out of the ring.
+    const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS }, (_, index) => [
+      run.start(`req-${index}`, "GET", `/posts/${index + 2}`),
+      run.finish(`req-${index}`),
+    ]).flat()
+
+    const container = await theReader(...doomed, ...filler)
+
+    expect(lines(container).some((line) => line.textContent?.includes("the doomed log line"))).toBe(false)
+  })
+
+  test("leaves a line alone while its row is still held, rendering exactly as before", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.log("req-1", "Feed cache MISS"),
+      run.finish("req-1"),
+    )
+
+    expect(messages(container)).toEqual(["Feed cache MISS"])
   })
 })

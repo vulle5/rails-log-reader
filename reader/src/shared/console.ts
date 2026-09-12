@@ -1,4 +1,4 @@
-import { requestRowId, runRowId } from "./activity"
+import { requestRowId, runRowId, type EvictedRow } from "./activity"
 import { eventIdentity, type AppLogEvent, type Envelope } from "./wire"
 
 /**
@@ -31,21 +31,58 @@ export type ConsoleLine = {
 }
 
 export type ConsoleStream = {
-  /** The same array throughout, appended to in place. */
+  /** The same array throughout, mutated in place: lines are appended and evicted, never reordered. */
   readonly lines: readonly ConsoleLine[]
   /** Fold a batch of envelopes, in append order. Safe to hand the same bytes twice. */
   fold: (envelopes: readonly Envelope[]) => void
+  /**
+   * Let go of every line whose `owner` is one of `evicted`'s rows — what `activityTable`'s
+   * `fold` and `foldEarlier` hand back, the instant they evict those rows under the *Memory
+   * bound* (ADR-0005, #63). A line's lifetime is exactly its owning row's, so this is the
+   * whole of the Console's own retention: no counter here decides when a line goes, only
+   * this call saying which rows just went. Attributed or not, *Echo* included — nothing here
+   * recognises an Echo at all, so there is nothing here that could spare one.
+   *
+   * Also closes the *attribution horizon* the same way `activityTable`'s own `foldOne` does:
+   * a line printed for a Request row's `requestId` after this call is not that row's to
+   * reclaim, so it is attributed to its Run instead, exactly as a Trailing event past the
+   * horizon already is there.
+   */
+  evict: (evicted: readonly EvictedRow[]) => void
 }
 
 /**
- * Unbounded, and now the only fold that is: #27 bounded `activityTable` and left the Console
- * out of it, so a session long enough to evict its oldest rows still holds every App log line
- * it ever saw. That is the *Memory bound*'s question rather than a second one, and it is
- * open (#44) — as is what a line whose row has been evicted selects when it is clicked.
+ * Bounded, and by nothing of its own (ADR-0005, #63): a line's retention is exactly its
+ * owning row's, so the moment `evict` is told that row is gone, its lines go with it. Before
+ * this the Console read the envelope stream independently of `activityTable` and outlived
+ * every row's eviction — a session long enough to evict its oldest rows still held every App
+ * log line it ever saw, one honest fact (a `Rails.logger` call never disappearing) sitting on
+ * top of one dishonest one (a click on an old line landing on a row the fold no longer had).
+ * Giving the Console a second, independently-counted bound would have kept "one number, not
+ * two" in name only; deriving retention from the Activity fold's own eviction is what keeps
+ * it true.
  */
 export function consoleStream(): ConsoleStream {
   const lines: ConsoleLine[] = []
   const folded = new Set<string>()
+  /**
+   * Request ids past the *attribution horizon*: their row has been evicted, and — unlike a
+   * Run — a Request row never reopens, so nothing will ever again claim a line naming one of
+   * these as its own. `ownerOf` reads this for the same reason `activityTable`'s own
+   * `foldOne` checks its `evicted` Set: a line printed for one of these now belongs to
+   * whichever Run wrote it, exactly like a line with no `request_id` at all.
+   *
+   * Grown only by `evict`, and never trimmed the way `activityTable`'s own `evicted` Set is:
+   * one string per Request row this session has ever evicted, which is a request id already
+   * paid for elsewhere and orders of magnitude smaller than a Console line, so there is
+   * nothing here worth a second ring to bound.
+   */
+  const pastHorizon = new Set<string>()
+
+  function ownerOf(event: AppLogEvent) {
+    if (event.request_id === null || pastHorizon.has(event.request_id)) return runRowId(event.run_id)
+    return requestRowId(event.request_id)
+  }
 
   function fold(envelopes: readonly Envelope[]) {
     for (const envelope of envelopes) {
@@ -59,9 +96,26 @@ export function consoleStream(): ConsoleStream {
     }
   }
 
-  return { lines, fold }
-}
+  /**
+   * One pass, in place — the same shape `activityTable`'s own `compact` takes for the same
+   * reason. `folded` forgets the evicted lines' identities too, rather than remembering them
+   * forever with nothing left to point at: the fold's own dedup sets are trimmed the same way
+   * once a row is gone, and a line whose exact bytes somehow arrived again after that would be
+   * read as new rather than silently dropped — the same reading a Trailing event gets once its
+   * request's row is out of memory entirely.
+   */
+  function evict(evicted: readonly EvictedRow[]) {
+    if (evicted.length === 0) return
+    const gone = new Set(evicted.map((row) => row.id))
+    for (const row of evicted) if (row.requestId !== null) pastHorizon.add(row.requestId)
 
-function ownerOf(event: AppLogEvent) {
-  return event.request_id === null ? runRowId(event.run_id) : requestRowId(event.request_id)
+    let kept = 0
+    for (const line of lines) {
+      if (gone.has(line.owner)) folded.delete(line.id)
+      else lines[kept++] = line
+    }
+    lines.length = kept
+  }
+
+  return { lines, fold, evict }
 }

@@ -5,6 +5,7 @@ import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import {
   activityTable,
   type ActivityRow,
+  type EvictedRow,
   type RequestRow,
   type RunRow,
   type TimelineEvent,
@@ -50,18 +51,26 @@ async function theReaderReads(logDirectory: string) {
   // it: the Sidecar announces it on attaching, and a load-earlier continues the scan from
   // there and hands back where the history begins now.
   let from = 0
-  const sidecar = await openSidecar(logDirectory, activity.fold, (start) => {
-    from = start
-  })
+  // Every row `fold` and `foldEarlier` have ever handed back, in the order they reported
+  // it — the fold's own report of what it let go of, which is what `live.ts` hands the
+  // Console (#63).
+  const evicted: EvictedRow[] = []
+  const sidecar = await openSidecar(
+    logDirectory,
+    (envelopes) => evicted.push(...activity.fold(envelopes)),
+    (start) => {
+      from = start
+    },
+  )
   opened.push(sidecar)
 
   async function loadEarlier() {
     const earlier = await readEarlier(logDirectory, from)
     from = earlier.from
-    activity.foldEarlier(earlier.envelopes)
+    evicted.push(...activity.foldEarlier(earlier.envelopes))
   }
 
-  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier }
+  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, evicted }
 }
 
 /** What a timeline event is, in one string: the query it ran or the line it printed. */
@@ -994,6 +1003,21 @@ describe("the Memory bound", () => {
     expect(reader.rows.every((candidate) => !candidate.overBound)).toBe(true)
   })
 
+  // #63: the fold's own report of what it let go of, which is what lets the *Console* drop
+  // the same rows' lines without a bound of its own.
+  test("reports the id of every row it evicts, oldest first", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10))
+    await reader.caughtUp()
+
+    expect(reader.evicted).toEqual(
+      Array.from({ length: 10 }, (_, index) => ({ id: `request req-${index}`, requestId: `req-${index}` })),
+    )
+  })
+
   test("never evicts a request that is still in flight, however much arrives after it", async () => {
     const log = await aLogDirectory()
     const run = aRun("srv-1")
@@ -1229,5 +1253,18 @@ describe("load-earlier", () => {
     // asked for does not evaporate under the first request to arrive after it.
     expect(reader.rows.at(0)?.id).toBe("run rake-1")
     expect(timeline(runRow(reader.rows, "rake-1"))).toEqual(["rake-1 counted the posts"])
+  })
+
+  // #63: the ceiling rises by exactly what a pull brings in, so the ordinary pull evicts
+  // nothing — the *Console*, told about a pull's evictions the same way as a live fold's, has
+  // nothing to do most of the time this control is clicked.
+  test("reports nothing evicted by the ordinary pull, because its ceiling rises with it", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithHistory(log)
+    const reader = await theReaderReads(log)
+
+    await reader.loadEarlier()
+
+    expect(reader.evicted).toEqual([])
   })
 })
