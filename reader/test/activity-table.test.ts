@@ -1060,10 +1060,17 @@ describe("the Memory bound", () => {
     const run = aRun("rake-1")
     const reader = await theReaderReads(log)
 
+    // Attached on a header alone, well under the bound, so the burst below is read as it
+    // arrives rather than through the load-on-open scan a first read over an already-huge
+    // file would take — that scan would trim it to the ceiling on its own, on disk, before
+    // the in-memory ring ever saw more than it could hold.
+    await appendToSidecar(log, run.header("rake"))
+    await reader.caughtUp()
+
     // One Run, saying more unattributed things than the ceiling allows, with nothing else in
     // the file for the bound to evict instead.
     const burst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.log(null, `record ${index}`))
-    await appendToSidecar(log, run.header("rake"), ...burst)
+    await appendToSidecar(log, ...burst)
     await reader.caughtUp()
 
     expect(reader.rows).toHaveLength(1)
@@ -1075,10 +1082,14 @@ describe("the Memory bound", () => {
     const run = aRun("srv-1")
     const reader = await theReaderReads(log)
 
+    // Attached on the start alone, for the same reason as above.
+    await appendToSidecar(log, run.start("req-1"))
+    await reader.caughtUp()
+
     // No run_header and nothing unattributed, so this request's row is the only row the fold
     // ever opens: an N+1 with more queries than the ceiling, all its own.
     const queries = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.sql("req-1", `SELECT ${index}`))
-    await appendToSidecar(log, run.start("req-1"), ...queries, run.finish("req-1"))
+    await appendToSidecar(log, ...queries, run.finish("req-1"))
     await reader.caughtUp()
 
     expect(reader.rows).toHaveLength(1)
@@ -1090,8 +1101,11 @@ describe("the Memory bound", () => {
     const run = aRun("rake-1")
     const reader = await theReaderReads(log)
 
+    await appendToSidecar(log, run.header("rake"))
+    await reader.caughtUp()
+
     const burst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.log(null, `record ${index}`))
-    await appendToSidecar(log, run.header("rake"), ...burst)
+    await appendToSidecar(log, ...burst)
     await reader.caughtUp()
 
     const oversized = runRow(reader.rows, "rake-1")
@@ -1105,14 +1119,18 @@ describe("the Memory bound", () => {
     const first = aRun("rake-1")
     const reader = await theReaderReads(log)
 
+    await appendToSidecar(log, first.header("rake"))
+    await reader.caughtUp()
+
     const firstBurst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => first.log(null, `first ${index}`))
-    await appendToSidecar(log, first.header("rake"), ...firstBurst)
+    await appendToSidecar(log, ...firstBurst)
     await reader.caughtUp()
     expect(runRow(reader.rows, "rake-1").overBound).toBe(true)
 
-    // A second Run bursts the same way. The first Run's row is the oldest in the table and
-    // evictable — a Run row always is — so the bound now has somewhere else to look, and
-    // takes it: the mark is never on two rows at once.
+    // A second Run bursts the same way, appended once the file is already attached to — so
+    // this too is read as it arrives rather than rescanned as history. The first Run's row is
+    // the oldest in the table and evictable — a Run row always is — so the bound now has
+    // somewhere else to look, and takes it: the mark is never on two rows at once.
     const second = aRun("rake-2")
     const secondBurst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => second.log(null, `second ${index}`))
     await appendToSidecar(log, second.header("rake"), ...secondBurst)
