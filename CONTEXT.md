@@ -207,11 +207,12 @@ Reader accumulates by itself, and history the developer went and asked for that 
 under the next request to arrive would make the control useless; a developer clicking it
 often enough for that to matter is its own natural limit, so nothing further bounds it. Nor
 is the one row left standing, and that is where this bound stops being one: a `rake` burst
-larger than the figure lands in a single Run row, and emptying the table is worse than
-exceeding the number — so the row stays whole, however far over the figure it runs, and
-says so rather than going quiet about it: a Run row standing over the bound carries a
-visible mark that it is holding more than the usual bound, never the word "trimmed,"
-because nothing in it was.
+larger than the figure lands in a single Run row — the ordinary way here, though a lone
+Request row with more queries than the figure earns the same mark the same way — and
+emptying the table is worse than exceeding the number, so the row stays whole, however far
+over the figure it runs, and says so rather than going quiet about it: the row standing over
+the bound carries a visible mark that it is holding more than the usual bound, never the
+word "trimmed," because nothing in it was.
 
 Forgetting is bounded too, on both sides of it. The bound remembers which requests it has
 evicted — kept to the same figure — so a *Trailing event* arriving for one reads as

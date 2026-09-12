@@ -5,6 +5,7 @@ GlobalRegistrator.register()
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
+import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 
 const { act } = await import("react")
 const { createRoot } = await import("react-dom/client")
@@ -272,6 +273,18 @@ describe("what a row says it is", () => {
     expect(table.querySelector(".partial-mark")?.textContent).toBe("partial")
     expect(cells(table)[1]).toBe("200")
     expect(cells(table)[9]).toBe("13ms")
+  })
+
+  // #62: the last row standing, over the Memory bound's usual ceiling because taking it too
+  // would leave the table empty rather than bounded.
+  test("marks the last row standing over bound, never as trimmed", async () => {
+    const run = aRun("rake-1")
+    const burst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.log(null, `record ${index}`))
+    const table = await theActivityTable(run.header("rake"), ...burst)
+
+    const mark = table.querySelector(".over-bound-mark")
+    expect(mark?.textContent).toBe("over bound")
+    expect(mark?.textContent?.toLowerCase()).not.toContain("trim")
   })
 })
 

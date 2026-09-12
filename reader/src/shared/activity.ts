@@ -64,6 +64,15 @@ export type RequestRow = {
    */
   partial: boolean
   /**
+   * `true` when this is the *last row standing*: the only row left, holding more events
+   * than the Memory bound's ceiling by itself, with nothing else in the table for the bound
+   * to take instead. Never means anything was cut — every event this row ever held is still
+   * here, in full, in `timeline` — only that eviction stopped at one row rather than empty
+   * the table by taking it too. See `RunRow.overBound`, which is the ordinary way here: a
+   * single request outgrowing the ceiling on its own is the rarer of the two.
+   */
+  overBound: boolean
+  /**
    * How long this request had been running as of the last event the Reader saw for it, and
    * the wall clock reading that last event carried. `null` until a `request_start` gives it
    * something to measure from, so a *Partial request* has none until one turns up, and is
@@ -179,6 +188,14 @@ export type RunRow = {
    * one was opened by an unattributed event rather than a header.
    */
   reopened: boolean
+  /**
+   * `true` for the same reason `RequestRow.overBound` is, and this is the ordinary way there:
+   * a `rake` burst larger than the load-on-open figure lands in one Run row before anything
+   * else has a chance to open beside it, and the bound refuses to evict the only row left
+   * rather than leave the table empty. Nothing in the row is trimmed — every event it holds
+   * is still there and still rendered — the row is simply left standing over the ceiling.
+   */
+  overBound: boolean
   /** Display only, like a request's: read off whichever event opened the row. */
   startedAtWall: number | null
   sqlCount: number
@@ -258,6 +275,13 @@ export function activityTable(): ActivityTable {
    * unmarked row rather than a wrong one.
    */
   const evictedRuns = new Set<string>()
+  /**
+   * The row currently marked `overBound`, if any — there is never more than one, since it
+   * only ever holds where `rows.length` is exactly `1`. Tracked rather than recomputed by
+   * scanning `rows`, so clearing the mark costs one comparison rather than a pass over
+   * everything the bound is holding.
+   */
+  let overBoundRow: ActivityRow | null = null
 
   /** Events the fold is holding. */
   let held = 0
@@ -300,6 +324,7 @@ export function activityTable(): ActivityTable {
         state: "in-flight",
         // Anything but a start means the Reader has the children and not the parent.
         partial: envelope.type !== "request_start",
+        overBound: false,
         provenElapsed: null,
         startedAtWall: null,
         method: null,
@@ -342,6 +367,7 @@ export function activityTable(): ActivityTable {
         appName: null,
         marker: false,
         reopened: evictedRuns.has(envelope.run_id),
+        overBound: false,
         startedAtWall: envelope.at_wall,
         sqlCount: 0,
         logCount: 0,
@@ -656,7 +682,9 @@ export function activityTable(): ActivityTable {
    * bound by itself, a `rake` burst of unattributed queries landing in a single Run row,
    * where evicting it would leave the table empty rather than bounded and trimming inside it
    * would leave a count of 20,000 beside a timeline holding the last few. That is where this
-   * bound stops being one, and it is the honest place to stop.
+   * bound stops being one, and it is the honest place to stop — though never silently:
+   * `updateOverBound` marks whichever row that leaves standing over the ceiling, so the
+   * table says so rather than just quietly exceeding it.
    */
   function evictToBound() {
     const taken = new Set<ActivityRow>()
@@ -680,6 +708,25 @@ export function activityTable(): ActivityTable {
     keepLatest(folded, ceiling)
     keepLatest(evicted, ceiling)
     keepLatest(evictedRuns, ceiling)
+
+    updateOverBound()
+  }
+
+  /**
+   * The mark for the case `evictToBound` just stopped short of: one row left, still over the
+   * ceiling, because taking it too would empty the table. Read off `rows.length` rather than
+   * off having skipped a row in the loop above, so it says the same thing whether the table
+   * arrived at one row by eviction or simply never held more than one to begin with — an
+   * oversized row is exactly as `overBound` either way.
+   */
+  function updateOverBound() {
+    const only = rows.length === 1 ? rows[0] : undefined
+    const solitary = only !== undefined && held > ceiling ? only : null
+    if (solitary === overBoundRow) return
+
+    if (overBoundRow !== null) overBoundRow.overBound = false
+    if (solitary !== null) solitary.overBound = true
+    overBoundRow = solitary
   }
 
   /**

@@ -132,6 +132,9 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
         ) : (
           clock(row.startedAtWall)
         )}
+        {/* A different fact from `partial`, and never in tension with it: the *last row
+            standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
+        <OverBoundMark row={row} />
       </td>
       <td className="cell-status">
         <Status row={row} />
@@ -177,6 +180,11 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
  * It renders nothing like the marker and never sits beside one — a reopened row has no
  * header of its own to draw a boundary from — so it stops reading exactly like a Run the
  * Reader only ever attached inside, which shows neither mark.
+ *
+ * `overBound` is `OverBoundMark`, shared with `RequestRow` below: the *last row standing*,
+ * over the bound's usual ceiling because the table would otherwise be empty rather than
+ * bounded. A `rake` burst outgrowing the ceiling before anything else exists to evict is the
+ * ordinary way a Run row earns it.
  */
 function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
   return (
@@ -191,7 +199,10 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
       aria-selected={selected}
       onClick={onSelect}
     >
-      <td className="cell-started">{clock(row.startedAtWall)}</td>
+      <td className="cell-started">
+        {clock(row.startedAtWall)}
+        <OverBoundMark row={row} />
+      </td>
       <td className="cell-run" colSpan={4}>
         {row.marker && <span className="run-marker-label">Run started</span>}
         {/* Distinct from the Run marker above, and never drawn beside it: a reopened row has
@@ -218,6 +229,26 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
       <td className="cell-ms" />
       <td className="cell-ms cell-total" />
     </tr>
+  )
+}
+
+/**
+ * The *last row standing*: the Memory bound would not evict this row without leaving the
+ * table empty, so it stands over the ceiling instead of under it. Shown beside the started
+ * time on both row kinds, because that is the one cell every row has and neither kind needs
+ * for anything else in this rare a case. Never says "trimmed" — nothing here was cut, the
+ * row is simply larger than the bound's usual figure.
+ */
+function OverBoundMark({ row }: { row: Request | Run }) {
+  if (!row.overBound) return null
+
+  return (
+    <span
+      className="over-bound-mark"
+      title="Holding more events than the Memory bound's usual ceiling — evicting it would empty the table, so nothing here has been trimmed"
+    >
+      over bound
+    </span>
   )
 }
 

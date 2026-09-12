@@ -989,6 +989,9 @@ describe("the Memory bound", () => {
     expect(reader.rows).toHaveLength(LOAD_ON_OPEN_EVENTS / 2)
     expect(requests(reader.rows).at(0)?.path).toBe("/posts/10")
     expect(requests(reader.rows).at(-1)?.path).toBe(`/posts/${LOAD_ON_OPEN_EVENTS / 2 + 9}`)
+    // Collectively over the ceiling before eviction, but no single one of these small rows
+    // ever is, and more than one is left standing: none carries the last-row-standing mark.
+    expect(reader.rows.every((candidate) => !candidate.overBound)).toBe(true)
   })
 
   test("never evicts a request that is still in flight, however much arrives after it", async () => {
@@ -1050,6 +1053,73 @@ describe("the Memory bound", () => {
     // inside, which never had a row taken from it in the first place — and never alongside
     // a Run marker, which this row has no header of its own to draw one from.
     expect(runRow(reader.rows, "srv-1")).toMatchObject({ marker: false, runKind: null, reopened: true })
+  })
+
+  test("marks the last row standing over bound when a rake burst outgrows the ceiling alone", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("rake-1")
+    const reader = await theReaderReads(log)
+
+    // One Run, saying more unattributed things than the ceiling allows, with nothing else in
+    // the file for the bound to evict instead.
+    const burst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.log(null, `record ${index}`))
+    await appendToSidecar(log, run.header("rake"), ...burst)
+    await reader.caughtUp()
+
+    expect(reader.rows).toHaveLength(1)
+    expect(runRow(reader.rows, "rake-1").overBound).toBe(true)
+  })
+
+  test("marks a Request row the same way, when it alone outgrows the ceiling", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+
+    // No run_header and nothing unattributed, so this request's row is the only row the fold
+    // ever opens: an N+1 with more queries than the ceiling, all its own.
+    const queries = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.sql("req-1", `SELECT ${index}`))
+    await appendToSidecar(log, run.start("req-1"), ...queries, run.finish("req-1"))
+    await reader.caughtUp()
+
+    expect(reader.rows).toHaveLength(1)
+    expect(row(reader.rows, "/posts/12").overBound).toBe(true)
+  })
+
+  test("never reads as trimmed: every event the last row standing holds is still there", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("rake-1")
+    const reader = await theReaderReads(log)
+
+    const burst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => run.log(null, `record ${index}`))
+    await appendToSidecar(log, run.header("rake"), ...burst)
+    await reader.caughtUp()
+
+    const oversized = runRow(reader.rows, "rake-1")
+    expect(oversized.overBound).toBe(true)
+    expect(oversized.logCount).toBe(burst.length)
+    expect(oversized.timeline).toHaveLength(burst.length)
+  })
+
+  test("moves the mark rather than leaving it on two rows at once", async () => {
+    const log = await aLogDirectory()
+    const first = aRun("rake-1")
+    const reader = await theReaderReads(log)
+
+    const firstBurst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => first.log(null, `first ${index}`))
+    await appendToSidecar(log, first.header("rake"), ...firstBurst)
+    await reader.caughtUp()
+    expect(runRow(reader.rows, "rake-1").overBound).toBe(true)
+
+    // A second Run bursts the same way. The first Run's row is the oldest in the table and
+    // evictable — a Run row always is — so the bound now has somewhere else to look, and
+    // takes it: the mark is never on two rows at once.
+    const second = aRun("rake-2")
+    const secondBurst = Array.from({ length: LOAD_ON_OPEN_EVENTS + 10 }, (_, index) => second.log(null, `second ${index}`))
+    await appendToSidecar(log, second.header("rake"), ...secondBurst)
+    await reader.caughtUp()
+
+    expect(runs(reader.rows).map((candidate) => candidate.runId)).toEqual(["rake-2"])
+    expect(runRow(reader.rows, "rake-2").overBound).toBe(true)
   })
 })
 
