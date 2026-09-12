@@ -916,7 +916,7 @@ describe("Run rows", () => {
 
     const { rows } = await theReaderReads(log)
 
-    expect(runRow(rows, "srv-1")).toMatchObject({ marker: false, runKind: null, logCount: 1 })
+    expect(runRow(rows, "srv-1")).toMatchObject({ marker: false, runKind: null, reopened: false, logCount: 1 })
   })
 
   test("gives a Run that emitted nothing unattributed no empty row of its own", async () => {
@@ -1024,6 +1024,32 @@ describe("the Memory bound", () => {
     // request it has in fact forgotten — and not attributed to anything: its Run holds it.
     expect(requests(reader.rows).map((request) => request.requestId)).not.toContain("req-1")
     expect(runs(reader.rows).flatMap(timeline)).toContain("SELECT 'after the horizon'")
+  })
+
+  test("marks a Run row reopened when its evicted Run says something unattributed again", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+    // A server Run, so its first row carries a Run marker — which is the row this test
+    // evicts, to check the marker does not survive onto the row that replaces it.
+    await appendToSidecar(log, run.header(), run.sql(null))
+    await reader.caughtUp()
+    expect(runRow(reader.rows, "srv-1").marker).toBe(true)
+
+    // Enough other traffic to push the Run row — the oldest row in the table — past the
+    // bound and out.
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10, 100))
+    await reader.caughtUp()
+    expect(runs(reader.rows)).toHaveLength(0)
+
+    // The same Run, saying something unattributed again.
+    await appendToSidecar(log, run.log(null, "[ActiveJob] [SendDigestJob] Performing"))
+    await reader.caughtUp()
+
+    // A fresh, header-less row — marked apart from a Run the Reader only ever attached
+    // inside, which never had a row taken from it in the first place — and never alongside
+    // a Run marker, which this row has no header of its own to draw one from.
+    expect(runRow(reader.rows, "srv-1")).toMatchObject({ marker: false, runKind: null, reopened: true })
   })
 })
 

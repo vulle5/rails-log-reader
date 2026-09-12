@@ -661,8 +661,13 @@ mark.search-match {
 
 /* Marked for its whole life, in the column that would have said when it started — because
    nobody saw it start. Never cleared: the events emitted before the Reader attached are
-   lost, and how many there were is unknowable. */
-.partial-mark {
+   lost, and how many there were is unknowable.
+
+   Shares its look with `.run-reopened-label` below: both are a quiet badge for a mark that
+   is a fact about missing history, never an alarm — unlike the *Run marker*'s bold accent
+   line, which is a boundary rather than an absence. */
+.partial-mark,
+.run-reopened-label {
   padding: 0 4px;
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -721,6 +726,13 @@ mark.search-match {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent);
+}
+
+/* A Run row reopened after its earlier one was evicted under the Memory bound. Its shared
+   declarations are above, beside `.partial-mark`; this is only what sets it apart on a Run
+   row's line. */
+.run-reopened-label {
+  margin-right: 8px;
 }
 
 /* ---- the Console rail ------------------------------------------------------ */

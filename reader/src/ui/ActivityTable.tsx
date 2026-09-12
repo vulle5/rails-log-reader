@@ -171,6 +171,12 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
  * into one file, so the rows under a marker are as likely to be another Run's as this one's.
  * That is also why no row anywhere carries a Run tag — the marker is the only thing the
  * table says about which process wrote what, and it says it in one place.
+ *
+ * `reopened` is a different mark for a different fact: a Run whose earlier row the *Memory
+ * bound* evicted, opening this one fresh because the Run said something unattributed again.
+ * It renders nothing like the marker and never sits beside one — a reopened row has no
+ * header of its own to draw a boundary from — so it stops reading exactly like a Run the
+ * Reader only ever attached inside, which shows neither mark.
  */
 function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
   return (
@@ -188,6 +194,16 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
       <td className="cell-started">{clock(row.startedAtWall)}</td>
       <td className="cell-run" colSpan={4}>
         {row.marker && <span className="run-marker-label">Run started</span>}
+        {/* Distinct from the Run marker above, and never drawn beside it: a reopened row has
+            no header of its own for a marker to be drawn from. */}
+        {row.reopened && (
+          <span
+            className="run-reopened-label"
+            title="Its earlier row was evicted under the Memory bound — this Run has said something unattributed again"
+          >
+            reopened
+          </span>
+        )}
         {[runDescription(row).kind, ...runDescription(row).facts].map((said) => (
           <span key={said} className="run-said">
             <Highlight text={said} />

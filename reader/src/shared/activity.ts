@@ -170,6 +170,15 @@ export type RunRow = {
    * the Reader may draw.
    */
   marker: boolean
+  /**
+   * `true` for a row the Reader opened because a Run whose earlier row the *Memory bound*
+   * evicted said something unattributed again — distinguishing it from a Run the Reader
+   * only ever attached inside, which leaves `runKind` and `pid` `null` for the same reason
+   * but was never shown and taken away. Never `true` alongside `marker`: the row's own
+   * `run_header`, if this Run ever had one, was on the row the bound already took, and this
+   * one was opened by an unattributed event rather than a header.
+   */
+  reopened: boolean
   /** Display only, like a request's: read off whichever event opened the row. */
   startedAtWall: number | null
   sqlCount: number
@@ -240,6 +249,15 @@ export function activityTable(): ActivityTable {
    * fact already shown and evicted, which is the one reading of it that is false.
    */
   const evicted = new Set<string>()
+  /**
+   * Run ids the bound has taken the row of — kept for the opposite reason `evicted` is.
+   * `evicted` stops a request opening a second row at all; this never does, because a Run
+   * still running has every right to another one. What it does instead is mark that second
+   * row `reopened`, so it stops reading exactly like a Run the Reader only ever attached
+   * inside. Bounded the same way, so a Run reopening five thousand evictions later opens an
+   * unmarked row rather than a wrong one.
+   */
+  const evictedRuns = new Set<string>()
 
   /** Events the fold is holding. */
   let held = 0
@@ -323,6 +341,7 @@ export function activityTable(): ActivityTable {
         railsVersion: null,
         appName: null,
         marker: false,
+        reopened: evictedRuns.has(envelope.run_id),
         startedAtWall: envelope.at_wall,
         sqlCount: 0,
         logCount: 0,
@@ -660,6 +679,7 @@ export function activityTable(): ActivityTable {
     // again, which is the reading left once the fold no longer remembers the row at all.
     keepLatest(folded, ceiling)
     keepLatest(evicted, ceiling)
+    keepLatest(evictedRuns, ceiling)
   }
 
   /**
@@ -687,9 +707,10 @@ export function activityTable(): ActivityTable {
     if (row.kind === "run") {
       const running = byRun.get(row.runId)
       byRun.delete(row.runId)
-      // Not remembered as evicted: a Run row is opened by whatever its Run says next, and a
-      // Run that is still running has every right to another one. A request does not — it
-      // has been shown and finished, and its second row would be a lie about a first.
+      // Unlike a request, a Run row is opened by whatever its Run says next, and a Run that
+      // is still running has every right to another one — so this is remembered only to mark
+      // that next row `reopened`, never to stop it opening.
+      evictedRuns.add(row.runId)
       return running?.events ?? 0
     }
 
