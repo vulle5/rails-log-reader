@@ -71,10 +71,14 @@ order* for what orders the rest.
 
 **Partial request** — a Request event the Reader pieced together without having observed
 its start, because the Reader attached mid-flight or started after the request did. It is
-promoted as its finish arrives, gaining method, path, status and duration — but it stays
-Partial for its whole life, because the events emitted before the Reader attached are lost
-and their number is unknowable. Distinct from *unattributed*: a Partial request's children
-are correctly correlated; it is the parent that was missed.
+promoted as its finish arrives, gaining method, path, status and duration — and stays
+Partial until its own **load-earlier** pull turns up the `request_start` it missed, because
+that is the one thing that changes what the mark actually records: not "the Reader never
+saw this," but "the Reader does not currently hold this." A pull that reaches back far
+enough clears it outright — the events are recovered, not lost, and a mark that kept saying
+otherwise would be false in the one direction this project never allows itself, even the
+safe one. Distinct from *unattributed*: a Partial request's children are correctly
+correlated; it is the parent that was missed.
 _Avoid_: orphan, stub, inferred.
 
 **Interrupted request** — a Request event whose Run ended before it finished: the process
@@ -113,12 +117,22 @@ before it, because Rails writes the line there and then. What that deliberately 
 prove, it leaves alone: the `↳` callsite `verbose_query_logs` prints under a query is the
 one thing in those two lines the SQL event does not carry, and it stays.
 
-**Console** — a global, dev-tools-style stream of every App log event, attributed or
-not, in *append order*. Rendered as the **Console rail**, the leftmost of the Reader's
-three columns. **App log events only** — never SQL, attributed or not. The Console exists
-so that a `Rails.logger` call you wrote is findable and one click from the request that
-ran it; queries outnumber log lines and would bury it. Every line is clickable and sets
-*Selection*.
+**Console** — a dev-tools-style stream of every App log event its owning row still holds,
+attributed or not, in *append order*. Rendered as the **Console rail**, the leftmost of the
+Reader's three columns. **App log events only** — never SQL, attributed or not. The Console
+exists so that a `Rails.logger` call you wrote is findable and one click from the request
+that ran it; queries outnumber log lines and would bury it. Every line is clickable and
+sets *Selection*.
+
+Bounded by the *Memory bound*, and by nothing of its own: a line's retention is exactly its
+owning row's, so the moment that row is evicted, the line goes with it. Until #44 the
+Console read the envelope stream independently of `activityTable` and outlived every row's
+eviction — one honest fact (a `Rails.logger` call you wrote never disappearing) sitting on
+top of one dishonest one (a click on an old line landing on a row the fold no longer had, a
+gutter rule pointing at nothing). Tying the two folds' retention together was cheaper than
+giving the Console a second, independently-counted bound, and keeps "one number, not two"
+literally true: there is still exactly one ring, and the Console's memory is derived from
+it rather than counted again.
 
 Volume is a **level** and **source** problem, never an attribution one, and the two chip
 groups that thin it start from opposite ends because the failure they prevent is the same
@@ -177,21 +191,45 @@ tracks) so there is one number, not two. Counted in **events** and evicted by wh
 exactly the history that backward scan delivered, and one Run row carrying an all-day
 worker's output is bounded by the same number a table full of requests is — while a row
 that had half its queries taken away would be a count of 24 beside a timeline showing
-three, so a row leaves whole or it stays. A request still *in flight* is never evicted —
-there is no timeout, ever, and a bound that took the hanging request away once five thousand
-events had gone past it would be one, measured in other people's traffic; an *Interrupted*
-row evicts like any other, having been concluded. Nor is the one row left standing, and that
-is where this bound stops being one: a `rake` burst larger than the figure lands in a single
-Run row, and emptying the table is worse than exceeding the number. Doubles as the
-attribution horizon: a finished request stops accepting *Trailing events* the instant its
-row is evicted. Reachable past load-on-open only through an explicit **load-earlier**
-control that continues the same backward scan — no infinite scroll, no silent fetch — and
-what that control pulls in is exempt from eviction, because the bound is on what the Reader
-accumulates by itself and history the developer went and asked for that evaporated under
-the next request to arrive would make the control useless. A live request reset mid-Run by
-boot-time truncation gets no extra signal; it surfaces as an ordinary *Partial request*,
-which already reads honestly on its own. See
-`docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
+three, so a row leaves whole or it stays.
+
+Three things this bound will not take, settled by #44 as three separate refusals rather
+than one leaky rule. A request still *in flight* is never evicted — there is no timeout,
+ever, and a bound that took the hanging request away once five thousand events had gone
+past it would be one, measured in other people's traffic; an *Interrupted* row evicts like
+any other, having been concluded. (The one gap this leaves: a forked Puma worker writes no
+`run_header` of its own and so can never be *Interrupted*, so a request stuck inside a
+worker that was killed without a clean restart stays unevictable forever. Known, named, and
+left alone rather than given a timer of its own — a timer here is the rule this bound exists
+to refuse, wearing a different name.) What a **load-earlier** pull brought in is never
+evicted either, and the ceiling it raises never comes back down — the bound is on what the
+Reader accumulates by itself, and history the developer went and asked for that evaporated
+under the next request to arrive would make the control useless; a developer clicking it
+often enough for that to matter is its own natural limit, so nothing further bounds it. Nor
+is the one row left standing, and that is where this bound stops being one: a `rake` burst
+larger than the figure lands in a single Run row, and emptying the table is worse than
+exceeding the number — so the row stays whole, however far over the figure it runs, and
+says so rather than going quiet about it: a Run row standing over the bound carries a
+visible mark that it is holding more than the usual bound, never the word "trimmed,"
+because nothing in it was.
+
+Forgetting is bounded too, on both sides of it. The bound remembers which requests it has
+evicted — kept to the same figure — so a *Trailing event* arriving for one reads as
+*unattributed* rather than opening a bogus *Partial request*; that memory is itself capped
+to the figure, so a Trailing event arriving five thousand evictions later **does** open a
+fresh row, honestly rather than by accident. See *Run row* for the mirror case on the Run
+side, which is not remembered as evicted at all.
+
+Doubles as the attribution horizon: a finished request stops accepting *Trailing events*
+the instant its row is evicted. Reachable past load-on-open only through the explicit
+**load-earlier** control above, which continues the same backward scan — no infinite
+scroll, no silent fetch. A live request reset mid-Run by boot-time truncation gets no extra
+signal; it surfaces as an ordinary *Partial request*, which already reads honestly on its
+own.
+
+The *Console* is bounded by this too, and by nothing of its own — see that entry. See
+`docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md` and
+`docs/adr/0005-the-memory-bounds-exemptions-and-the-consoles-retention.md`.
 
 **Trailing event** — an SQL or App log event whose `seq` places it *after* its request's
 `request_finish`. Attribution is not in doubt — the `request_id` is right there — only the
@@ -241,6 +279,12 @@ division of labour with the *Console*: the Console is where you read **when** so
 happened, the Run row is where you read **what**. Groups by *process*, never by job —
 every job a worker ever ran lands in one undifferentiated row, which is precisely why
 this is not the first-class background-job grouping v1 rules out.
+
+Never remembered as evicted — a Run still running has every right to another row — so a Run
+whose row the *Memory bound* took can open a second one, header-less, the next time it says
+something unattributed. Marked `reopened` rather than left to read exactly like a Run the
+Reader only ever attached inside: those are different facts, and #44 is why they stopped
+sharing one look.
 
 **Run marker** — the boundary the *Activity table* draws on a *Run row* where that Run's
 `run_header` landed. It means literally *this Run started here*, and never *everything below
@@ -331,10 +375,14 @@ a reader to look at nothing, over the lines they scrolled up to read.
 Neither is a **load-earlier** counted. Its control sits at the top of the *Activity table*,
 so reaching it has already paused that column, and the history it prepends went *up* rather
 than arriving below — a pill offering to take the reader down to it would be pointing the
-wrong way. Under the *Memory bound* the number is an undercount instead: a fold at its cap
-evicts a row for every row it takes, so the length it is read from stands still. That is the
-same trade as the seam above and it is worn rather than fixed — being exact would need the
-second record of what the reader has seen that the pill is deliberately not.
+wrong way. Under the *Memory bound* the number would otherwise be a silent undercount: a
+fold at its cap evicts a row for every row it takes, so the length it is read from stands
+still while traffic keeps running past underneath — a paused reader told nothing is
+arriving. Rather than let an exact-looking count freeze (#44), the pill switches from a
+count to a floor once the column is at the cap — "5,000+ new" rather than a number that has
+quietly stopped moving — which costs nothing beyond what the seam above already costs: it
+is the same "prompt to go and look, not a ledger" trade, admitted where it applies rather
+than worn silently.
 
 All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
