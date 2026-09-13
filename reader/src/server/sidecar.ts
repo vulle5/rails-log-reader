@@ -12,9 +12,9 @@ import { EVENT_TYPES, type Envelope } from "../shared/wire"
  * Ingestion is a file offset and nothing else: the Reader remembers how far into
  * `log/rails_log_reader.jsonl` it has read, and every line past that point is an envelope
  * it has not seen. That is what lets a temp file drive the whole Reader with no Rails
- * process anywhere near it (ADR-0003).
+ * process anywhere near it.
  *
- * Two things here are not obvious and are both ADR-0003's:
+ * Two things here are not obvious:
  *
  * - **The watch is on the `log/` directory, not on the Sidecar.** The Reader is routinely
  *   started before Rails has ever booted, so there is frequently no file to watch yet, and
@@ -27,7 +27,7 @@ import { EVENT_TYPES, type Envelope } from "../shared/wire"
 
 export const SIDECAR_NAME = "rails_log_reader.jsonl"
 
-/** ADR-0003's line cap, which the Initializer applies on write and this applies on read. */
+/** The Sidecar's line cap, which the Initializer applies on write and this applies on read. */
 export const MAX_LINE_BYTES = 256 * 1024
 
 const BACKSTOP_MS = 1_000
@@ -106,8 +106,8 @@ export async function openSidecar(
     // and the answer to both is to attach to what is there now as if opening it.
     //
     // A truncation that regrows past the old offset inside one tick would slip through, and
-    // is left to: that is 64 MB of new events inside a second, and the alternative is the
-    // liveness protocol ADR-0003 refused.
+    // is left to: that is 64 MB of new events inside a second, and the alternative is a
+    // liveness protocol this design deliberately does not add.
     if (inode !== sidecar.ino || sidecar.size < offset) {
       inode = sidecar.ino
       offset = await startOfHistory(path, sidecar.size)
@@ -121,7 +121,7 @@ export async function openSidecar(
 
     const handle = await open(path, "r")
     try {
-      // One allocation for everything appended since the last read, bounded by ADR-0003's
+      // One allocation for everything appended since the last read, bounded by the Sidecar's
       // 64 MB cap on the file itself. Behaviour under volume — backpressure, a drop policy —
       // is out of scope for v1 and open on the map.
       const span = Buffer.alloc(sidecar.size - offset)
@@ -141,7 +141,7 @@ export async function openSidecar(
   /**
    * Reads are serialised and never overlap: the watcher fires in bursts, and two reads at
    * one offset would deliver the same envelopes twice. A read that fails takes nothing
-   * down — there is no Reader surface for "your Sidecar is unreadable" yet (#29), and the
+   * down — there is no Reader surface for "your Sidecar is unreadable" yet, and the
    * backstop retries a second later — but it must not poison the chain either.
    */
   function catchUp() {
@@ -174,10 +174,9 @@ export async function openSidecar(
 
 /**
  * Where the load-on-open history before `end` begins: the start of the ~5,000th line back
- * from it, found by scanning backwards over the same offset the Reader tracks — the one seek
- * ADR-0003 describes. `end` is the end of a line — EOF, or the start of the line the Reader
- * already has — so the newline the count runs one past closes the line before the history,
- * and the byte after it opens it.
+ * from it, found by scanning backwards over the same offset the Reader tracks. `end` is the
+ * end of a line — EOF, or the start of the line the Reader already has — so the newline the
+ * count runs one past closes the line before the history, and the byte after it opens it.
  *
  * Called with EOF when a Sidecar is attached to, and with the history's own start when the
  * *load-earlier* control continues the scan: one function, because it is one scan.
@@ -260,7 +259,7 @@ function readEnvelopes(lines: Buffer) {
 }
 
 /**
- * One line. Unparseable lines are skipped silently (ADR-0003): a Sidecar is written by
+ * One line. Unparseable lines are skipped silently: a Sidecar is written by
  * concurrent processes and read while it is being written, so a half-written or interleaved
  * line is an ordinary event in the life of the file rather than a fault to report.
  */
@@ -297,7 +296,7 @@ function isEnvelope(value: unknown): value is Envelope {
 }
 
 /**
- * ADR-0003's line cap, from the reading end. The Initializer already applies it on write,
+ * The Sidecar's line cap, from the reading end. The Initializer already applies it on write,
  * so a line this large is one written by a Sidecar the Reader does not control — an
  * Initializer older than the cap, or a file written by hand. The Reader never assumes the
  * file it reads was written by its own master copy, and a 400 KB backtrace is the same

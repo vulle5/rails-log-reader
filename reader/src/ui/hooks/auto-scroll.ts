@@ -79,7 +79,7 @@ export function scrolled(state: AutoScroll, bottom: boolean): AutoScroll {
  *
  * `evicted` is the *Memory bound*'s own report of what it just took while this batch folded —
  * rows, for the Activity table, and the same rows again for the Console, whose retention
- * borrows that eviction rather than counting one of its own (#63). Zero everywhere below the
+ * borrows that eviction rather than counting one of its own. Zero everywhere below the
  * cap, where `howMany` is exact on its own. Once the bound is evicting one row for every row
  * it takes, `howMany` stalls at zero for the Activity table — the length it counts holds
  * still — or can even run negative for the Console, whose own rendered count is lines rather
@@ -110,8 +110,8 @@ type AutoScrollOptions = {
    * not something the reader would see by scrolling down, and a pill that counted it would
    * be sending them to look at nothing.
    *
-   * Growth of a length, which holds for as long as a column only ever appends — and since #27
-   * the Activity table does not. Its two other ends are both handled by `listing`, which that
+   * Growth of a length, which holds for as long as a column only ever appends — and the
+   * Activity table does not. Its two other ends are both handled by `listing`, which that
    * column feeds the row it starts at: a *load-earlier* prepending history above the oldest
    * row is not growth below, and the *Memory bound* taking a row off the same end is not a
    * loss below either. What is left is the fold sitting *at* its cap, where a row evicted per
@@ -154,8 +154,8 @@ type AutoScrollOptions = {
    * How many rows the *Memory bound* has evicted, ever — cumulative, counted the same way
    * `items` is, so a rising delta between two renders is what tells `arrived` a batch was
    * capped rather than counting one of its own. Left unset by the Detail column, which the
-   * bound does not apply to as a fold (#63, #64): a Selection's timeline is never evicted out
-   * from under it, so it has nothing to turn into a floor.
+   * bound does not apply to as a fold: a Selection's timeline is never evicted out from under
+   * it, so it has nothing to turn into a floor.
    */
   evicted?: number
 }

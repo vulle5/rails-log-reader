@@ -1,9 +1,9 @@
 /**
- * SQL highlighting, hand-rolled and dependency-free — the mechanism #9 chose. Rails and
- * ActiveRecord emit a narrow grammar: keywords, quoted identifiers, string and numeric
- * literals, `$1` and `?` placeholders, and a QueryLogs comment on the end. That is small
- * enough that one regex is competitive with any library, and a library would cost either a
- * CJS interop dance (Prism) or ~12 KB gzip (highlight.js) to colour one short string.
+ * SQL highlighting, hand-rolled and dependency-free. Rails and ActiveRecord emit a narrow
+ * grammar: keywords, quoted identifiers, string and numeric literals, `$1` and `?`
+ * placeholders, and a QueryLogs comment on the end. That is small enough that one regex is
+ * competitive with any library, and a library would cost either a CJS interop dance (Prism)
+ * or ~12 KB gzip (highlight.js) to colour one short string.
  *
  * The tokenizer's one hard promise: **it never edits.** Concatenating every token's text
  * reproduces the input character for character, which is what keeps "renders exactly as
@@ -34,11 +34,11 @@ export type SqlToken = { kind: SqlTokenKind; text: string }
  * A string literal ends on a doubled quote **or** a backslash-escaped one, which is a
  * dialect call and worth stating: `\'` is an escape on mysql2 and trilogy, and merely a
  * backslash before the closing quote on postgres and sqlite. It is read as an escape
- * because that is the case Rails actually produces — #13 established that with
- * `prepared_statements` off, Arel inlines literals straight into the SQL text, so a quote
- * inside a value reaches the Reader escaped by the mysql adapter, while ActiveRecord's own
- * postgres and sqlite quoting doubles the quote and never emits `\'` at all. Guessing wrong
- * miscolours a stretch of one query and can do no worse: this file never edits.
+ * because that is the case Rails actually produces — with `prepared_statements` off, Arel
+ * inlines literals straight into the SQL text, so a quote inside a value reaches the Reader
+ * escaped by the mysql adapter, while ActiveRecord's own postgres and sqlite quoting doubles
+ * the quote and never emits `\'` at all. Guessing wrong miscolours a stretch of one query
+ * and can do no worse: this file never edits.
  */
 const TOKEN =
   /\/\*[\s\S]*?(?:\*\/|$)|--[^\n]*|'(?:''|\\[\s\S]|[^'])*'?|"(?:""|[^"])*"?|`[^`]*`?|\$\d+|\?|\d+(?:\.\d+)?|[A-Za-z_]\w*/g

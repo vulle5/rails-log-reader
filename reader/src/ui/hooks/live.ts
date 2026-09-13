@@ -11,22 +11,22 @@ import type { Envelope } from "../../shared/wire"
  * it. Both start `null` — nothing has been observed yet — and both are read off *every*
  * envelope, not only `run_header`, because a `run_header` can sit outside the load-on-open
  * window the Reader attached inside; any envelope from the current Run says the same `v`
- * and the same `run_id` regardless (#29).
+ * and the same `run_id` regardless.
  */
 export type WireStatus = {
   rows: readonly ActivityRow[]
   /**
    * The *Console*'s own fold of the same envelopes: every App log event, in append order,
    * that its owning row still holds — a line's retention borrows the Activity fold's own
-   * eviction rather than counting its own (#63).
+   * eviction rather than counting its own.
    */
   lines: readonly ConsoleLine[]
   /**
    * How many rows the *Memory bound* has evicted, ever. Cumulative rather than per-batch, so
    * the Activity table's and the Console's own auto-scrolls can each read it as one more thing
    * to watch grow — the signal `arrived` turns into a floor once a paused column's rendered
-   * count stalls at the cap (#64). One number for both columns, because it is one bound: the
-   * Console has none of its own to report (#63).
+   * count stalls at the cap. One number for both columns, because it is one bound: the
+   * Console has none of its own to report.
    */
   evictedRows: number
   liveWireVersion: number | null
@@ -66,7 +66,7 @@ export type EarlierState = {
  * `activity.fold` hands back is one it just evicted under the *Memory bound*, and
  * `stream.evict` is what lets the Console's lines go with it — and its attribution horizon
  * close behind a Request row the same way `activityTable`'s own does — rather than the
- * Console counting a bound of its own (#63).
+ * Console counting a bound of its own.
  *
  * Both folds and the cursor outlive that effect, in `useState` initialisers and a ref, for
  * the same reason: a reconnection is not a new Reader. What the folds hold — including
@@ -100,8 +100,8 @@ export function useSidecar(): WireStatus {
       const envelopes = JSON.parse(message.data) as Envelope[]
       const evicted = activity.fold(envelopes)
       stream.fold(envelopes)
-      // The Console's retention borrowed from the fold's own eviction (#63): whatever rows
-      // this batch's fold just took, the Console lets go of what belonged to them.
+      // The Console's retention borrows from the fold's own eviction: whatever rows this
+      // batch's fold just took, the Console lets go of what belonged to them.
       stream.evict(evicted)
       const latest = envelopes.at(-1)
 

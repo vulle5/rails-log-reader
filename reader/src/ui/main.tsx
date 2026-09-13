@@ -10,12 +10,12 @@ if (container === null) throw new Error("index.html is missing its #root element
 
 /**
  * The one place the Sidecar is subscribed to, so every component below is a pure render.
- * `useInitializerFileStatus` and `useInitializerRepair` are the same idea for #29: the fetch
- * to `GET /initializer-status` and the `POST /initializer-repair` that follows a click both
- * live here, and `detectMismatch` folds the file status together with whatever `v` the live
- * Sidecar last reported into the one thing `Reader` actually renders. `detectEmptyState` is
- * #28's half of the same read: the same file status, with whether the Sidecar's history has
- * all arrived, into why an empty Reader is empty.
+ * `useInitializerFileStatus` and `useInitializerRepair` own the fetch to `GET
+ * /initializer-status` and the `POST /initializer-repair` that follows a click, and
+ * `detectMismatch` folds the file status together with whatever `v` the live Sidecar last
+ * reported into the one thing `Reader` actually renders. `detectEmptyState` folds the same
+ * file status, with whether the Sidecar's history has all arrived, into why an empty Reader
+ * is empty.
  */
 function LiveReader() {
   const { rows, lines, evictedRows, liveWireVersion, liveRunId, historyLoaded, earlier, loadEarlier } = useSidecar()

@@ -4,7 +4,7 @@ import type { TimelineEvent } from "../../../../shared/activity"
 import { Chip } from "../../../components/Chip"
 
 /**
- * The *Detail column*'s one thinning — #54's fix for the axis `ConsoleFilters` does not touch.
+ * The *Detail column*'s one thinning, on the axis `ConsoleFilters` does not touch.
  * A Console line is thinned by who logged it; a Detail column entry is thinned by whether
  * `development.log` would ever have shown it at all.
  *

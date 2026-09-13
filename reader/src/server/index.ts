@@ -79,7 +79,7 @@ function envelopeStream() {
       // The load-on-open history has all been sent by the time `openSidecar` resolves, and
       // this says so. Without it an empty Activity table is two things the browser cannot tell
       // apart — a Sidecar with nothing in it, and one whose history is still on its way — and
-      // #28's *enabled but idle* would flash over every page load that had rows coming.
+      // the *enabled but idle* state would flash over every page load that had rows coming.
       // Empty data, because a message with none is one `EventSource` never dispatches.
       send("event: loaded\ndata: {}\n\n")
     },
@@ -99,7 +99,7 @@ function envelopeStream() {
 
 /**
  * The *load-earlier* control: the block of envelopes immediately before the history the
- * browser holds, read by continuing the same backward scan ADR-0003's load-on-open is. A
+ * browser holds, read by continuing the same backward scan the load-on-open history uses. A
  * `GET` because it only ever reads, and stateless because the offset comes in with the
  * request — the server is the Sidecar and nothing else, and holds no history of its own.
  */
@@ -114,22 +114,22 @@ async function earlier(request: Request) {
 }
 
 /**
- * #29: is the Host app's copy of the Initializer the Reader's own master copy, byte for
- * byte? And #28: is it there at all, and is the Marker file beside it? A GET because it only
- * ever reads — ADR-0004's two fixed-contract paths are what tell *not installed* from *not
- * enabled* from *enabled but idle*, and the Reader only ever reads the Host app's files
- * outside the one repair action below.
+ * Is the Host app's copy of the Initializer the Reader's own master copy, byte for byte? Is
+ * it there at all, and is the Marker file beside it? A GET because it only ever reads —
+ * two fixed-contract paths are what tell *not installed* from *not enabled* from
+ * *enabled but idle*, and the Reader only ever reads the Host app's files outside the one
+ * repair action below.
  */
 async function initializerStatus() {
   return Response.json(await initializerFileStatus(railsRoot))
 }
 
 /**
- * #29's one write: overwrite `config/initializers/rails_log_reader.rb` with the Reader's
- * master copy, and nothing else. Never the Marker file, never any other path in the Work
- * app — creating and removing the Marker stays the developer's own act. The Reader cannot
- * restart Rails, so the client is left to prompt for one and confirm it by the arrival of a
- * new `run_id` on the Sidecar it is already watching.
+ * The one write this route makes: overwrite `config/initializers/rails_log_reader.rb` with
+ * the Reader's master copy, and nothing else. Never the Marker file, never any other path in
+ * the Work app — creating and removing the Marker stays the developer's own act. The Reader
+ * cannot restart Rails, so the client is left to prompt for one and confirm it by the arrival
+ * of a new `run_id` on the Sidecar it is already watching.
  */
 async function repairInitializer() {
   try {
@@ -161,7 +161,7 @@ function serveOrSaySo(port: number) {
         // A connection that is quiet whenever the Host app is, which is most of the time — so
         // exempt from `Bun.serve`'s 10 s idle timeout, which would otherwise reap it every
         // twelve seconds and leave each append inside `EventSource`'s three-second reconnect
-        // arriving late (#39). Only this route: nothing else here is meant to be held open.
+        // arriving late. Only this route: nothing else here is meant to be held open.
         // There's no test for this, because Bun's default timeout is 10 s and the test
         // would have to wait that long to fail.
         "/events": (request, server) => {
