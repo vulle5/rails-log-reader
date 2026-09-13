@@ -1241,9 +1241,37 @@ mark.search-match {
 }
 
 .exception {
-  padding: 8px 12px;
+  position: relative;
+  padding: 8px 60px 8px 12px;
   border-top: 1px solid var(--error);
   border-bottom: 1px solid var(--border);
+}
+
+/* Anchored to `.exception` and not to the column: this is the one place a copy control
+   earns its keep, since a query or a log line is easy enough to select by hand. Reduced
+   opacity at rest so it never competes with the exception it sits on, solidifying on
+   hover or focus the way it is reached. */
+.copy-button {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  /* Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
+     beside it — the layout stays put the way a click here is not supposed to disturb it. */
+  min-width: 52px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.copy-button:hover,
+.copy-button:focus-visible {
+  opacity: 1;
 }
 
 .exception-message {

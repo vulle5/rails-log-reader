@@ -537,6 +537,96 @@ describe("a request that raised", () => {
 })
 
 /**
+ * A clean plain-text reconstruction, meant for pasting into a bug tracker, a colleague's
+ * chat, or an AI assistant — never the block's own markup, and never silent about the paste
+ * having happened.
+ */
+describe("copying an exception", () => {
+  async function click(element: Element) {
+    await act(async () => element.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  }
+
+  function copyButton(container: HTMLElement, scope = ".exception") {
+    const found = detail(container).querySelector(`${scope} .copy-button`)
+    if (found === null) throw new Error("no copy control")
+    return found
+  }
+
+  test("appears in the Exception block and nowhere else", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", "SELECT 1"),
+      run.log("req-1", "about to raise"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "RuntimeError", message: "boom", backtrace: ["order.rb:1"] },
+      }),
+    )
+
+    await select(container, "/orders")
+
+    expect(detail(container).querySelectorAll(".exception .copy-button")).toHaveLength(1)
+    // SQL queries and App log lines are easy enough to select-and-copy by hand.
+    expect(detail(container).querySelector(".entry-sql .copy-button")).toBeNull()
+    expect(detail(container).querySelector(".entry-log .copy-button")).toBeNull()
+  })
+
+  test("copies the class and message, then one backtrace frame per line, no UI chrome", async () => {
+    const run = aRun("srv-1")
+    const backtrace = ["app/models/order.rb:44:in `block in recalculate_total!'", "puma (6.6.0) lib/puma/server.rb:443"]
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "undefined method `price_cents' for nil", backtrace },
+      }),
+    )
+
+    await select(container, "/orders")
+    await click(copyButton(container))
+
+    expect(await navigator.clipboard.readText()).toBe(
+      ["NoMethodError: undefined method `price_cents' for nil", ...backtrace].join("\n"),
+    )
+  })
+
+  test("ends the copied text with the same cut wording the on-screen note gives", async () => {
+    const run = aRun("srv-1")
+    const finish = run.finish("req-1", {
+      status: 500,
+      exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44"] },
+    })
+    const container = await theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
+
+    await select(container, "/orders")
+    const note = detail(container).querySelector(".exception .cut")?.textContent
+    await click(copyButton(container))
+
+    expect(note).not.toBeUndefined()
+    expect(await navigator.clipboard.readText()).toBe(
+      `NoMethodError: boom\napp/models/order.rb:44\n# ${note}`,
+    )
+  })
+
+  test("gives a visible confirmation after a successful copy, rather than copying silently", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", { status: 500, exception: { class: "RuntimeError", message: "boom", backtrace: [] } }),
+    )
+
+    await select(container, "/orders")
+    const button = copyButton(container)
+    expect(button.textContent).not.toContain("Copied")
+
+    await click(button)
+
+    expect(copyButton(container).textContent).toContain("Copied")
+  })
+})
+
+/**
  * The whole point of the column, over the dense seed rather than a crafted pair: the shape
  * has to be visible in the middle of a real request's traffic, not on its own.
  */

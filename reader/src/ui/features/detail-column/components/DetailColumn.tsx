@@ -3,6 +3,9 @@ import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../.
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { controllerAction, methodClassName, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, useMatches } from "../../../hooks/search"
+import { CopyButton } from "./CopyButton"
+import { bytes } from "../lib/format"
+import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 
 /**
@@ -196,10 +199,6 @@ function Cut({ field, original }: { field: string; original: number | undefined 
   return <p className="cut">{`${field} was cut by the Sidecar — ${bytes(original)} was emitted`}</p>
 }
 
-function bytes(howMany: number) {
-  return howMany < 1024 ? `${howMany} bytes` : `${Math.round(howMany / 1024)} KB`
-}
-
 /**
  * Labelled as *this query's parameter values*, and never as values sent to the database:
  * trilogy never parameterizes a query at the wire level, so the second phrasing would be
@@ -267,6 +266,10 @@ function LogLine({ event }: { event: AppLogEvent }) {
 function Exception({ exception, cutFrom }: { exception: RequestException; cutFrom: number | null }) {
   return (
     <section className="exception" aria-label="Exception">
+      {/* Copy, not select-and-copy: the one block on this page an exception is filed from
+          somewhere else, so it alone gets a control for it — a query or a log line is easy
+          enough to select by hand. */}
+      <CopyButton text={exceptionText(exception, cutFrom)} label="Copy exception" />
       <p className="exception-message">
         <span className="exception-class">
           <Highlight text={exception.class} />
