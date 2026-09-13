@@ -491,6 +491,27 @@ describe("a request's timeline", () => {
     expect(theOnlyRequest(rows).exception).toBeNull()
   })
 
+  test("threads its owning Run's rails_root onto the request row", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), run.start("req-1"), run.finish("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).railsRoot).toBe("/home/dev/example-app")
+  })
+
+  test("leaves a request's rails_root unknown when its Run's run_header was never seen", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    // No run.header() here: the Reader attached mid-stream.
+    await appendToSidecar(log, run.start("req-1"), run.finish("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).railsRoot).toBeNull()
+  })
+
   test("drops the line Rails logs beside a query it already holds, keeping the callsite under it", async () => {
     const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = 58 LIMIT 1 /*action='show'*/`
     const log = await aLogDirectory()
@@ -865,6 +886,7 @@ describe("Run rows", () => {
       pid: 91_887,
       railsVersion: "8.0.2",
       appName: "ExampleApp",
+      railsRoot: "/home/dev/example-app",
     })
   })
 
@@ -1230,6 +1252,18 @@ describe("load-earlier", () => {
     expect(reader.rows.indexOf(request)).toBe(before + 1)
     // The pull recovered the very `request_start` the row was missing: not lost, recovered.
     expect(request.partial).toBe(false)
+  })
+
+  test("backfills rails_root onto a request opened before the pull recovered its header", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithHistory(log)
+    const reader = await theReaderReads(log)
+
+    expect(theOnlyRequest(reader.rows).railsRoot).toBeNull()
+
+    await reader.loadEarlier()
+
+    expect(theOnlyRequest(reader.rows).railsRoot).toBe("/home/dev/example-app")
   })
 
   test("leaves a request Partial when the pull does not reach its start", async () => {

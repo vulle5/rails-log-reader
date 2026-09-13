@@ -113,6 +113,8 @@ export type RequestRow = {
    * promise the Reader can only keep if it says when the file could not.
    */
   backtraceCutFrom: number | null
+  /** The owning Run's `rails_root`, kept in step with `RunRow.railsRoot`. `null` until that Run's `run_header` is folded, whenever that turns out to be. */
+  railsRoot: string | null
 }
 
 /**
@@ -147,6 +149,8 @@ export type RunRow = {
   pid: number | null
   railsVersion: string | null
   appName: string | null
+  /** `Rails.root`. `null` where `run_header` was never seen, like `appName`. */
+  railsRoot: string | null
   /**
    * The *Run marker*: drawn where a `run_header` announcing a web process landed, and
    * meaning literally *this Run started here* — never *everything below belongs to it*.
@@ -348,6 +352,8 @@ export function activityTable(): ActivityTable {
         trailing: [],
         exception: null,
         backtraceCutFrom: null,
+        // Backfilled below if this Run's header lands after this row already opened.
+        railsRoot: byRun.get(envelope.run_id)?.row.railsRoot ?? null,
       },
       startedAtMono: null,
       finishSeq: null,
@@ -372,6 +378,7 @@ export function activityTable(): ActivityTable {
         pid: null,
         railsVersion: null,
         appName: null,
+        railsRoot: null,
         marker: false,
         reopened: evictedRuns.has(envelope.run_id),
         overBound: false,
@@ -574,6 +581,11 @@ export function activityTable(): ActivityTable {
       row.pid = envelope.payload.pid
       row.railsVersion = envelope.payload.rails_version
       row.appName = envelope.payload.app_name
+      row.railsRoot = envelope.payload.rails_root
+      // A load-earlier pull can bring this header in after one of its requests already opened.
+      for (const folding of byRequest.values()) {
+        if (folding.row.runId === envelope.run_id) folding.row.railsRoot = envelope.payload.rails_root
+      }
 
       if (bootsAWebProcess(envelope.payload.kind)) {
         // The marker goes where this header landed, so it is only ever drawn on a row this
