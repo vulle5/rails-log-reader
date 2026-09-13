@@ -1262,11 +1262,14 @@ mark.search-match {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-raised);
-  color: var(--fg-muted);
+  color: var(--fg);
   font-family: var(--ui);
   font-size: 11px;
   cursor: pointer;
-  opacity: 0.5;
+  /* `opacity` dims the border and background along with the label — pushed no lower than
+     this, or "reduced" starts reading as "gone" rather than as "not yet what you're looking
+     at". */
+  opacity: 0.7;
 }
 
 .copy-button:hover,
