@@ -7,8 +7,13 @@ import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./ActivityTable"
 import { useAutoScroll, type ColumnAutoScroll } from "./hooks/auto-scroll"
-import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
-import { ConsoleRail } from "./ConsoleRail"
+import {
+  ConsoleFilters,
+  consoleFilterKey,
+  linesShown,
+  useConsoleFilter,
+} from "./features/console/components/ConsoleFilters"
+import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./DetailColumn"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./DetailFilters"
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
