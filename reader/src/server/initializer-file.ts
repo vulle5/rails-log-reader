@@ -4,9 +4,9 @@ import { join } from "node:path"
 import type { InitializerFileStatus } from "../shared/initializer-status"
 
 /**
- * The two fixed-contract paths ADR-0004 relies on to tell *not installed* from *not
+ * The two fixed-contract paths this file relies on to tell *not installed* from *not
  * enabled* from *enabled but idle* using only reads. This file reads both, and writes only
- * the first: `config/initializers/rails_log_reader.rb` is what #29's repair overwrites, and
+ * the first: `config/initializers/rails_log_reader.rb` is what the repair overwrites, and
  * the Marker file, `log/rails_log_reader.enabled`, is only ever checked for — creating and
  * removing it stays the developer's own act.
  *
@@ -48,7 +48,7 @@ export async function initializerFileStatus(railsRoot: string): Promise<Initiali
 }
 
 /**
- * Presence, and nothing else: the Marker file's content is never read (ADR-0004), so this
+ * Presence, and nothing else: the Marker file's content is never read, so this
  * asks the one question the Initializer's own gate asks. Whether the running process has
  * seen it is another matter — that is read once, at boot — and not one a file can answer.
  */
@@ -64,8 +64,7 @@ async function markerExists(railsRoot: string) {
 
 /**
  * `POST /initializer-repair`'s whole implementation: overwrite exactly the one path, and
- * nothing else — not even `config/initializers/` itself. #29 says "overwrites exactly that
- * one path" and "never touches any other path in the Host app", so this deliberately does
+ * nothing else — not even `config/initializers/` itself. This deliberately does
  * not `mkdir` a missing directory into existence: every real Rails root already has
  * `config/initializers/` (`rails new` creates it), so the only app this could ever matter
  * for is one so far from a real Rails root that failing the repair — surfaced to the

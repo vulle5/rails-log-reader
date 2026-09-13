@@ -8,7 +8,7 @@ import type { InitializerFileStatus } from "../../../../shared/initializer-statu
  * installed* — nothing to compare yet, so no banner flashes on a fresh page load ahead of the
  * read that would justify one.
  *
- * Re-read on focus because #28's empty states each name a command, and the command is run
+ * Re-read on focus because the empty states each name a command, and the command is run
  * somewhere else — in the terminal beside the Reader, or an editor that just touched the
  * Initializer. Coming back to the tab is the moment the answer may have changed, and a screen
  * still saying *not installed* after the file was copied in would be the tool looking broken
@@ -70,11 +70,11 @@ export type RepairState =
   | { phase: "failed"; error: string }
   /** The file is copied; the developer still has to restart Rails to load it. */
   | { phase: "awaiting-restart" }
-  /** A new `run_id` arrived after the copy — #29's own definition of a confirmed repair. */
+  /** A new `run_id` arrived after the copy — the definition of a confirmed repair. */
   | { phase: "restarted" }
 
 /**
- * The one click #29 asks for: overwrite the Host app's copy, prompt for a restart, and
+ * The one click this hook exposes: overwrite the Host app's copy, prompt for a restart, and
  * confirm success by the arrival of a new `run_id` — never by polling `/initializer-status`
  * again, which could only ever confirm the file, not the process that has to reload it.
  *

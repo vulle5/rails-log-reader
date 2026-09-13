@@ -14,3 +14,7 @@ See `docs/agents/issue-tracker.md`.
 
 Single-context: `CONTEXT.md` at the repo root, ADRs under `docs/adr/`.
 See `docs/agents/domain.md`.
+
+### Comments
+
+Code comments document behavior, not history. See `docs/agents/comments.md`.

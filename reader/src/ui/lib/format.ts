@@ -63,9 +63,9 @@ export function runDescription(row: Pick<RunRow, "runKind" | "pid">) {
 }
 
 /**
- * The one lookup #50 asks for: the Activity table's method cell and the Detail heading's
- * method share it, so a verb renders the same colour in both places or a colour drifting
- * between them would be a bug this function alone could have caught. GET keeps the accent
+ * The one lookup the Activity table's method cell and the Detail heading's method share, so
+ * a verb renders the same colour in both places, or a colour drifting between them would be
+ * a bug this function alone could have caught. GET keeps the accent
  * already used for it; POST, PUT/PATCH — read as one bucket, both "modify" — and DELETE each
  * get one of their own. Everything else — HEAD, OPTIONS, a verb this Reader has never heard
  * of, or no method at all — is `"other"`, which is plain neutral text and never GET's colour

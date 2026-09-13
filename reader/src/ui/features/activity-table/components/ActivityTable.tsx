@@ -24,8 +24,8 @@ import { useClimbingElapsed } from "../lib/elapsed"
  * shows. The table is a `grid` and the showing row carries `aria-selected`, because a table
  * whose rows are selectable is one — but selecting from the keyboard is deliberately **not**
  * here. A grid's keyboard contract is a roving tab stop plus arrow-key navigation, and
- * arrow keys moving the selection have to scroll the table to follow, which is #26's
- * auto-scroll model and not something to invent in passing. A `tabIndex` on every row would
+ * arrow keys moving the selection have to scroll the table to follow, which belongs to the
+ * auto-scroll hook and not something to invent in passing. A `tabIndex` on every row would
  * have been the cheap half of that pattern and, at the Memory bound's rows, five thousand
  * tab stops.
  */
@@ -265,7 +265,7 @@ function rowClassName(classes: readonly string[], selected: boolean, pinned: boo
 
 /**
  * A status when the finish carried one, and otherwise whichever of the three reasons it has
- * none. A finished request with no status is one that raised before it had a response (#47) —
+ * none. A finished request with no status is one that raised before it had a response —
  * its exception is in the *Detail column* — and a blank there would read the same as a cell
  * with nothing to say, on the row that most needs to read as an error.
  */
@@ -273,8 +273,8 @@ function Status({ row }: { row: Request }) {
   if (row.status !== null) {
     const className = statusClassName(row.status)
     const status = <Highlight text={String(row.status)} />
-    // 1xx, 2xx and 3xx get no class and so no span: unchanged, plain text, exactly as before
-    // #50 gave 4xx and 5xx colours of their own.
+    // 1xx, 2xx and 3xx get no class and so no span: plain text, uncoloured. 4xx and 5xx get
+    // colours of their own via `statusClassName`.
     return className === "" ? status : <span className={className}>{status}</span>
   }
   if (row.state !== "finished") return <StateDot state={row.state} />

@@ -2,7 +2,7 @@ import type { Mismatch } from "../../../../shared/initializer-status"
 import type { RepairState } from "../lib/initializer-repair"
 
 /**
- * #29's whole surface: a non-blocking banner naming which half of the Initializer is wrong
+ * A non-blocking banner naming which half of the Initializer is wrong
  * — the file on disk, or the process already running — and the one click that repairs
  * either. Rendered above the Reader's three columns rather than inside any of them, because
  * a mismatch is a fact about the *connection* to the Host app, not about anything any one
@@ -57,7 +57,7 @@ const MISMATCH_MESSAGE: Record<Exclude<Mismatch["kind"], "none">, string> = {
 }
 
 /**
- * #29's refusal case: `v` on an envelope is newer than `WIRE_VERSION`, a shape this Reader
+ * The refusal case: `v` on an envelope is newer than `WIRE_VERSION`, a shape this Reader
  * has never read a line from. Rendered in place of the three columns rather than beside
  * them — the Reader has no way to know which of its own assumptions the unread part of that
  * shape would break, so it declines to guess through any of them rather than render

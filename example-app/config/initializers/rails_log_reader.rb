@@ -9,29 +9,25 @@
 # and restart. Delete that file to turn it off again. Nothing below the gate on the first
 # line of code runs without it, so a colleague who never creates one gets no middleware, no
 # subscribers, no logger sink and no file at all — their `tail -f log/development.log` shows
-# exactly what it shows today. That is why this file being committed is harmless.
+# exactly what it shows today.
 #
 # Events are appended, one JSON object per line, to log/rails_log_reader.jsonl, which Rails'
 # own .gitignore already covers. The Reader tails that file and never writes to it. Nothing
-# is ever written into log/development.log except the boot warnings below — and those cannot
-# reach a developer who has not opted in, because they sit below the gate too.
+# is ever written into log/development.log except the boot warnings below, which sit below
+# the same gate.
 #
-# This is a copy. The master lives at reader/rails/rails_log_reader.rb in the
-# rails-log-reader repo, and that is where to edit it — an edit made here is a difference
-# between the two, which is what the repo's CI exists to catch.
+# This is a copy. The master lives at reader/rails/rails_log_reader.rb — edit there.
 
-# The one gate, and the reason inertness is structural rather than audited: with no marker
-# file, or in any environment but development, the rest of this file never happens.
-# `development?` is an allowlist — production, staging and test are refused by construction
-# rather than by three checks that could each be got wrong. The marker file's *presence* is
-# the whole switch; its contents are never read. Both questions are answered once, here, at
-# boot, which is why turning the Reader on takes a restart.
+# The one gate: with no marker file, or in any environment but development, the rest of this
+# file never happens. `development?` is an allowlist — production, staging and test are all
+# refused. The marker file's *presence* is the whole switch; its contents are never read.
+# Both questions are answered once, at boot, so a marker file change needs a restart to take
+# effect.
 return unless Rails.env.development? && Rails.root.join("log/rails_log_reader.enabled").exist?
 
 # ActiveSupport::BroadcastLogger#broadcast_to is the only way to read Rails.logger without
 # changing what log/development.log contains, and Rails 7.0 does not have it. Its 7.0
-# substitute is deprecated, undocumented and cannot be detached again, so it would break the
-# promise this whole file is built around rather than merely cost a port.
+# substitute is deprecated, undocumented and cannot be detached again.
 if Rails.gem_version < Gem::Version.new("7.1")
   Rails.logger.warn(
     "[rails_log_reader] disabled: reading Rails.logger without changing log/development.log " \
@@ -45,24 +41,15 @@ require "json"
 require "securerandom"
 
 module RailsLogReader
-  # Stamped on every envelope, and bumped when a field changes meaning — including when a
-  # field a Reader could once count on becomes one it has to check for, which is a meaning
-  # change from the reading half's side even though the field itself still says what it did.
-  # The Reader reads it to tell "the new file is loaded" from "the file on disk is new but
-  # the process is not".
-  #
-  # 2: `duration_ms` became optional on a `request_finish` (#45).
-  # 3: `status` on a `request_finish` now names the controller's own status when one was
-  #    reached — `process_action.action_controller`'s, read before `Rack::ConditionalGet`
-  #    or `Rack::ETag` get a chance to rewrite it further down the stack — and only falls
-  #    back to the Rack-final status `Middleware` reads when no controller was reached at
-  #    all (#47's cases, untouched). Same field, same `number | null`, a different moment (#53).
+  # Stamped on every envelope, and bumped when a field changes meaning for the reading half —
+  # including when a field a Reader could once count on becomes one it has to check for. The
+  # Reader reads it to tell "the new file is loaded" from "the file on disk is new but the
+  # process is not".
   WIRE_VERSION = 3
 
   SIDECAR = Rails.root.join("log/rails_log_reader.jsonl")
 
-  # The disk bound, checked once at boot and never again. Truncating on every boot would
-  # fire every time puma-dev reaps an idle app, which is precisely the history worth keeping.
+  # The disk bound, checked once at boot and never again.
   MAX_SIDECAR_BYTES = 64 * 1024 * 1024
 
   # A field past this is cut, and its original byte length is recorded under `truncated` so
@@ -71,35 +58,24 @@ module RailsLogReader
   MAX_FIELD_BYTES = 64 * 1024
   KEPT_WHOLE = %w[backtrace].freeze
 
-  # ADR-0003's safety net on top of the per-field cap above. Nothing here ever writes a
-  # field over 64 KB except a backtrace, kept whole on purpose — so a single 500 can still
-  # run to several hundred KB on one line. A write(2) that large can be split by the kernel,
-  # letting a concurrent writer's line land inside ours, which is the one way append order
-  # can be corrupted rather than merely surprising. Past this cap the largest field is
-  # shrunk further, backtrace included, and the shrink is recorded in `truncated` same as
-  # any other.
+  # A safety net on top of the per-field cap above. Nothing here ever writes a field over
+  # 64 KB except a backtrace, kept whole on purpose — so a single 500 can still run to
+  # several hundred KB on one line. A write(2) that large can be split by the kernel, letting
+  # a concurrent writer's line land inside ours, which is the one way append order can be
+  # corrupted. Past this cap the largest field is shrunk further, backtrace included, and the
+  # shrink is recorded in `truncated` same as any other.
   MAX_LINE_BYTES = 256 * 1024
 
   # Request-scoped handoff between the pieces below, which observe the same request on the
   # same thread but never share a method call: the middleware that opens it, and the
   # subscribers that close it.
   #
-  # `ActiveSupport::CurrentAttributes` was the obvious home for this and is the wrong one
-  # (#45). Rails clears every CurrentAttributes from `reloader.before_class_unload`, and the
-  # Middleware below is installed *above* `ActionDispatch::Reloader` — so on the first request
-  # after any edit, that reset landed in the middle of a live request instead of at its
-  # boundary. The row lost its request_id halfway through, every event it emitted afterwards
-  # went to its Run instead, and it never got a finish at all.
-  #
-  # A CurrentAttributes instance is itself kept in `ActiveSupport::IsolatedExecutionState`, so
-  # this is the same per-execution-context storage under a key Rails does not clear — and not
-  # a new idea in this file, which already keeps `rails_log_reader_sql_starts` there. What is
-  # given up is the automatic reset at the request boundary, and that is a real cost rather
-  # than a free win: a thread serves one request after another, so a request_id left behind on
-  # one would attribute the next request's events — and every unattributed line in between —
-  # to a request that is over. So this file clears its own key, at the same boundary Rails
-  # cleared it at: `executor.to_complete`, registered in `install_request_events`. A value
-  # leaking across requests stays a failure mode with exactly one place to look.
+  # Backed by `ActiveSupport::IsolatedExecutionState`, the same per-execution-context storage
+  # `rails_log_reader_sql_starts` below already uses — which Rails does not clear at a request
+  # boundary on its own. This file clears its own key by hand, at `executor.to_complete`
+  # (registered in `install_request_events`), the same boundary Rails uses to clear
+  # `CurrentAttributes`. A value leaking across requests would attribute the next request's
+  # events, and every unattributed line in between, to a request that is already over.
   module Current
     KEY = :rails_log_reader_request
     ATTRIBUTES = %i[request_id started_at_mono status controller_status view_runtime_ms db_runtime_ms
@@ -149,10 +125,10 @@ module RailsLogReader
   end
 
   # Object-form on purpose, and `start` does nothing on purpose: `request.action_dispatch`'s
-  # own start fires from Rails::Rack::Logger, later than the Middleware's above — the very
-  # gap ADR-0002 closed by moving the start marker earlier — so its timestamp is the wrong
-  # one to keep. `finish` is deferred to Rack::BodyProxy close, which fires after every
-  # middleware has unwound and is the truest "request over" marker available.
+  # own start fires from Rails::Rack::Logger, later than the Middleware's above, so its
+  # timestamp is the wrong one to keep. `finish` is deferred to Rack::BodyProxy close, which
+  # fires after every middleware has unwound and is the truest "request over" marker
+  # available.
   class RequestFinishSubscriber
     def start(_name, _id, _payload); end
 
@@ -166,18 +142,17 @@ module RailsLogReader
       # None of this reads from the notification's own payload — `request.action_dispatch`
       # never carries anything but `request:` — it is all handed off through Current instead.
       #
-      # A `status` of `nil` stays on the wire as `null`, and that is a decision rather than a
-      # gap (#47): it is a request whose `@app.call` never returned, so there was no response
-      # to read a status off. Puma will answer the client with a 500 of its own, but this file
-      # never sees that, and a status it did not observe would be one it made up.
+      # A `status` of `nil` stays on the wire as `null`: a request whose `@app.call` never
+      # returned has no response to read a status off, and a status this file did not observe
+      # would be one it made up.
       #
       # `Current.controller_status`, when there is one, wins over `Current.status` — the
-      # Rack-final status `Middleware` reads off `@app.call`'s own return. The two can disagree
-      # (#53): `Rack::ConditionalGet` and `Rack::ETag` sit below `Middleware` in the default
-      # stack, and swap a controller's 200 for an empty 304 on a matching `If-None-Match` —
-      # after `ActionController::LogSubscriber` has already logged `Completed 200 OK` from the
-      # same payload `controller_status` is read from. `Middleware`'s status is the fallback
-      # rather than the discard: a request that never reached a controller (#47's cases) never
+      # Rack-final status `Middleware` reads off `@app.call`'s own return. The two can
+      # disagree: `Rack::ConditionalGet` and `Rack::ETag` sit below `Middleware` in the
+      # default stack and can swap a controller's 200 for an empty 304 on a matching
+      # `If-None-Match`, after `ActionController::LogSubscriber` has already logged
+      # `Completed 200 OK` from the same payload `controller_status` is read from.
+      # `Middleware`'s status is the fallback: a request that never reached a controller never
       # gets a `controller_status` at all, and its Rack-final status is the only one there is.
       def build_payload
         duration = duration_ms
@@ -194,11 +169,11 @@ module RailsLogReader
       # The exception that took the response away, when nothing handed one over. Only a
       # request that reached a controller gets `process_action.action_controller`'s — and the
       # ones that raise above `ShowExceptions` never do: a spoofed `Client-IP` raises from
-      # inside `Rails::Rack::Logger`'s own `Started GET` line, on default settings (#47).
-      # There is no handing this one through Current either, because Logger emits this finish
-      # from its own `rescue Exception` and only then re-raises, so the raise reaches the
-      # Middleware after the finish has already been written. Inside that rescue, `$!` is the
-      # exception, and it is the only place it exists yet.
+      # inside `Rails::Rack::Logger`'s own `Started GET` line, on default settings. There is
+      # no handing this one through Current either, because Logger emits this finish from its
+      # own `rescue Exception` and only then re-raises, so the raise reaches the Middleware
+      # after the finish has already been written. Inside that rescue, `$!` is the exception,
+      # and it is the only place it exists yet.
       #
       # Asked only when there is no status. `$!` is whatever this thread is handling, and a
       # finish from a response's `BodyProxy` close can run inside a rescue that has nothing
@@ -208,16 +183,14 @@ module RailsLogReader
       end
 
       # The request's own duration, not `process_action.action_controller`'s: it has to
-      # cover routing and the middleware either side, not just what ran inside a controller
-      # — and it has to exist at all for the 404s that never reach one.
+      # cover routing and the middleware either side, not just what ran inside a controller —
+      # and it has to exist at all for the 404s that never reach one.
       #
-      # A finish is a fact about a request that ended, and the one field it cannot measure must
-      # not be able to take the whole event down with it: this used to subtract a `Current` the
-      # reloader had cleared mid-request, raise a TypeError inside `guard`, and lose the finish
-      # in silence (#45). No start to measure from is `nil` here and a field left off the wire
-      # there — absence, the same answer `row_count` gets above, and never a zero that would
-      # read as an instant request. A missing start is also what a `run_end` mid-request leaves
-      # behind, so this is worth having whatever cleared it.
+      # A finish is a fact about a request that ended, and the one field it cannot measure
+      # must not be able to take the whole event down with it. No start to measure from is
+      # `nil` here and a field left off the wire there — absence, the same answer `row_count`
+      # gets above, and never a zero that would read as an instant request. A missing start is
+      # also what a `run_end` mid-request leaves behind.
       def duration_ms
         return unless Current.started_at_mono
 
@@ -263,8 +236,8 @@ module RailsLogReader
 
     # `event.time` is float milliseconds off the same CLOCK_MONOTONIC everything else here
     # reads, taken on the background thread when the query really went to the database — so
-    # it, and not this moment, is the `at_mono` ADR-0002 asks for while `seq` records the
-    # replay. `event.duration` is Rails' own measurement of a query this thread never saw run.
+    # it, and not this moment, is what `at_mono` carries, while `seq` records the replay.
+    # `event.duration` is Rails' own measurement of a query this thread never saw run.
     def publish_event(event)
       RailsLogReader.guard do
         record(event.payload, event.duration, at_mono: (event.time * 1_000_000).round)
@@ -330,18 +303,15 @@ module RailsLogReader
         bind.first.name if bind.is_a?(Array) && bind.first.respond_to?(:name)
       end
 
-      # The spec's stated assumption, and the smallest thing that cannot crash the append: a
-      # value that is already a JSON primitive goes as-is, anything else goes as its `to_s`.
-      # The filter has already run by the time a value gets here, and `[FILTERED]` is a
-      # delegator around a String rather than a String, so it takes the `to_s` branch and
+      # A value that is already a JSON primitive goes as-is; anything else goes as its
+      # `to_s`. The filter has already run by the time a value gets here, and `[FILTERED]` is
+      # a delegator around a String rather than a String, so it takes the `to_s` branch and
       # stays filtered. How any of this is *displayed* is the Reader's problem, not this
       # file's.
       #
-      # A binary column's value — a bind that is BINARY-encoded or not `valid_encoding?` —
-      # used to be caught right here, by a method of this class alone. #33 moved that check
-      # into `emit`'s own walk, where every payload gets it rather than binds only, so a bind
-      # goes through unscrubbed: whatever this returns still has to survive `cut_oversized_fields`
-      # before it reaches the wire, same as every other field on the envelope.
+      # A bind that is BINARY-encoded or not `valid_encoding?` goes through unscrubbed here:
+      # whatever this returns still has to survive `cut_oversized_fields` before it reaches
+      # the wire, same as every other field on the envelope.
       def serialize(value)
         case value
         when nil, true, false, Integer then value
@@ -358,20 +328,19 @@ module RailsLogReader
   # in the broadcast and keeps answering for it: `dispatch` returns the first sink's value,
   # and `Rails.logger.formatter` hands back the first sink's formatter.
   #
-  # A plain ::Logger, never an ActiveSupport::TaggedLogging one, and the reason is not taste.
-  # A call a BroadcastLogger does not dispatch itself goes through `method_missing`, which
-  # forwards to *every* sink that responds and — unlike `dispatch` — does not memoise the
-  # block. With two tagged sinks in the broadcast, `Rails.logger.tagged("X") { ... }` runs
-  # its block twice and development.log gains the line twice, once tagged and once not,
-  # because the first sink has already popped by the time the second runs it; `push_tags`
-  # comes back as [["X"], ["X"]], so `tagged` then pops two tags for one push. Measured
-  # against the Example app, not deduced. This sink responds to none of that, so a tag can
-  # only ever be read.
+  # A plain ::Logger, never an ActiveSupport::TaggedLogging one. A call a BroadcastLogger
+  # does not dispatch itself goes through `method_missing`, which forwards to *every* sink
+  # that responds and — unlike `dispatch` — does not memoise the block. With two tagged sinks
+  # in the broadcast, `Rails.logger.tagged("X") { ... }` would run its block twice and
+  # development.log would gain the line twice, once tagged and once not, because the first
+  # sink has already popped by the time the second runs it; `push_tags` comes back as
+  # [["X"], ["X"]], so `tagged` then pops two tags for one push. This sink responds to none
+  # of that, so a tag can only ever be read.
   #
   # One capture gap comes with that, and it is Rails' own rather than ours:
   # `Rails.logger.tagged("X")` *without* a block returns a tagged clone of whichever single
   # sink answered — development.log's — and lines written through that object never reach the
-  # broadcast, so they never reach here. It read exactly that way before this sink existed.
+  # broadcast, so they never reach here.
   class LoggerSink < ::Logger
     SEVERITIES = %w[debug info warn error fatal unknown].freeze
 
@@ -437,11 +406,11 @@ module RailsLogReader
         # broadcast — but only once *something* runs it, and a sink whose level suppresses
         # the line never does. Being last in the broadcast, ours would then be the first and
         # only caller: a `logger.debug { expensive }` that a Work app's log_level had made
-        # free would start costing it again, and a block that raises — dead code until now —
-        # would raise out of this method and into the developer's request. So the block is
-        # read only once the rest of the broadcast has already read it, which
-        # `Rails.logger.level` answers exactly, this sink's own UNKNOWN being unable to lower
-        # that minimum. There is no message to record without it, so there is no event.
+        # free would start costing it again, and a block that raises would raise out of this
+        # method and into the developer's request. So the block is read only once the rest of
+        # the broadcast has already read it, which `Rails.logger.level` answers exactly, this
+        # sink's own UNKNOWN being unable to lower that minimum. There is no message to
+        # record without it, so there is no event.
         #
         # A message that arrived already built is a different question and gets the opposite
         # answer, above: keeping a string the app has already paid for costs it nothing.
@@ -514,15 +483,11 @@ module RailsLogReader
     # orderings — its numbers, its clock and the bytes in the file — can never disagree with
     # each other. What that costs is the lock wait: on a contended write the stamps say when
     # the event reached the file rather than when it was observed, microseconds earlier.
-    # Cheap, because the lock is held for one JSON.generate and one append to a page-cached
-    # file, and worth it, because an ordering that disagrees with itself reads as a bug in
-    # the Reader.
     #
-    # `at_mono` is that stamp for everything but the one case ADR-0002 named: a `load_async`
-    # query, issued on a background thread and replayed on the request thread long after.
-    # There `seq` records the replay and `at_mono` has to record the issue, which is the
-    # whole reason the envelope carries both — so a caller that knows the true moment hands
-    # it in rather than letting this method invent a later one.
+    # `at_mono` is that stamp for everything but one case: a `load_async` query, issued on a
+    # background thread and replayed on the request thread long after. There `seq` records
+    # the replay and `at_mono` has to record the issue — so a caller that knows the true
+    # moment hands it in rather than letting this method invent a later one.
     def emit(type, payload, request_id: nil, at_mono: nil)
       return if @disabled
 
@@ -600,7 +565,7 @@ module RailsLogReader
         # row. Its `ensure` covers the paths where `@app.call` raises rather than returns,
         # which is the case with no `BodyProxy` to hang a close on at all.
         #
-        # That is why the reset is registered here rather than in the Middleware: the finish
+        # The reset is registered here rather than in the Middleware because the finish
         # arrives *after* `call` has returned, so an `ensure` there would clear the context
         # out from under it.
         #
@@ -608,9 +573,9 @@ module RailsLogReader
         # registers its own `CurrentAttributes.clear_all` from a railtie initializer, which
         # runs before `config/initializers/` — and `to_complete` callbacks are `:before`
         # kind, so they run in registration order. This one therefore runs *after* Rails'
-        # own, and the *Trailing event* window this ADR opened is left as wide as it was,
-        # never narrower. Blocks registered on the executor are instance_exec'd against it,
-        # hence the explicit receiver on `guard`.
+        # own, leaving the *Trailing event* window as wide as it was, never narrower. Blocks
+        # registered on the executor are instance_exec'd against it, hence the explicit
+        # receiver on `guard`.
         Rails.application.executor.to_complete { RailsLogReader.guard { Current.reset } }
 
         ActiveSupport::Notifications.subscribe("request.action_dispatch", RequestFinishSubscriber.new)
@@ -629,9 +594,9 @@ module RailsLogReader
         end
 
         # The only source for view/db runtime, the exception object with its backtrace, and
-        # now the status the controller actually produced (#53) — `request.action_dispatch`
-        # never carries any of them. Handed off through Current because this fires, and is
-        # gone, well before that finish does.
+        # the status the controller actually produced — `request.action_dispatch` never
+        # carries any of them. Handed off through Current because this fires, and is gone,
+        # well before that finish does.
         #
         # `payload[:status]` is `response.status` on the ordinary path, but not only there:
         # `ActionController::Instrumentation#process_action` rescues whatever the action
@@ -639,10 +604,10 @@ module RailsLogReader
         # status_code_for_exception` `ActionController::LogSubscriber` reads to print
         # `Completed`, stamps the payload with it, and only then re-raises — so a raise inside
         # a reached controller does not leave this `nil`, and `Current.controller_status` ends
-        # up set to whatever development.log's own `Completed` line would say, matching it even
-        # though the exception goes on past this notification. `build_payload` falls back to
-        # `Middleware`'s Rack-final status only for the request this notification never fired
-        # for at all — #47's routing-failure and raised-above-`ShowExceptions` cases, where
+        # up set to whatever development.log's own `Completed` line would say, matching it
+        # even though the exception goes on past this notification. `build_payload` falls
+        # back to `Middleware`'s Rack-final status only for the request this notification
+        # never fired for at all — a routing failure or a raise above `ShowExceptions`, where
         # no controller was ever reached to rescue anything.
         ActiveSupport::Notifications.subscribe("process_action.action_controller") do |*, payload|
           guard do
@@ -690,7 +655,7 @@ module RailsLogReader
       # The backstop under the four methods above, all of which run once, at boot. Whatever
       # goes wrong inside, the one thing that must not happen is this file being the reason
       # an app fails to boot — so, unlike `guard`, this one is not silent: it is a boot-time
-      # refusal, the kind ADR-0004 says warns exactly once.
+      # refusal that warns exactly once.
       def guard_boot
         yield
       rescue StandardError => e
@@ -741,11 +706,10 @@ module RailsLogReader
         "unknown"
       end
 
-      # `rails s` leaves a Rails::Server behind, but puma-dev — which is how the app this was
-      # written for actually runs — boots straight through config.ru with no such object
-      # anywhere. The rack entry point is on the stack either way, and asking for it directly
-      # is both narrower and more honest than guessing from a constant some other Run has
-      # loaded too.
+      # `rails s` leaves a Rails::Server behind, but puma-dev boots straight through
+      # config.ru with no such object anywhere. The rack entry point is on the stack either
+      # way, so this asks for it directly rather than guessing from a constant some other Run
+      # has loaded too.
       def booted_by_a_rack_server?
         caller_locations.any? { |location| location.path.end_with?("config.ru") }
       end
@@ -755,13 +719,9 @@ module RailsLogReader
       # — and only it can be recorded, because a field can be over the cap without any single
       # string in it being over: fifty 2 KB binds are 100 KB that nothing shortens.
       #
-      # That one walk is also where #33's scrub rides along: `scrub_and_size` is `byte_size`
-      # with a second job, checking every String it visits for the encoding JSON.generate
-      # cannot carry, wherever it sits nested inside an Array or a Hash. Riding the walk this
-      # method already pays for is what keeps the scrub unconditional without becoming a
-      # second traversal of the same payload — the alternative this file rejected was scoping
-      # it to "this field happened to be large", which is exactly the kind of accident #13
-      # already showed cannot be trusted to catch a bad byte.
+      # That one walk also carries the scrub: `scrub_and_size` is `byte_size` with a second
+      # job, checking every String it visits for the encoding `JSON.generate` cannot carry,
+      # wherever it sits nested inside an Array or a Hash.
       def cut_oversized_fields(payload)
         oversized = {}
 
@@ -859,12 +819,12 @@ module RailsLogReader
       # ASCII (`rb_str_new` with no encoding, right beside header values the same C
       # extension does tag UTF-8) — a mislabel, not a blob. Re-reading the bytes as UTF-8 is
       # how to tell that from an actual blob apart: valid, and it was text all along, so it
-      # is re-tagged and passed straight through — `JSON.generate` will read this string's
+      # is re-tagged and passed straight through — `JSON.generate` reads a string's current
       # encoding, not what it used to be tagged, and re-tagging here rather than trusting
-      # its own BINARY-tolerant fallback is what keeps this file working the same on the
-      # json gem's next major version, which is dropping that fallback. Invalid, and there
-      # is no readable part to salvage, so it goes as its size, which is development.log's
-      # own answer for a bind (#20) and now every other field's too.
+      # `JSON.generate`'s own BINARY-tolerant fallback keeps this working once the json gem
+      # drops that fallback. Invalid, and there is no readable part to salvage, so it goes as
+      # its size, the same answer development.log gives for a bind and now every other field
+      # too.
       def scrub_utf8(string)
         if string.encoding == Encoding::BINARY
           retagged = string.dup.force_encoding(Encoding::UTF_8)
@@ -944,13 +904,13 @@ module RailsLogReader
         end
       end
 
-      # ADR-0003's whole-line safety net, on top of the per-field cap `cut_oversized_fields`
-      # already applied. The only field that can still be this large is a backtrace, kept
-      # whole by `KEPT_WHOLE` on purpose — so unlike that cap, this one is allowed to shrink
-      # it: a `write(2)` too large to be atomic is the one way append order can be corrupted,
-      # and that risk outranks keeping a backtrace whole. Bounded at three passes so a
-      # pathological line cannot loop forever; one is the overwhelming common case; three
-      # comfortably covers JSON's own escaping overhead eating into an estimate.
+      # A whole-line safety net, on top of the per-field cap `cut_oversized_fields` already
+      # applied. The only field that can still be this large is a backtrace, kept whole by
+      # `KEPT_WHOLE` on purpose — so unlike that cap, this one is allowed to shrink it: a
+      # `write(2)` too large to be atomic is the one way append order can be corrupted.
+      # Bounded at three passes so a pathological line cannot loop forever; one is the
+      # overwhelming common case; three comfortably covers JSON's own escaping overhead
+      # eating into an estimate.
       def enforce_line_cap(envelope)
         line = JSON.generate(envelope)
 

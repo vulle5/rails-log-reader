@@ -49,7 +49,7 @@ import { ThemeSwitch, useTheme } from "./hooks/theme"
  *
  * Rows and Console lines are passed in rather than subscribed to here: the live Sidecar is
  * `main.tsx`'s business, which keeps this component mountable over a seeded fold. The
- * version-mismatch props below (#29) are the same idea applied to the Initializer's own
+ * version-mismatch props below are the same idea applied to the Initializer's own
  * status: `main.tsx` owns the fetch and the `EventSource`, and everything here is a pure
  * render of whatever it was handed, defaulting to "nothing wrong" so a seeded fold with no
  * opinion about the Initializer renders exactly as it always has.
@@ -97,7 +97,7 @@ export function Reader({
   const showing = rows.find((row) => row.id === selected) ?? null
 
   // The tab filter lives here rather than inside the table for the same reason Selection
-  // does: #25's Console click has to be able to clear a filter that is hiding the row it is
+  // does: a Console click has to be able to clear a filter that is hiding the row it is
   // jumping to, and "take me there" is a promise neither a filter nor a scroll position may
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
@@ -201,7 +201,7 @@ export function Reader({
     setPinned(null)
   }
 
-  // #29's one hard stop: a `v` newer than this Reader understands is a shape it has never
+  // One hard stop: a `v` newer than this Reader understands is a shape it has never
   // read a line from, so it declines to render any of the three columns rather than guess
   // through an unread part of that shape. Everything else — including a `v` *older* than
   // this Reader's own, which is the ordinary shape of a stale process — renders as usual.

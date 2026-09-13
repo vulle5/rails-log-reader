@@ -1,24 +1,20 @@
 import { WIRE_VERSION } from "./wire"
 
 /**
- * The two halves of #29's problem: the Initializer is one file copy-pasted into the Work
- * app, and it can drift from the Reader's own master copy in a way a diff can see, or drift
- * from what a *running* Rails process actually has loaded in a way only the wire can see.
- * This file is the seam between the two: pure, so both are exercised the same way a fixture
- * Sidecar drives the fold in `activity.ts` — no filesystem, no `EventSource`, no process.
+ * Pure logic for the Initializer status banner: no filesystem, no `EventSource`, no process,
+ * so it can be exercised the same way a fixture Sidecar drives the fold in `activity.ts`.
  */
 
 /**
- * What `GET /initializer-status` answers, straight off reads of ADR-0004's two fixed-contract
- * paths: does the Host app's `config/initializers/rails_log_reader.rb` exist, is it
- * byte-identical to the Reader's own `reader/rails/rails_log_reader.rb`, and is the Marker
- * file there.
+ * What `GET /initializer-status` answers: does the Host app's
+ * `config/initializers/rails_log_reader.rb` exist, is it byte-identical to the Reader's own
+ * `reader/rails/rails_log_reader.rb`, and is the Marker file there.
  */
 export type InitializerFileStatus = {
   /**
-   * `false` means the path does not exist at all. That is *not installed*, #28's empty
-   * state and not this one's — so `detectMismatch` treats it the same as "nothing to
-   * compare yet" rather than as a mismatch to repair.
+   * `false` means the path does not exist at all. That is *not installed*, a separate empty
+   * state — so `detectMismatch` treats it the same as "nothing to compare yet" rather than
+   * as a mismatch to repair.
    */
   installed: boolean
   /** Byte-identical to the master copy. Meaningless when `installed` is `false`. */
@@ -33,11 +29,10 @@ export type InitializerFileStatus = {
 }
 
 /**
- * The two mismatch kinds #29 asks the Reader to tell apart, named for the half of the
- * product that is wrong: the file on disk, or the process that already booted from it.
- * `none` covers both "no mismatch" and "nothing to compare yet" — the Reader stays silent
- * either way, which is what keeps a fresh page load from flashing a banner it cannot yet
- * back up with a read.
+ * The two mismatch kinds the Reader tells apart, named for the half of the product that is
+ * wrong: the file on disk, or the process that already booted from it. `none` covers both
+ * "no mismatch" and "nothing to compare yet" — the Reader stays silent either way, which is
+ * what keeps a fresh page load from flashing a banner it cannot yet back up with a read.
  */
 export type Mismatch = { kind: "none" } | { kind: "file_stale" } | { kind: "process_stale" }
 
@@ -49,9 +44,9 @@ export type Mismatch = { kind: "none" } | { kind: "file_stale" } | { kind: "proc
  *
  * `file_stale` wins when both are true at once, because repairing it is the same first step
  * either way — copy the master in — and the file being wrong is the more specific thing to
- * say. Once the file reads current, a `v` behind `WIRE_VERSION` is exactly "a stale
- * Initializer still loaded after the new one was copied in" (#29's own example), which
- * `file_stale` alone could never surface: the file already reads clean.
+ * say. Once the file reads current, a `v` behind `WIRE_VERSION` is exactly a stale
+ * Initializer still loaded after the new one was copied in, which `file_stale` alone could
+ * never surface: the file already reads clean.
  */
 export function detectMismatch(
   file: InitializerFileStatus | null,
@@ -64,10 +59,9 @@ export function detectMismatch(
 }
 
 /**
- * Why the Reader has nothing to show, which #28 asks it to say rather than leave the
- * developer guessing whether the tool is broken. Three causes, each one command from the
- * next, and told apart by reads alone — ADR-0004's two fixed-contract paths, and whether the
- * load-on-open history held anything:
+ * Why the Reader has nothing to show, rather than leaving the developer guessing whether the
+ * tool is broken. Three causes, each one command from the next, and told apart by reads
+ * alone — the file, the Marker, and whether the load-on-open history held anything:
  *
  * - `not_installed` — no `config/initializers/rails_log_reader.rb`. Carries where the
  *   master copy is, because the command that resolves it copies from there.

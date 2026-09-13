@@ -15,9 +15,8 @@ import { tokenizeSql } from "../lib/sql-highlight"
  * Nothing here reformats: a query is rendered as the Initializer emitted it, comment and
  * all, tokenized into spans that put the text back together character for character. What
  * is read is what `development.log` showed and what pastes into a console — SCHEMA and
- * EXPLAIN queries included, unless `DetailFilters`' one chip is hiding them, which is #54's
- * fix for the one respect in which that promise used to overshoot: `development.log` never
- * shows them at all.
+ * EXPLAIN queries included, unless `DetailFilters`' one chip is hiding them: `development.log`
+ * itself never shows them at all.
  *
  * The column is present from the first paint whether or not anything is selected — the
  * placeholder is what pins it — so selecting a row changes what this holds and nothing

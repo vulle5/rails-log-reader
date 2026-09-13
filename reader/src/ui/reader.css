@@ -30,7 +30,7 @@
   --warn: #9a6700;
   --error: #cf222e;
 
-  /* #50: HTTP methods and status classes, coloured independently of each other and of
+  /* HTTP methods and status classes, coloured independently of each other and of
      `--warn`/`--error` above, so a 404 is never visually identical to a logged `.error` call
      and DELETE is never mistaken for one either. GET keeps `--accent`, above, and needs no
      token of its own — neither does 5xx, which reads as the failure it is in `--error`, the
@@ -113,11 +113,10 @@ body {
    whole Reader instead of the column scrolling its own contents. Pinning the minimum to `0`
    is what lets the track be smaller than what is in it; `overflow: hidden` here says the
    remaining scroll is the columns' and never the page's. */
-/* The banner (#29) sits above the grid rather than inside it, so it needs a track of its
-   own — a flex column with the grid as its one growing child, rather than the grid owning
-   the full height itself. `.reader` no longer claims `height: 100%`: with the banner absent
-   most of the time, sizing it against a fixed height would leave the grid either short of
-   the shell or, worse, unaware the banner exists at all. */
+/* The banner sits above the grid rather than inside it, so it needs a track of its own — a
+   flex column with the grid as its one growing child, rather than the grid owning the full
+   height itself. Sizing the grid against a fixed height would leave it either short of the
+   shell or, worse, unaware the banner exists at all. */
 .reader-shell {
   display: flex;
   flex-direction: column;
@@ -135,8 +134,8 @@ body {
   overflow: hidden;
 }
 
-/* Not styled as an error even in its warning colour: nothing is broken, and #29 is explicit
-   that the Reader stays a read-only tail outside the one click this offers. */
+/* Not styled as an error even in its warning colour: nothing is broken, and the Reader stays
+   a read-only tail outside the one click this offers. */
 .initializer-banner {
   display: flex;
   flex: 0 0 auto;
@@ -188,8 +187,8 @@ body {
   font-size: 11px;
 }
 
-/* #29's refusal screen: rendered in place of the three columns, not beside them, because a
-   `v` this Reader does not understand could break an assumption any one of them makes. */
+/* The refusal screen: rendered in place of the three columns, not beside them, because a `v`
+   this Reader does not understand could break an assumption any one of them makes. */
 .unsupported-wire {
   display: flex;
   flex-direction: column;
@@ -370,7 +369,7 @@ mark.search-match {
   text-align: center;
 }
 
-/* #28: why the Activity table is empty. Under the headings, where the first row will land, and
+/* Why the Activity table is empty. Under the headings, where the first row will land, and
    quiet — none of the three causes is an error, each is a step not taken yet. The command is
    the thing on it worth reading, so it is the one thing set apart, and selectable whole. */
 .empty-state {
@@ -622,14 +621,14 @@ mark.search-match {
 }
 
 /* A finished request that never had a status: it raised before there was a response to read
-   one off (#47). In the error colour, unlike the dot above, because this one did fail — the
-   same reason `.status-5xx` below shares it rather than getting a colour of its own. */
+   one off. In the error colour, unlike the dot above, because this one did fail — the same
+   reason `.status-5xx` below shares it rather than getting a colour of its own. */
 .no-status,
 .status-5xx {
   color: var(--error);
 }
 
-/* #50: 4xx grouped by class, not by exact code — a 404 and a 422 are one colour — and a
+/* 4xx grouped by class, not by exact code — a 404 and a 422 are one colour — and a
    dedicated token rather than `--warn`/`--error`, so a 4xx is never visually identical to a
    logged `.warn` or `.error` call. 5xx has no token of its own: it is `--error`, above, one
    fewer colour for the same failure `.no-status` already means. 1xx, 2xx and 3xx carry no
@@ -776,8 +775,7 @@ mark.search-match {
 }
 
 /* The lit group: the line under the pointer, its siblings, and — across the gutter — their
-   row. Additive and nothing more. Dimming the rest was built and rejected: hovering is what
-   you do constantly, and it made everything else unreadable exactly then. */
+   row. Additive and nothing more. */
 .console-line-lit,
 .console-line-lit:hover {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
@@ -852,8 +850,8 @@ mark.search-match {
   align-items: center;
 }
 
-/* The Detail column's one thinning (#54): a single chip, so no second group and no separator
-   are needed the way the Console's two axes need one. */
+/* The Detail column's one thinning: a single chip, so no second group and no separator are
+   needed the way the Console's two axes need one. */
 .detail-filters {
   display: flex;
   flex: 0 0 auto;
@@ -1009,7 +1007,7 @@ mark.search-match {
   white-space: nowrap;
 }
 
-/* #50: the same lookup as `.cell-method` above, so a verb reads one colour in the Activity
+/* The same lookup as `.cell-method` above, so a verb reads one colour in the Activity
    table and the same colour here — `format.ts`'s `methodClassName` is what makes it one
    function rather than two copies of this list. Declared after `.detail-method`, above,
    because these override its default `--accent` and — tied on specificity — only later rules
