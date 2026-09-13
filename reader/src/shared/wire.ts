@@ -1,10 +1,4 @@
-/**
- * The wire contract: one envelope per line of the Sidecar, written by the Initializer and
- * read by the Reader. The two halves are built independently against this file.
- *
- * See `docs/adr/0002-the-event-envelope-and-ordering-key.md`, including its amendments —
- * `run_end` and the pid-keyed `run_id` come from the amendment, not the body.
- */
+/** The wire contract: one envelope per line of the Sidecar, written by the Initializer and read by the Reader. */
 
 /**
  * Stamped on every envelope. Bumped when a field changes meaning — including when a field a
@@ -12,12 +6,6 @@
  * the reading half's side even though the field itself still says what it always did: a
  * Reader built before the change reads the absence as `undefined` and renders straight
  * through it, which is the exact failure `isWireVersionUnderstood` exists to refuse.
- *
- * 2: `duration_ms` became optional on a `request_finish` (#45).
- * 3: `status` on a `request_finish` names the controller's own status when one was reached,
- *    rather than the Rack-final one `Rack::ConditionalGet`/`Rack::ETag` can rewrite further
- *    down the middleware stack. Same field, same `number | null` — the moment it names
- *    changed (#53).
  */
 export const WIRE_VERSION = 3
 
@@ -110,21 +98,20 @@ export type RequestFinishPayload = {
    * disagree: `Rack::ConditionalGet`/`Rack::ETag` sit below the Initializer's middleware in
    * the default stack and can swap a controller's 200 for an empty 304 on a matching
    * `If-None-Match`, after Rails has already logged `Completed 200 OK` from the same payload
-   * this reads (#53). Before #53, this was always the Rack-final status.
+   * this reads.
    *
    * `null` where the request raised its way out of the whole middleware stack: no controller
    * was reached, and the Initializer's own middleware reads the status off what `@app.call`
-   * returned — which, on that path, returned nothing. An explicit absence, decided in #47 —
-   * the client gets its server's 500, but the Initializer never sees it, so it names no status
-   * it did not observe. Not rare: `Rails::Rack::Logger` sits above `DebugExceptions`, so a
-   * raise there escapes on default settings, and a spoofed `Client-IP` header is enough. The
-   * finish is emitted either way, and `exception` below says what raised.
+   * returned — which, on that path, returned nothing. Not rare: `Rails::Rack::Logger` sits
+   * above `DebugExceptions`, so a raise there escapes on default settings, and a spoofed
+   * `Client-IP` header is enough. The finish is emitted either way, and `exception` below
+   * says what raised.
    */
   status: number | null
   /**
    * Absent where the Initializer had no start to measure from — the one thing a finish is
    * allowed not to carry. Absence, as `row_count` below is absent, and never a zero that
-   * would read as an instant request. See ADR-0002's amendment from #45.
+   * would read as an instant request.
    */
   duration_ms?: number
   view_runtime_ms?: number
@@ -152,10 +139,7 @@ export type SqlPayload = {
   binds: BindValue[]
 }
 
-/**
- * Every level `Rails.logger` can be called at, quietest first — a tuple rather than a union
- * spelled twice, so the Console's chips are these and cannot drift out of step with them.
- */
+/** Every level `Rails.logger` can be called at, quietest first; shared with the Console's chips. */
 export const SEVERITIES = ["debug", "info", "warn", "error", "fatal", "unknown"] as const
 
 export type Severity = (typeof SEVERITIES)[number]
