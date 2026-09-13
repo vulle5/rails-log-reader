@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 
-import { activityTable, type ActivityRow } from "../shared/activity"
-import { consoleStream, type ConsoleLine } from "../shared/console"
-import type { Earlier } from "../shared/earlier"
-import type { Envelope } from "../shared/wire"
+import { activityTable, type ActivityRow } from "../../shared/activity"
+import { consoleStream, type ConsoleLine } from "../../shared/console"
+import type { Earlier } from "../../shared/earlier"
+import type { Envelope } from "../../shared/wire"
 
 /**
  * What the live wire is saying about itself, apart from the rows folded out of it: the `v`

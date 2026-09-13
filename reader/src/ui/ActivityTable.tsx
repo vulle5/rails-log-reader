@@ -1,7 +1,7 @@
 import type { ActivityRow } from "../shared/activity"
 import { useClimbingElapsed } from "./elapsed"
-import { clock, controllerAction, count, elapsed, methodClassName, ms, runDescription, statusClassName } from "./format"
-import { Highlight } from "./search"
+import { clock, controllerAction, count, elapsed, methodClassName, ms, runDescription, statusClassName } from "./lib/format"
+import { Highlight } from "./hooks/search"
 
 /**
  * The Activity table: one dense, fixed-height row per thing that owns events — a *Request

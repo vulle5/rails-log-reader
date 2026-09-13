@@ -1,4 +1,4 @@
-import type { RequestRow, RunRow } from "../shared/activity"
+import type { RequestRow, RunRow } from "../../shared/activity"
 
 /** The Reader's display conversions, in one place because two columns show the same numbers. */
 

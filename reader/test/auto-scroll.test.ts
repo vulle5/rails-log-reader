@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { arrived, atBottom, FOLLOWING, scrolled, type Port } from "../src/ui/auto-scroll"
+import { arrived, atBottom, FOLLOWING, scrolled, type Port } from "../src/ui/hooks/auto-scroll"
 
 /**
  * The *auto-scroll* rule, taken apart from the three scrollports that obey it. Three columns
