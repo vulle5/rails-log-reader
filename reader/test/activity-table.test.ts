@@ -1259,15 +1259,10 @@ describe("load-earlier", () => {
     await aSidecarWithHistory(log)
     const reader = await theReaderReads(log)
 
-    // The request row opened off the finish the load-on-open window caught; the Run row it
-    // belongs to opened earlier still, off an unattributed filler line, with no header seen
-    // yet either — the same gap the Run marker goes undrawn over.
     expect(theOnlyRequest(reader.rows).railsRoot).toBeNull()
 
     await reader.loadEarlier()
 
-    // The pull's earlier block carries the header the row opened without — recovered, same
-    // as the request's own start above, rather than left reading "unknown" forever.
     expect(theOnlyRequest(reader.rows).railsRoot).toBe("/home/dev/example-app")
   })
 

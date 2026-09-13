@@ -113,16 +113,7 @@ export type RequestRow = {
    * promise the Reader can only keep if it says when the file could not.
    */
   backtraceCutFrom: number | null
-  /**
-   * The owning Run's `rails_root` — a request carries only its Run's id otherwise, and
-   * `rails_root` is what a backtrace frame needs to tell the Host app's own code from a
-   * gem's. Kept in step with `RunRow.railsRoot` even where the two disagreed the moment this
-   * row opened, the same *load-earlier* gap the Run marker reads: a request opened from a
-   * Run row that had said something before its header reached the Reader starts `null` and
-   * is corrected the moment that header is folded, wherever in time that turns out to be.
-   * `null` and staying `null` means exactly one thing — the header never arrived at all —
-   * which is `null` rather than a guess for the same reason `RunRow.appName` is.
-   */
+  /** The owning Run's `rails_root`, kept in step with `RunRow.railsRoot`. `null` until that Run's `run_header` is folded, whenever that turns out to be. */
   railsRoot: string | null
 }
 
@@ -158,11 +149,7 @@ export type RunRow = {
   pid: number | null
   railsVersion: string | null
   appName: string | null
-  /**
-   * `Rails.root`, the absolute path a backtrace frame is classified as the Host app's own
-   * code against. `null` where `run_header` was never seen — a Run the Reader met mid-stream
-   * — which is `appName`'s own reason for being `null` rather than a guess.
-   */
+  /** `Rails.root`. `null` where `run_header` was never seen, like `appName`. */
   railsRoot: string | null
   /**
    * The *Run marker*: drawn where a `run_header` announcing a web process landed, and
@@ -365,9 +352,7 @@ export function activityTable(): ActivityTable {
         trailing: [],
         exception: null,
         backtraceCutFrom: null,
-        // Whatever the Run row knows right now — `null` where it has no row yet, exactly as
-        // where it has one but no header. The run_header branch below backfills this if the
-        // header lands later, which is the only other way it changes.
+        // Backfilled below if this Run's header lands after this row already opened.
         railsRoot: byRun.get(envelope.run_id)?.row.railsRoot ?? null,
       },
       startedAtMono: null,
@@ -597,11 +582,7 @@ export function activityTable(): ActivityTable {
       row.railsVersion = envelope.payload.rails_version
       row.appName = envelope.payload.app_name
       row.railsRoot = envelope.payload.rails_root
-      // The same gap the Run marker reads above, for a Request row rather than the Run
-      // row's own boundary: a *load-earlier* pull can bring this header in after a request
-      // on this Run already opened its row not having seen it. Backfilling here is what
-      // keeps `RequestRow.railsRoot` meaning "unknown" and not "unknown as of whenever this
-      // row happened to open".
+      // A load-earlier pull can bring this header in after one of its requests already opened.
       for (const folding of byRequest.values()) {
         if (folding.row.runId === envelope.run_id) folding.row.railsRoot = envelope.payload.rails_root
       }

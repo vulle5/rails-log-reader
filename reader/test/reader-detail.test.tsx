@@ -545,7 +545,7 @@ describe("highlighting a Host-app backtrace frame", () => {
     return [...(detail(container).querySelectorAll(".backtrace li") ?? [])]
   }
 
-  test("gives only the frame under rails_root the heavier weight, style only", async () => {
+  test("gives only the frame under rails_root the full-contrast colour, style only", async () => {
     const run = aRun("srv-1")
     const container = await theReader(
       run.header(),
@@ -562,13 +562,11 @@ describe("highlighting a Host-app backtrace frame", () => {
     expect(frames.map((frame) => frame.textContent)).toEqual([HOST_FRAME, GEM_FRAME])
     expect(frames[0]?.classList.contains("backtrace-host")).toBe(true)
     expect(frames[1]?.classList.contains("backtrace-host")).toBe(false)
-    // Style only: the frame order and count are untouched, and the gem frame is still there.
     expect(frames).toHaveLength(2)
   })
 
   test("leaves every frame unhighlighted when the Run's run_header was never seen", async () => {
     const run = aRun("srv-1")
-    // No run.header(): the Reader attached mid-stream, so rails_root is unknown.
     const container = await theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
