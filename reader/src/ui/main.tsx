@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client"
 
 import { detectEmptyState, detectMismatch } from "../shared/initializer-status"
-import { useInitializerFileStatus, useInitializerRepair } from "./initializer-repair"
+import { useInitializerFileStatus, useInitializerRepair } from "./features/setup-status/lib/initializer-repair"
 import { useSidecar } from "./hooks/live"
 import { Reader } from "./Reader"
 

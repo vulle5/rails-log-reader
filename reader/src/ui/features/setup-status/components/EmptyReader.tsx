@@ -1,4 +1,4 @@
-import type { EmptyState } from "../shared/initializer-status"
+import type { EmptyState } from "../../../../shared/initializer-status"
 
 /**
  * #28: an empty Reader names its own cause. A table with no rows in it is otherwise the same

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import type { InitializerFileStatus } from "../shared/initializer-status"
+import type { InitializerFileStatus } from "../../../../shared/initializer-status"
 
 /**
  * `GET /initializer-status`, fetched on mount and again whenever the window comes back into
