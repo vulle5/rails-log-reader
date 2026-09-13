@@ -5,6 +5,7 @@ import { controllerAction, methodClassName, ms, runDescription } from "../../../
 import { Highlight, Marked, useMatches } from "../../../hooks/search"
 import { CopyButton } from "./CopyButton"
 import { bytes } from "../lib/format"
+import { isHostFrame } from "../lib/backtrace"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 
@@ -73,7 +74,9 @@ function RequestDetail({ row, filter }: { row: RequestRow; filter: DetailFilter 
       </header>
 
       <Timeline events={eventsShown(row.timeline, filter)} />
-      {row.exception !== null && <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} />}
+      {row.exception !== null && (
+        <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={row.railsRoot} />
+      )}
       {/* Checked on the filtered length rather than `row.trailing.length`: a trailing block of
           nothing but SCHEMA queries, hidden, must not leave an empty "After the request
           finished" section behind — the section is about there being something to show
@@ -263,7 +266,15 @@ function LogLine({ event }: { event: AppLogEvent }) {
   )
 }
 
-function Exception({ exception, cutFrom }: { exception: RequestException; cutFrom: number | null }) {
+function Exception({
+  exception,
+  cutFrom,
+  railsRoot,
+}: {
+  exception: RequestException
+  cutFrom: number | null
+  railsRoot: string | null
+}) {
   return (
     <section className="exception" aria-label="Exception">
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
@@ -277,11 +288,14 @@ function Exception({ exception, cutFrom }: { exception: RequestException; cutFro
         <Highlight text={exception.message} />
       </p>
       {/* Full and uncleaned, gem frames and all, so "the bug was in a gem" stays an answer
-          the Reader can give. Nothing here drops a frame for looking like someone else's —
-          and on the one occasion the wire itself had to, it says so underneath. */}
+          the Reader can give. Nothing here drops, reorders or collapses a frame for looking
+          like someone else's — and on the one occasion the wire itself had to, it says so
+          underneath. A frame under the Run's `rails_root` renders heavier, weight only, so
+          the eye lands on the developer's own code first without the gem frames around it
+          being touched. */}
       <ol className="backtrace">
         {exception.backtrace.map((frame, at) => (
-          <li key={at}>
+          <li key={at} className={isHostFrame(frame, railsRoot) ? "backtrace-host" : undefined}>
             <Highlight text={frame} />
           </li>
         ))}

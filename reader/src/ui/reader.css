@@ -1301,6 +1301,12 @@ mark.search-match {
   overflow-wrap: anywhere;
 }
 
+/* The Host app's own frames: heavier weight only, so the eye lands on the developer's code
+   first without gem or framework frames being recoloured, reordered or hidden. */
+.backtrace-host {
+  font-weight: 700;
+}
+
 /* Set apart and captioned, so a *Trailing event* cannot be mistaken for the timeline it
    sits below. */
 .trailing {

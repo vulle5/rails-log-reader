@@ -96,12 +96,12 @@ export function aRun(runId: string, epoch = EPOCH) {
 
   return {
     runId,
-    header: (kind: "server" | "console" | "rake" | "worker" = "server", pid = 48_211) =>
+    header: (kind: "server" | "console" | "rake" | "worker" = "server", pid = 48_211, railsRoot = "/home/dev/example-app") =>
       envelope("run_header", null, {
         kind,
         rails_version: "8.0.2",
         app_name: "ExampleApp",
-        rails_root: "/home/dev/example-app",
+        rails_root: railsRoot,
         pid,
       }),
     end: () => envelope("run_end", null, {}),

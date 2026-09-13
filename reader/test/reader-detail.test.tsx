@@ -536,6 +536,53 @@ describe("a request that raised", () => {
   })
 })
 
+describe("highlighting a Host-app backtrace frame", () => {
+  const RAILS_ROOT = "/home/dev/example-app"
+  const HOST_FRAME = `${RAILS_ROOT}/app/models/order.rb:44:in \`block in recalculate_total!'`
+  const GEM_FRAME = "puma (6.6.0) lib/puma/server.rb:443:in `process_client'"
+
+  function frameElements(container: HTMLElement) {
+    return [...(detail(container).querySelectorAll(".backtrace li") ?? [])]
+  }
+
+  test("gives only the frame under rails_root the heavier weight, style only", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.header(),
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [HOST_FRAME, GEM_FRAME] },
+      }),
+    )
+
+    await select(container, "/orders")
+    const frames = frameElements(container)
+
+    expect(frames.map((frame) => frame.textContent)).toEqual([HOST_FRAME, GEM_FRAME])
+    expect(frames[0]?.classList.contains("backtrace-host")).toBe(true)
+    expect(frames[1]?.classList.contains("backtrace-host")).toBe(false)
+    // Style only: the frame order and count are untouched, and the gem frame is still there.
+    expect(frames).toHaveLength(2)
+  })
+
+  test("leaves every frame unhighlighted when the Run's run_header was never seen", async () => {
+    const run = aRun("srv-1")
+    // No run.header(): the Reader attached mid-stream, so rails_root is unknown.
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [HOST_FRAME, GEM_FRAME] },
+      }),
+    )
+
+    await select(container, "/orders")
+
+    expect(frameElements(container).some((frame) => frame.classList.contains("backtrace-host"))).toBe(false)
+  })
+})
+
 /**
  * A clean plain-text reconstruction, meant for pasting into a bug tracker, a colleague's
  * chat, or an AI assistant — never the block's own markup, and never silent about the paste
