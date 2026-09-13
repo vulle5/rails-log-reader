@@ -13,6 +13,10 @@
   --fg: #14181d;
   --fg-muted: #5c6773;
   --fg-faint: #8b95a1;
+  /* Full contrast against `--bg`, and nothing between the two themes' opposite ends: black
+     here, white in dark — `--fg` is already close but is a legible grey either way, not the
+     ceiling this is for. */
+  --fg-strong: #000000;
   --accent: #2f6feb;
   --selected: #e8effc;
   --ui: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -60,6 +64,7 @@
   --fg: #e4e8ee;
   --fg-muted: #9aa5b1;
   --fg-faint: #6b7682;
+  --fg-strong: #ffffff;
   --accent: #6ea0ff;
   --selected: #1c2432;
 
@@ -1301,10 +1306,11 @@ mark.search-match {
   overflow-wrap: anywhere;
 }
 
-/* The Host app's own frames: heavier weight only, so the eye lands on the developer's code
-   first without gem or framework frames being recoloured, reordered or hidden. */
+/* The Host app's own frames: full-contrast text against `.backtrace`'s own muted default, so
+   the eye lands on the developer's code first without gem or framework frames being
+   reordered or hidden — only recoloured relative to them, never each other. */
 .backtrace-host {
-  font-weight: 700;
+  color: var(--fg-strong);
 }
 
 /* Set apart and captioned, so a *Trailing event* cannot be mistaken for the timeline it

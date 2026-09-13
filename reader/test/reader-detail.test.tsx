@@ -545,7 +545,7 @@ describe("highlighting a Host-app backtrace frame", () => {
     return [...(detail(container).querySelectorAll(".backtrace li") ?? [])]
   }
 
-  test("gives only the frame under rails_root the heavier weight, style only", async () => {
+  test("gives only the frame under rails_root the full-contrast colour, style only", async () => {
     const run = aRun("srv-1")
     const container = await theReader(
       run.header(),

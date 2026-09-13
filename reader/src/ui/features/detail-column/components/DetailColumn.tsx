@@ -290,9 +290,9 @@ function Exception({
       {/* Full and uncleaned, gem frames and all, so "the bug was in a gem" stays an answer
           the Reader can give. Nothing here drops, reorders or collapses a frame for looking
           like someone else's — and on the one occasion the wire itself had to, it says so
-          underneath. A frame under the Run's `rails_root` renders heavier, weight only, so
-          the eye lands on the developer's own code first without the gem frames around it
-          being touched. */}
+          underneath. A frame under the Run's `rails_root` renders at full contrast against
+          the rest of the trace's muted default, so the eye lands on the developer's own code
+          first without the gem frames around it being touched. */}
       <ol className="backtrace">
         {exception.backtrace.map((frame, at) => (
           <li key={at} className={isHostFrame(frame, railsRoot) ? "backtrace-host" : undefined}>
