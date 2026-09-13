@@ -176,7 +176,8 @@ export function Reader({
   useLayoutEffect(() => {
     if (jumpTo === null) return
 
-    reader.current?.querySelector(rowSelector(jumpTo.row))?.scrollIntoView({ block: "center" })
+    const row = reader.current?.querySelector(rowSelector(jumpTo.row))
+    if (row !== null && row !== undefined) scrollToRow(row)
     setJumpTo(null)
   }, [jumpTo])
 
@@ -288,6 +289,47 @@ export function Reader({
       </SearchContext>
     </div>
   )
+}
+
+/**
+ * `scrollIntoView({ block: "center" })` recentres unconditionally — on a row that is already
+ * fully on screen, which turns "take me there" into a jump on every click and not only the
+ * ones that land somewhere the reader cannot see; and even on a row that is not, which turns
+ * a row one line above the fold into the same full recentre as one at the far end of the
+ * table. A row already inside the band below is left exactly where it is; one outside it is
+ * moved the *least* it takes to clear the band — set on the scrollport directly rather than
+ * handed to `scrollIntoView`, because that native "nearest" has no notion of the sticky
+ * heading and would happily call a row still under it "close enough".
+ *
+ * The band is the same one *Hover grouping*'s rule stops at: the scrollport with its sticky
+ * heading's height taken off the top and, when the table is wider than the column, a
+ * horizontal scrollbar's height taken off the bottom — `clientHeight` rather than the
+ * bounding rect's, because the rect is the scrollport's own border box and includes the
+ * strip the scrollbar sits in, which is not part of what a row can be read from underneath.
+ */
+function scrollToRow(row: Element) {
+  const port = row.closest(".column-body")
+  if (port === null) {
+    row.scrollIntoView({ block: "nearest" })
+    return
+  }
+
+  const portBox = port.getBoundingClientRect()
+  // happy-dom has no layout, so every rect above reads as all zeros — which is exactly the
+  // "already visible" shape a real off-screen row would never have. Falling back to asking
+  // the row itself is what keeps that a real jump there, and here, rather than a no-op.
+  if (portBox.height === 0) {
+    row.scrollIntoView({ block: "nearest" })
+    return
+  }
+
+  const sticky = port.querySelector("thead")?.getBoundingClientRect().height ?? 0
+  const visibleTop = portBox.top + sticky
+  const visibleBottom = portBox.top + port.clientHeight
+  const rowBox = row.getBoundingClientRect()
+
+  if (rowBox.top < visibleTop) port.scrollTop -= visibleTop - rowBox.top
+  else if (rowBox.bottom > visibleBottom) port.scrollTop += rowBox.bottom - visibleBottom
 }
 
 type ColumnProps = {

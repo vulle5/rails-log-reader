@@ -322,11 +322,18 @@ mark.search-match {
 
 /* Each column scrolls on its own, which is also what keeps its height off the grid — and
    what the sticky headings inside one are sticky against: `.detail-heading` and the Activity
-   table's `th` need a scrollport of their own, and would otherwise stick to the window's. */
+   table's `th` need a scrollport of their own, and would otherwise stick to the window's.
+
+   `scrollbar-gutter: stable` reserves the scrollbar's width whether or not the content is
+   tall enough to need it. Without it, the Detail column paints with no scrollbar until a
+   selection gives it enough to scroll — at which point the scrollbar appears and narrows
+   everything already on screen by its width. Reserving the gutter up front is what keeps
+   picking a row from being the thing that moves the row's own content. */
 .column-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 
