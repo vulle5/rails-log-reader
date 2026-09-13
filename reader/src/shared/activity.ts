@@ -1,30 +1,7 @@
 import { LOAD_ON_OPEN_EVENTS } from "./bounds"
 import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RunKind, type SqlEvent } from "./wire"
 
-/**
- * The fold: Sidecar envelopes in append order become Activity table rows.
- *
- * Three events are one row — a request is never a mutable record on the wire, so folding
- * `request_start`, `request_route` and `request_finish` together is the Reader's job, and
- * SQL and App log events attach to the row their `request_id` names. The two ordering
- * rules this file exists to keep are ADR-0002's, as amended by #8:
- *
- * - **Append order is the global key.** Envelopes arrive in the order they were appended to
- *   the Sidecar and are folded in that order, so nothing here sorts. `seq` restarts at 1 in
- *   every Run and orders only one request's own timeline; `at_wall`, which NTP can step
- *   backwards, is carried for display and never compared.
- * - **A row sits at the append position of the earliest event observed for it.** The row is
- *   created by whichever of its events arrives first — `request_start` for an ordinary
- *   request, a child for one whose start the Reader missed, the `run_header` for a Run — so
- *   a new row is always an append at the bottom and never an insert, and rows mutate in
- *   place and never move. Two Runs writing at once therefore interleave at their true
- *   append positions rather than being slabbed above or below each other.
- *
- * The other half of this file is what the wire deliberately never says. *In-flight*,
- * *Interrupted* and *Partial request* appear in no envelope: each is concluded here, from
- * evidence in the file and never from a clock or a threshold — there is no timeout on an
- * in-flight request, ever.
- */
+/** The fold: Sidecar envelopes in append order become Activity table rows. */
 
 /**
  * One SQL or App log event, kept whole rather than reduced to what a column happens to show
@@ -247,8 +224,8 @@ export type ActivityTable = {
    *
    * Returns every row the *Memory bound* evicted while folding this batch — empty far more
    * often than not. This is the fold's own report of what it just let go of, for the one
-   * caller (the *Console*, #63) whose retention derives from this bound rather than counting
-   * its own: handing the rows over is what lets that caller drop what depended on one the
+   * caller (the *Console*) whose retention derives from this bound rather than counting its
+   * own: handing the rows over is what lets that caller drop what depended on one the
    * instant this fold does, and keep attributing correctly for whatever a Request row's
    * eviction closes the horizon on next.
    */
@@ -274,7 +251,7 @@ export type ActivityTable = {
  * because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized
- * by: the fold opens holding exactly the history ADR-0003's backward scan delivered, and a
+ * by: the fold opens holding exactly the history the backward scan on open delivered, and a
  * row full of an all-day worker's output is bounded by the same number a table full of
  * requests is. Eviction is by whole rows all the same — a row that had half its queries
  * taken away would be a table saying 24 beside a timeline showing three.
@@ -502,8 +479,8 @@ export function activityTable(): ActivityTable {
   /**
    * What the Reader can prove about how long an in-flight request has been running: the
    * distance in its own Run's `at_mono` between its start and the last thing it said. Within
-   * one Run, so the two readings are the same clock — the one subtraction ADR-0002 allows,
-   * and the reason two `at_wall`s are never the things subtracted here.
+   * one Run, so the two readings are the same clock — the only subtraction that is ever
+   * valid here, and the reason two `at_wall`s are never the things subtracted.
    *
    * The reading is never allowed to fall: a `load_async` query hands in the `at_mono` it was
    * *issued* at, which is earlier than the moment it is replayed on the request thread, and
@@ -717,9 +694,9 @@ export function activityTable(): ActivityTable {
    * table says so rather than just quietly exceeding it.
    *
    * Returns every row taken, oldest first — the fold's own report of what it let go of,
-   * which is how a caller with no bound of its own (the *Console*, #63) learns to let go of
-   * the same thing at the same moment, rather than being handed a second ring to keep in
-   * step by hand.
+   * which is how a caller with no bound of its own (the *Console*) learns to let go of the
+   * same thing at the same moment, rather than being handed a second ring to keep in step by
+   * hand.
    */
   function evictToBound(): readonly EvictedRow[] {
     const taken = new Set<ActivityRow>()
