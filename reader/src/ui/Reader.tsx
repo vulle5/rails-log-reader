@@ -14,8 +14,8 @@ import {
   useConsoleFilter,
 } from "./features/console/components/ConsoleFilters"
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
-import { detailItems, DetailColumn } from "./DetailColumn"
-import { DetailFilters, detailFilterKey, useDetailFilter } from "./DetailFilters"
+import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
+import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"

@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react"
 
-import type { TimelineEvent } from "../shared/activity"
-import { Chip } from "./components/Chip"
+import type { TimelineEvent } from "../../../../shared/activity"
+import { Chip } from "../../../components/Chip"
 
 /**
  * The *Detail column*'s one thinning — #54's fix for the axis `ConsoleFilters` does not touch.
