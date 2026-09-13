@@ -74,7 +74,7 @@ export type RepairState =
   | { phase: "restarted" }
 
 /**
- * The one click #29 asks for: overwrite the Work app's copy, prompt for a restart, and
+ * The one click #29 asks for: overwrite the Host app's copy, prompt for a restart, and
  * confirm success by the arrival of a new `run_id` — never by polling `/initializer-status`
  * again, which could only ever confirm the file, not the process that has to reload it.
  *

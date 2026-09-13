@@ -8,7 +8,7 @@ only in the `development` environment on Rails 7.1 or newer. Settled in
 This **overturns** ADR-0003's "opt-in by one env var", which
 [#6](https://github.com/vulle5/rails-log-reader/issues/6) settled without naming the
 variable and — more importantly — before the deciding constraint was on the table: the
-Work app runs under **puma-dev**, not `rails s`.
+Host app runs under **puma-dev**, not `rails s`.
 
 ## Why not an environment variable
 
@@ -46,7 +46,7 @@ knowledge of puma-dev, and every Run started in that directory sees it.
 
 ## The contract
 
-- **The developer creates the marker; the Reader never writes into the Work app.**
+- **The developer creates the marker; the Reader never writes into the Host app.**
   [#7](https://github.com/vulle5/rails-log-reader/issues/7) put the *Scenario* launcher in
   the Example app precisely so the Reader stays a read-only tail of a file. Creating the
   marker on `bun start` buys nothing — the Reader still cannot restart Rails, so the
@@ -110,7 +110,7 @@ constraint protects the collaborator who never opted in.
 Rejected alternatives: `$stderr` lands in puma-dev's own log, which the developer may never
 open; writing a refusal Event into the Sidecar fails in the case that matters most, since an
 unwritable `log/` cannot report that `log/` is unwritable; and raising is out of the question
-— a log reader must never stop the Work app from booting. Mid-Run write failures are
+— a log reader must never stop the Host app from booting. Mid-Run write failures are
 unchanged from ADR-0003: rescue and disable silently.
 
 ## Consequences

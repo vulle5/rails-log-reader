@@ -16,20 +16,20 @@ for `test/fixtures/*.yml`, and the Example app has seed data of its own.
 _Avoid_: fixture (as a name), demo app, sample app.
 
 **Initializer** — the Rails half of the product: one Ruby file the developer copies into
-their Work app's `config/initializers/`, where Rails runs it once at boot. It hooks Rails
+their Host app's `config/initializers/`, where Rails runs it once at boot. It hooks Rails
 and forwards Events to the Reader. Distributed by copy-paste, not as a gem.
 _Avoid_: plugin, agent, shim.
 
 **Marker file** — `log/rails_log_reader.enabled`, the git-ignored file whose *presence*
 turns the Initializer on. Content is never read: presence is the whole gate, so `touch`
 is the entire act of enabling and the file never becomes a config file. Read once, at
-boot, so enabling needs a restart. Chosen over an env var because the Work app runs under
+boot, so enabling needs a restart. Chosen over an env var because the Host app runs under
 puma-dev — there is no shell to export from, and a variable is per terminal, so it would
 miss the `rake` and `rails c` Runs. Never created by the Reader, which only ever reads the
-Work app's files. See `docs/adr/0004-a-marker-file-gates-the-initializer.md`.
+Host app's files. See `docs/adr/0004-a-marker-file-gates-the-initializer.md`.
 _Avoid_: flag file, lock file, config.
 
-**Work app** — the user's real Rails 8 application at their job. The Reader must work
+**Host app** — the user's real Rails 8 application at their job. The Reader must work
 against it with only the Initializer added, opt-in per developer.
 
 **Event** — a single thing the Rails process emitted. Three kinds in v1:

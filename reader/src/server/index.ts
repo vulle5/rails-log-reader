@@ -114,10 +114,10 @@ async function earlier(request: Request) {
 }
 
 /**
- * #29: is the Work app's copy of the Initializer the Reader's own master copy, byte for
+ * #29: is the Host app's copy of the Initializer the Reader's own master copy, byte for
  * byte? And #28: is it there at all, and is the Marker file beside it? A GET because it only
  * ever reads — ADR-0004's two fixed-contract paths are what tell *not installed* from *not
- * enabled* from *enabled but idle*, and the Reader only ever reads the Work app's files
+ * enabled* from *enabled but idle*, and the Reader only ever reads the Host app's files
  * outside the one repair action below.
  */
 async function initializerStatus() {
@@ -158,7 +158,7 @@ function serveOrSaySo(port: number) {
     return Bun.serve({
       port,
       routes: {
-        // A connection that is quiet whenever the Work app is, which is most of the time — so
+        // A connection that is quiet whenever the Host app is, which is most of the time — so
         // exempt from `Bun.serve`'s 10 s idle timeout, which would otherwise reap it every
         // twelve seconds and leave each append inside `EventSource`'s three-second reconnect
         // arriving late (#39). Only this route: nothing else here is meant to be held open.

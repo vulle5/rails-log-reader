@@ -64,7 +64,7 @@ The ticket offered parsing Rails' own human-readable output, tagged with
 
 ## Bounds, and why each one is a bound rather than an assumption
 
-The user runs work apps under **puma-dev**, which idles an app out after 15 minutes by
+The user runs host apps under **puma-dev**, which idles an app out after 15 minutes by
 default (`-timeout`; they have raised theirs to 60). So Runs are short and frequent, and it
 is the *file* that accumulates across dozens of Runs a day, not any single Run. Every limit
 below is therefore a bound, unaffected by how long a Run happens to live:
@@ -86,7 +86,7 @@ below is therefore a bound, unaffected by how long a Run happens to live:
 - **One environment variable, read once at boot.** Unset, the Initializer returns before
   subscribing to anything, opening any file, or touching `Rails.logger`: a teammate who never
   sets it pays nothing and sees nothing. **Production is refused unconditionally** — a rail,
-  not a setting, because this file gets copy-pasted into a real work app that also boots in
+  not a setting, because this file gets copy-pasted into a real host app that also boots in
   CI. `test` stays allowed; debugging a flaky system test is a plausible local use.
 - **Where the variable is set is the developer's choice, and is documentation, not design.**
   For puma-dev users: `~/.powconfig` is read first and never touches the repo; `.pumaenv` is

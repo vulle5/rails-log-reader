@@ -5,7 +5,7 @@ import type { RepairState } from "./initializer-repair"
  * #29's whole surface: a non-blocking banner naming which half of the Initializer is wrong
  * — the file on disk, or the process already running — and the one click that repairs
  * either. Rendered above the Reader's three columns rather than inside any of them, because
- * a mismatch is a fact about the *connection* to the Work app, not about anything any one
+ * a mismatch is a fact about the *connection* to the Host app, not about anything any one
  * column shows.
  */
 export function InitializerBanner({
@@ -82,7 +82,7 @@ export function UnsupportedWireScreen({
         to version {understoodVersion}.
       </p>
       <p>
-        Pull a newer Reader, or repair the Work app's copy back to this Reader's own — either fixes
+        Pull a newer Reader, or repair the Host app's copy back to this Reader's own — either fixes
         the mismatch.
       </p>
       <RepairControl state={repairState} onRepair={onRepair} />

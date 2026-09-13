@@ -18,7 +18,7 @@ export const MARKER_RELATIVE_PATH = join("log", "rails_log_reader.enabled")
 
 /**
  * The Reader's own master copy. Resolved from this file's own location rather than from
- * `process.cwd()` — which is the Work app's root, the thing being compared *against* — and
+ * `process.cwd()` — which is the Host app's root, the thing being compared *against* — and
  * stable because the Reader has no build step: it runs straight out of `reader/src` (see
  * `reader/README.md`), so `import.meta.dir` is always `reader/src/server`.
  */
@@ -65,7 +65,7 @@ async function markerExists(railsRoot: string) {
 /**
  * `POST /initializer-repair`'s whole implementation: overwrite exactly the one path, and
  * nothing else — not even `config/initializers/` itself. #29 says "overwrites exactly that
- * one path" and "never touches any other path in the Work app", so this deliberately does
+ * one path" and "never touches any other path in the Host app", so this deliberately does
  * not `mkdir` a missing directory into existence: every real Rails root already has
  * `config/initializers/` (`rails new` creates it), so the only app this could ever matter
  * for is one so far from a real Rails root that failing the repair — surfaced to the

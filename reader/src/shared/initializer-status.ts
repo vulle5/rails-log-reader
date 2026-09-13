@@ -10,7 +10,7 @@ import { WIRE_VERSION } from "./wire"
 
 /**
  * What `GET /initializer-status` answers, straight off reads of ADR-0004's two fixed-contract
- * paths: does the Work app's `config/initializers/rails_log_reader.rb` exist, is it
+ * paths: does the Host app's `config/initializers/rails_log_reader.rb` exist, is it
  * byte-identical to the Reader's own `reader/rails/rails_log_reader.rb`, and is the Marker
  * file there.
  */
