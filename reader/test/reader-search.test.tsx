@@ -13,7 +13,7 @@ const { Reader } = await import("../src/ui/Reader")
 const { activityTable } = await import("../src/shared/activity")
 const { consoleStream } = await import("../src/shared/console")
 const { requestRowId } = await import("../src/shared/activity")
-const { rowSelector } = await import("../src/ui/ActivityTable")
+const { rowSelector } = await import("../src/ui/features/activity-table/components/ActivityTable")
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean

@@ -10,7 +10,7 @@
  * anything is a question the developer has to answer before they can ignore it.
  */
 
-import type { EarlierState } from "./hooks/live"
+import type { EarlierState } from "../../../hooks/live"
 
 type LoadEarlierProps = {
   state: EarlierState
