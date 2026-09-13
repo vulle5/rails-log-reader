@@ -158,7 +158,16 @@ function serveOrSaySo(port: number) {
     return Bun.serve({
       port,
       routes: {
-        "/events": envelopeStream,
+        // A connection that is quiet whenever the Work app is, which is most of the time — so
+        // exempt from `Bun.serve`'s 10 s idle timeout, which would otherwise reap it every
+        // twelve seconds and leave each append inside `EventSource`'s three-second reconnect
+        // arriving late (#39). Only this route: nothing else here is meant to be held open.
+        // There's no test for this, because Bun's default timeout is 10 s and the test
+        // would have to wait that long to fail.
+        "/events": (request, server) => {
+          server.timeout(request, 0)
+          return envelopeStream()
+        },
         "/earlier": { GET: earlier },
         "/initializer-status": { GET: initializerStatus },
         "/initializer-repair": { POST: repairInitializer },
