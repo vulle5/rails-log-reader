@@ -302,7 +302,8 @@ _Avoid_: separator, divider, restart banner.
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
 row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded — the
-exception it raised if it did — backtrace full and uncleaned, gem frames included — and its *trailing section*.
+exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
+default — and its *trailing section*.
 Pinned once opened, so selecting never reflows the layout. Renders what the Initializer
 emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
 cut says so where it is read rather than passing as whole.
@@ -314,6 +315,27 @@ anyway — the rare "why was the first request after a restart the slow one" que
 the dropped ones answer. One chip brings them back, persisted the same way the Console's
 chips are. Hidden is never dropped: the timeline still holds every one, and a hidden query
 is one click away rather than in the way of the ordinary request beside it.
+
+A backtrace collapses gem frames by default for the same reason: a real exception's trace
+is mostly framework internals, and scanning past forty of them to find the three that
+matter is exactly the noise this column exists to cut. Frames outside `isHostFrame`'s
+`railsRoot` prefix collapse into an inline "N frames hidden" marker at their position in
+the trace — never one marker for the whole thing, because call order is the one fact a
+stack trace exists to carry, and flattening it to a single blob would erase which frame
+called which. The raised frame — `backtrace[0]`, Ruby's own guarantee of where an
+exception happened — stays visible whatever its Host-app status; collapsing away the raise
+site by the same rule that hides `ActiveSupport`'s dispatch chain would defeat the column
+on its most common case, a `NoMethodError` or `RecordNotFound` several frames inside a gem.
+A marker's reveal is one-way and unpersisted: clicking opens its frames for the rest of
+that render, and the next render of any exception starts fully collapsed again — no
+toggle, nothing survives a reload. A trace with no Host-app frame at all (including while
+`railsRoot` is still unknown) is just one marker spanning everything but the raised frame;
+the exception's class and message above it are never hidden by this. *Search* reaches into
+a collapsed marker exactly as it reaches everywhere else it renders text: a match inside
+one force-opens it, because a hidden gap Search silently couldn't find would be the one
+place in this column that promise quietly didn't hold. Independent throughout of the cut a
+wire-truncated backtrace records: collapsing describes what the Reader chooses to show of
+what it holds, cutting describes what the wire sent, and neither reads the other.
 
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed
