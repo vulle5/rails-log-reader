@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import type { ProvenElapsed } from "../shared/activity"
+import type { ProvenElapsed } from "../../../../shared/activity"
 
 /**
  * The climbing half of an in-flight request's elapsed time.

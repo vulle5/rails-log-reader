@@ -5,21 +5,26 @@ import type { ConsoleLine } from "../shared/console"
 import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
-import { ActivityTable, rowSelector } from "./ActivityTable"
-import { useAutoScroll, type ColumnAutoScroll } from "./auto-scroll"
-import { ConsoleFilters, consoleFilterKey, linesShown, useConsoleFilter } from "./ConsoleFilters"
-import { ConsoleRail } from "./ConsoleRail"
-import { detailItems, DetailColumn } from "./DetailColumn"
-import { DetailFilters, detailFilterKey, useDetailFilter } from "./DetailFilters"
-import { EmptyReader } from "./EmptyReader"
+import { ActivityTable, rowSelector } from "./features/activity-table/components/ActivityTable"
+import { useAutoScroll, type ColumnAutoScroll } from "./hooks/auto-scroll"
+import {
+  ConsoleFilters,
+  consoleFilterKey,
+  linesShown,
+  useConsoleFilter,
+} from "./features/console/components/ConsoleFilters"
+import { ConsoleRail } from "./features/console/components/ConsoleRail"
+import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
+import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
+import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { HoverGrouping } from "./HoverGrouping"
-import { InitializerBanner, UnsupportedWireScreen } from "./InitializerMismatch"
-import type { RepairState } from "./initializer-repair"
-import type { EarlierState } from "./live"
-import { LoadEarlier } from "./LoadEarlier"
-import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./RowKindTabs"
-import { SearchBox, SearchContext, useSearch } from "./search"
-import { ThemeSwitch, useTheme } from "./theme"
+import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"
+import type { RepairState } from "./features/setup-status/lib/initializer-repair"
+import type { EarlierState } from "./hooks/live"
+import { LoadEarlier } from "./features/activity-table/components/LoadEarlier"
+import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./features/activity-table/components/RowKindTabs"
+import { SearchBox, SearchContext, useSearch } from "./hooks/search"
+import { ThemeSwitch, useTheme } from "./hooks/theme"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and

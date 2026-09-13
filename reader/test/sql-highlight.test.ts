@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { tokenizeSql, type SqlTokenKind } from "../src/ui/sql-highlight"
+import { tokenizeSql, type SqlTokenKind } from "../src/ui/features/detail-column/lib/sql-highlight"
 
 /**
  * The hand-rolled tokenizer #9 chose over a dependency. Rails' SQL is a narrow grammar —

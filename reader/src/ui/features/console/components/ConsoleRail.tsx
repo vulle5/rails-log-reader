@@ -1,5 +1,5 @@
-import type { ConsoleLine } from "../shared/console"
-import { Highlight } from "./search"
+import type { ConsoleLine } from "../../../../shared/console"
+import { Highlight } from "../../../hooks/search"
 
 /**
  * The **Console rail**: the leftmost of the Reader's three columns, and a global stream of

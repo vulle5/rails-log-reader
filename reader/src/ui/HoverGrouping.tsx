@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState, type RefObject } from "react"
 
-import { rowSelector } from "./ActivityTable"
-import { lineSelector } from "./ConsoleRail"
+import { rowSelector } from "./features/activity-table/components/ActivityTable"
+import { lineSelector } from "./features/console/components/ConsoleRail"
 import { captionFor, ruleBetween, rulePath, type Box, type GroupingRule } from "./grouping"
 
 /**

@@ -1,5 +1,5 @@
-import type { Mismatch } from "../shared/initializer-status"
-import type { RepairState } from "./initializer-repair"
+import type { Mismatch } from "../../../../shared/initializer-status"
+import type { RepairState } from "../lib/initializer-repair"
 
 /**
  * #29's whole surface: a non-blocking banner naming which half of the Initializer is wrong

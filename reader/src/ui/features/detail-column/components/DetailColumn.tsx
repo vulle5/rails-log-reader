@@ -1,9 +1,9 @@
-import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../shared/activity"
-import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../shared/wire"
+import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
+import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
-import { controllerAction, methodClassName, ms, runDescription } from "./format"
-import { Highlight, Marked, useMatches } from "./search"
-import { tokenizeSql } from "./sql-highlight"
+import { controllerAction, methodClassName, ms, runDescription } from "../../../lib/format"
+import { Highlight, Marked, useMatches } from "../../../hooks/search"
+import { tokenizeSql } from "../lib/sql-highlight"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines

@@ -1,8 +1,8 @@
 import { useCallback, useState } from "react"
 
-import type { ConsoleLine } from "../shared/console"
-import { SEVERITIES, type Severity } from "../shared/wire"
-import { Chip } from "./Chip"
+import type { ConsoleLine } from "../../../../shared/console"
+import { SEVERITIES, type Severity } from "../../../../shared/wire"
+import { Chip } from "../../../components/Chip"
 
 /**
  * Everything that thins the *Console*, in one place — so "what is the rail showing?" has one

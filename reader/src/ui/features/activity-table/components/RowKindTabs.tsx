@@ -1,4 +1,4 @@
-import type { ActivityRow } from "../shared/activity"
+import type { ActivityRow } from "../../../../shared/activity"
 
 /**
  * The Activity table's tabs, which filter by **row kind and nothing else**: Requests, Runs,
