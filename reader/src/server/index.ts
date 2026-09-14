@@ -1,6 +1,7 @@
 import { join } from "node:path"
 
 import index from "../ui/index.html"
+import { APP_NAME_VARIABLE, readAppNameOverride } from "./app-name"
 import { initializerFileStatus, repairInitializerFile } from "./initializer-file"
 import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
@@ -32,6 +33,8 @@ if (port === null) {
 }
 
 const logDirectory = join(railsRoot, "log")
+
+const appNameOverride = readAppNameOverride(process.env[APP_NAME_VARIABLE])
 
 /**
  * The server is the Sidecar and nothing else: it holds no fold, no rows and no history of
@@ -125,6 +128,16 @@ async function initializerStatus() {
 }
 
 /**
+ * `RAILS_LOG_READER_APP_NAME`, read once above at this process's own startup — never
+ * re-read, because the browser has no way to change it and neither does the Host app. A GET
+ * fetched once on mount, the same idiom `/initializer-status` uses, rather than server-side
+ * HTML templating: the static HTML-bundle route for `/*` below stays untouched either way.
+ */
+function appNameOverrideRoute() {
+  return Response.json({ override: appNameOverride })
+}
+
+/**
  * The one write this route makes: overwrite `config/initializers/rails_log_reader.rb` with
  * the Reader's master copy, and nothing else. Never the Marker file, never any other path in
  * the Work app — creating and removing the Marker stays the developer's own act. The Reader
@@ -169,6 +182,7 @@ function serveOrSaySo(port: number) {
           return envelopeStream()
         },
         "/earlier": { GET: earlier },
+        "/app-name-override": { GET: appNameOverrideRoute },
         "/initializer-status": { GET: initializerStatus },
         "/initializer-repair": { POST: repairInitializer },
         "/*": index,

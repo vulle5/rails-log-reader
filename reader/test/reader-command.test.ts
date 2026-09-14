@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { APP_NAME_VARIABLE, readAppNameOverride } from "../src/server/app-name"
 import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
 import type { Envelope } from "../src/shared/wire"
@@ -45,12 +46,12 @@ async function railsRoot() {
  * root. Which port 0 became is a thing only the process knows, and `readerUrl` is how it
  * says so. That the *default* is 5273 is asserted where it lives, next door.
  */
-function run(cwd: string) {
+function run(cwd: string, env: Record<string, string> = {}) {
   const reader = Bun.spawn([Bun.which("bun") ?? "bun", SERVER], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, [PORT_VARIABLE]: "0" },
+    env: { ...process.env, [PORT_VARIABLE]: "0", ...env },
   })
   started.push(reader)
   return reader
@@ -308,6 +309,24 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
   })
 })
 
+describe("the Host app's display name (#95)", () => {
+  test("GET /app-name-override says null when RAILS_LOG_READER_APP_NAME is not set", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    const response = await Bun.fetch(new URL("app-name-override", url))
+
+    expect(await response.json()).toEqual({ override: null })
+  })
+
+  test("GET /app-name-override answers whatever the env var says, for the life of the process", async () => {
+    const url = await readerUrl(run(await railsRoot(), { [APP_NAME_VARIABLE]: "MyApp" }))
+
+    const response = await Bun.fetch(new URL("app-name-override", url))
+
+    expect(await response.json()).toEqual({ override: "MyApp" })
+  })
+})
+
 /**
  * The port is a rule rather than a number — a default, an override, and a refusal — and the
  * rule is read here rather than by starting a Reader, because a test that binds 5273 to
@@ -339,5 +358,28 @@ describe("which port the Reader is on", () => {
     // `RAILS_LOG_READER_PORT= bun ...`, and a shell that exports it as the empty string.
     expect(readPort("")).toBe(DEFAULT_PORT)
     expect(readPort("  ")).toBe(DEFAULT_PORT)
+  })
+})
+
+/**
+ * The same rule as the port's, minus the refusal: any non-empty string names an app, so the
+ * only thing left to tell apart is set from unset.
+ */
+describe("the app-name override", () => {
+  test("is null unless RAILS_LOG_READER_APP_NAME is set", () => {
+    expect(readAppNameOverride(undefined)).toBeNull()
+  })
+
+  test("is whatever the override says", () => {
+    expect(readAppNameOverride("MyApp")).toBe("MyApp")
+  })
+
+  test("treats an override that is there but empty, or only whitespace, as not having been set", () => {
+    expect(readAppNameOverride("")).toBeNull()
+    expect(readAppNameOverride("  ")).toBeNull()
+  })
+
+  test("trims surrounding whitespace from an override that is otherwise set", () => {
+    expect(readAppNameOverride("  MyApp  ")).toBe("MyApp")
   })
 })

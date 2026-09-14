@@ -21,10 +21,10 @@ afterAll(async () => {
   await GlobalRegistrator.unregister()
 })
 
-async function openTheReader() {
+async function openTheReader(props: { appName?: string | null } = {}) {
   const container = document.createElement("div")
   document.body.append(container)
-  await act(async () => createRoot(container).render(<Reader />))
+  await act(async () => createRoot(container).render(<Reader {...props} />))
   return container
 }
 
@@ -98,5 +98,30 @@ describe("opening the Reader", () => {
     const container = await openTheReader()
 
     expect(body(column(container, "Detail column")).textContent).toContain("Nothing selected")
+  })
+})
+
+describe("the Host app's name in the title and the reader-bar (#95)", () => {
+  test("shows the generic fallback in both places before any Run has said anything", async () => {
+    const container = await openTheReader()
+
+    expect(container.querySelector(".app-name")?.textContent).toBe("Rails log reader")
+    expect(document.title).toBe("Rails log reader")
+  })
+
+  test("shows the Host app's own name in both places once one is known", async () => {
+    const container = await openTheReader({ appName: "MyApp" })
+
+    expect(container.querySelector(".app-name")?.textContent).toBe("MyApp")
+    expect(document.title).toBe("MyApp — Rails log reader")
+  })
+
+  test("the header label sits beside the search box and the theme switch, as plain text with no icon", async () => {
+    const container = await openTheReader({ appName: "MyApp" })
+    const bar = container.querySelector(".reader-bar")
+
+    expect(bar?.querySelector(".app-name svg, .app-name img")).toBeNull()
+    expect(bar?.querySelector(".search-box")).not.toBeNull()
+    expect(bar?.querySelector(".theme-switch")).not.toBeNull()
   })
 })

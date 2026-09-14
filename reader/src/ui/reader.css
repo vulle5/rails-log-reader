@@ -227,6 +227,27 @@ body {
   background: var(--bg-sunken);
 }
 
+/* The Host app's own name — or, before a Run has said one, the same fallback the tab title
+   opens on. Plain text, no icon: it is a label, not a brand mark. */
+.app-name {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Never shrunk, so it is `.app-name` alone that gives ground and truncates under an ellipsis
+   when the bar is narrow — the search box and theme switch stay their full width. */
+.reader-bar-controls {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+}
+
 .search-box {
   width: 320px;
   max-width: 100%;

@@ -1,7 +1,9 @@
 import { createRoot } from "react-dom/client"
 
+import { resolveAppName } from "../shared/app-name"
 import { detectEmptyState, detectMismatch } from "../shared/initializer-status"
 import { useInitializerFileStatus, useInitializerRepair } from "./features/setup-status/lib/initializer-repair"
+import { useAppNameOverride } from "./hooks/app-name"
 import { useSidecar } from "./hooks/live"
 import { Reader } from "./Reader"
 
@@ -18,9 +20,11 @@ if (container === null) throw new Error("index.html is missing its #root element
  * is empty.
  */
 function LiveReader() {
-  const { rows, lines, evictedRows, liveWireVersion, liveRunId, historyLoaded, earlier, loadEarlier } = useSidecar()
+  const { rows, lines, evictedRows, liveWireVersion, liveRunId, appName: wireAppName, historyLoaded, earlier, loadEarlier } =
+    useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
+  const appNameOverride = useAppNameOverride()
 
   async function onRepair() {
     const copied = await repair()
@@ -44,6 +48,7 @@ function LiveReader() {
       earlier={earlier}
       onLoadEarlier={loadEarlier}
       emptyState={detectEmptyState(fileStatus, historyLoaded)}
+      appName={resolveAppName(appNameOverride, wireAppName)}
     />
   )
 }

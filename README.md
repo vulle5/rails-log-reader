@@ -82,6 +82,8 @@ To turn the Reader off again, delete `log/rails_log_reader.enabled` and restart.
   `.git/info/exclude` instead.
 - Running two Rails apps at once? Only one Reader can hold port 5273, so set
   `RAILS_LOG_READER_PORT` for the second one.
+- The tab title and the header both show your app's name, by default it's the value of
+  `Rails.application.class.module_parent_name`. Set `RAILS_LOG_READER_APP_NAME` to override it.
 
 ## Checks
 

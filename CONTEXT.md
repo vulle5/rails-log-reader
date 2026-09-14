@@ -30,7 +30,11 @@ Host app's files. See `docs/adr/0004-a-marker-file-gates-the-initializer.md`.
 _Avoid_: flag file, lock file, config.
 
 **Host app** — the user's real Rails 8 application at their job. The Reader must work
-against it with only the Initializer added, opt-in per developer.
+against it with only the Initializer added, opt-in per developer. Its display name, shown in
+the Reader's tab title and `reader-bar` header, is the wire's own `app_name` — the first
+`run_header`'s, latched for the rest of the session and never reconsidered against a later
+Run — unless `RAILS_LOG_READER_APP_NAME` overrides it, which always wins. See
+`docs/adr/0009-the-app-name-override-is-a-reader-side-env-var.md`.
 
 **Event** — a single thing the Rails process emitted. Three kinds in v1:
 - **Request event** — an HTTP request. Has a start and a finish; is *in-flight* between them.

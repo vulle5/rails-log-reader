@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 
 import type { ActivityRow } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
@@ -75,6 +75,12 @@ type ReaderProps = {
   onLoadEarlier?: () => void
   /** Why there is nothing to show, from `detectEmptyState` — `null` while that is not known. */
   emptyState?: EmptyState | null
+  /**
+   * The Host app's display name — `resolveAppName`'s answer, already latched and already
+   * beaten by the env-var override if one was set. `null` is the generic-fallback state, not
+   * an error: nothing has said a name yet.
+   */
+  appName?: string | null
 }
 
 export function Reader({
@@ -89,6 +95,7 @@ export function Reader({
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
   emptyState = null,
+  appName = null,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -112,6 +119,15 @@ export function Reader({
   // Up here with the other hooks, and not only where its switch is drawn: the refusal screen
   // below returns before the bar exists, and the theme still has to follow the OS behind it.
   const theme = useTheme()
+
+  // The one side effect this component reaches outside itself for, and set here rather than
+  // in `main.tsx` for the reason the theme is: it is this component's own name for itself,
+  // not data `main.tsx` fetched. `index.html`'s own `<title>` is this same fallback, so a
+  // page that never got this far — the refusal screen below, or a render before React mounts
+  // at all — is already showing it.
+  useEffect(() => {
+    document.title = appName === null ? "Rails log reader" : `${appName} — Rails log reader`
+  }, [appName])
 
   // *Hover grouping*'s two states, and the reason they are two. `hovered` is lost the moment
   // the mouse moves — which is exactly what happens next — so a click leaves `pinned` behind
@@ -228,8 +244,11 @@ export function Reader({
       {/* Above the three columns rather than in any one of them, because neither belongs to
           one: a term lights every column at once, and a theme paints them. */}
       <header className="reader-bar">
-        <SearchBox term={term} onChange={setTerm} />
-        <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
+        <span className="app-name">{appName ?? "Rails log reader"}</span>
+        <div className="reader-bar-controls">
+          <SearchBox term={term} onChange={setTerm} />
+          <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
+        </div>
       </header>
       <SearchContext value={search}>
         <div className="reader" ref={reader}>
