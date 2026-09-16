@@ -11,6 +11,7 @@ import {
   type TimelineEvent,
 } from "../src/shared/activity"
 import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
+import { isHostFrame } from "../src/ui/features/detail-column/lib/backtrace"
 import {
   CLOCK_STEPPED_BACK,
   CONSOLE_RUN,
@@ -25,6 +26,7 @@ import {
   aRun,
   EPOCH,
   appendToSidecar,
+  eventually,
   forgetLogDirectories,
   replaceSidecar,
 } from "./sidecar.fixtures"
@@ -82,15 +84,6 @@ async function theReaderReads(logDirectory: string) {
   }
 
   return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, evicted, identity: () => identity }
-}
-
-/** Polls for the backward scan's result: it resolves off the read path, asynchronously. */
-async function eventually(satisfied: () => boolean, what: string) {
-  for (let attempt = 0; attempt < 150; attempt++) {
-    if (satisfied()) return
-    await Bun.sleep(20)
-  }
-  throw new Error(`${what} never happened`)
 }
 
 /** What a timeline event is, in one string: the query it ran or the line it printed. */
@@ -1360,6 +1353,12 @@ describe("recovering the live Run's header outside the load window", () => {
       pid: 48_211,
       railsVersion: "8.0.2",
     })
+    // What recovering `railsRoot` is actually for: `isHostFrame` reading it off `identity`
+    // is what backtrace highlighting resolves through, never off a row.
+    expect(isHostFrame("/home/dev/example-app/app/models/order.rb:44", reader.identity()?.railsRoot ?? null)).toBe(
+      true,
+    )
+    expect(isHostFrame("puma (6.6.0) lib/puma/server.rb:443", reader.identity()?.railsRoot ?? null)).toBe(false)
   })
 
   test("leaves row count and eviction state exactly as the load-on-open window alone left them", async () => {

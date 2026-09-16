@@ -19,6 +19,7 @@ import {
   aLogDirectoryThatDoesNotExistYet,
   aRun,
   appendToSidecar,
+  eventually,
   forgetLogDirectories,
   sidecarPath,
   truncateSidecar,
@@ -52,15 +53,6 @@ async function theReaderReads(logDirectory: string) {
   )
   opened.push(sidecar)
   return { delivered, runHeaders, caughtUp: () => sidecar.catchUp(), historyStart: () => historyStart }
-}
-
-/** Polls, because the watcher and the backstop are the two things under test here. */
-async function eventually(satisfied: () => boolean, what: string) {
-  for (let attempt = 0; attempt < 150; attempt++) {
-    if (satisfied()) return
-    await Bun.sleep(20)
-  }
-  throw new Error(`${what} never happened`)
 }
 
 describe("watching the log directory", () => {
@@ -348,4 +340,22 @@ describe("recovering the live Run's own run_header", () => {
     // gives up on, reached here by running out of file instead of running out of budget.
     expect(await findLiveRunHeader(path, 1, "no-such-run", size)).toBeNull()
   })
+
+  test(
+    "gives up past the 64 MB cap even though a matching header sits further back",
+    async () => {
+      const log = await aLogDirectory()
+      const run = aRun("srv-1")
+      const header = run.header()
+      // Comfortably past the cap, and free of the needle entirely: the scan has to stop at
+      // 64 MB on its own, rather than this test merely reaching the top of a small file.
+      const filler = Array.from({ length: 80 }, () => "x".repeat(1_000_000))
+      await appendToSidecar(log, header, ...filler, run.log(null, "near the end"))
+      const path = sidecarPath(log)
+      const { size } = await stat(path)
+
+      expect(await findLiveRunHeader(path, 1, "srv-1", size)).toBeNull()
+    },
+    20_000,
+  )
 })

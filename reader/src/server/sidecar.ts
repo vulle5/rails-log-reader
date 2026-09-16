@@ -234,38 +234,16 @@ async function startOfHistory(path: string, end: number) {
   }
 }
 
-/**
- * How far past the load-on-open window a Sidecar's own `run_header` is allowed to be before
- * the Reader gives up looking for it: the same figure `rails_log_reader.rb`'s
- * `MAX_SIDECAR_BYTES` truncates the whole file at boot to, so a header not found within that
- * much of it is not a header that could still be sitting further back. Benchmarked at
- * roughly 2.5 ms/MB against a synthetic 300 MB Sidecar whose header was never found, so this
- * cap's worst case — the header genuinely absent — costs on the order of 150-200 ms, off the
- * request path and behind the load-on-open history already streaming.
- */
+/** How far past the load-on-open window this scan will look before giving up. */
 const MAX_HEADER_SCAN_BYTES = 64 * 1024 * 1024
 
 /**
- * One scan's result, kept per Sidecar path rather than per attachment: a second tab or a
- * reconnect opens its own `Sidecar`, but the bytes it would scan are the same bytes the
- * first one already did. `inode` and `run_id` both have to match for a cached scan to answer
- * — a truncation changes the former and a restart that outruns the load-on-open window
- * without one changes the latter — so either one moving on invalidates it the same way
- * `read()`'s own attach detection already does, without this needing a truncation watcher
- * of its own.
- *
- * A deliberate, narrow exception to `index.ts`'s "the server holds no fold, no rows, no
- * history of its own": this remembers exactly one fact, and only for as long as it stays
- * true of the file on disk.
+ * One scan's result per Sidecar path. `inode` and `run_id` both have to match the cached
+ * entry for it to answer; either one differing is a cache miss, same as a fresh scan.
  */
 const liveHeaderScans = new Map<string, { inode: number; runId: string; header: Promise<RunHeaderEnvelope | null> }>()
 
-/**
- * The live Run's own `run_header`, found by continuing `startOfHistory`'s backward scan past
- * where the load-on-open window opened — capped, because a Sidecar whose header truly is not
- * there (attached mid-Run, before it ever wrote one) must not turn every attachment into an
- * unbounded read of the whole file.
- */
+/** The live Run's own `run_header`, found by continuing `startOfHistory`'s scan past `from`. */
 export function findLiveRunHeader(path: string, inode: number, runId: string, from: number): Promise<RunHeaderEnvelope | null> {
   const cached = liveHeaderScans.get(path)
   if (cached !== undefined && cached.inode === inode && cached.runId === runId) return cached.header

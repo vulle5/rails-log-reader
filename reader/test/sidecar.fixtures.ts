@@ -58,6 +58,15 @@ export function sidecarPath(logDirectory: string) {
   return join(logDirectory, SIDECAR_NAME)
 }
 
+/** Polls for something that resolves off its own read path, asynchronously. */
+export async function eventually(satisfied: () => boolean, what: string) {
+  for (let attempt = 0; attempt < 150; attempt++) {
+    if (satisfied()) return
+    await Bun.sleep(20)
+  }
+  throw new Error(`${what} never happened`)
+}
+
 /** One arbitrary wall clock and one arbitrary boot, shared with the dense seed next door. */
 export const EPOCH = 1_756_915_200_000
 export const BOOT_MONO = 118_492_300_000
