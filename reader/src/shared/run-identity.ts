@@ -6,10 +6,8 @@ import type { Envelope, RunKind } from "./wire"
  * the same reading `resolveAppName` already gave a `null` wire name.
  *
  * Read off the raw envelope stream rather than a folded `RunRow`/`RequestRow`, so these facts
- * survive the *Memory bound* evicting whichever row first carried them — generalizing
- * `latchAppName`'s contract (see this repo's `CONTEXT.md`, *Run identity* entry) from
- * `appName` alone to the whole `run_header` payload, which is the one envelope all five
- * fields arrive on together.
+ * survive the *Memory bound* evicting whichever row first carried them. See this repo's
+ * `CONTEXT.md`, *Run identity* entry.
  */
 export type RunIdentity = {
   railsRoot: string
@@ -21,9 +19,10 @@ export type RunIdentity = {
 
 /**
  * Folds a batch of envelopes into the latched identity: the first `run_header` wins and is
- * held for the rest of the session, never reconsidered against a later Run's own header —
- * the same reason `latchAppName` never reconsidered `appName` alone, generalized to the
- * four fields that arrive on the same envelope.
+ * held for the rest of the session, never reconsidered against a later Run's own header — a
+ * Host app that renamed itself mid-session, or a second, differently-named Run sharing one
+ * Sidecar, would otherwise make the tab title and header flicker between two answers to a
+ * question the developer only ever asked once.
  */
 export function latchRunIdentity(latched: RunIdentity, envelopes: readonly Envelope[]): RunIdentity {
   if (latched !== null) return latched
