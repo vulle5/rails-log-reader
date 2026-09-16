@@ -77,6 +77,11 @@ function envelopeStream() {
         // belongs to the side that holds the model, so a reconnection cannot forget how far
         // back the developer had asked to see.
         (from) => send(`event: history\ndata: ${JSON.stringify({ from })}\n\n`),
+        // The live Run's own `run_header`, when a capped backward scan found it outside the
+        // history above: its own event, not folded into `onEnvelopes`'s `data:` messages,
+        // because it did not just get appended — routing it through the same message the
+        // browser folds into rows would open one, which this is built specifically not to do.
+        (header) => send(`event: run-header\ndata: ${JSON.stringify(header)}\n\n`),
       )
 
       // The load-on-open history has all been sent by the time `openSidecar` resolves, and

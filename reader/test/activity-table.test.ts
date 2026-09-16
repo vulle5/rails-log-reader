@@ -10,6 +10,7 @@ import {
   type RunRow,
   type TimelineEvent,
 } from "../src/shared/activity"
+import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
 import {
   CLOCK_STEPPED_BACK,
   CONSOLE_RUN,
@@ -55,11 +56,20 @@ async function theReaderReads(logDirectory: string) {
   // it — the fold's own report of what it let go of, which is what `live.ts` hands the
   // Console (#63).
   const evicted: EvictedRow[] = []
+  let identity: RunIdentity = null
   const sidecar = await openSidecar(
     logDirectory,
-    (envelopes) => evicted.push(...activity.fold(envelopes)),
+    (envelopes) => {
+      evicted.push(...activity.fold(envelopes))
+      identity = latchRunIdentity(identity, envelopes)
+    },
     (start) => {
       from = start
+    },
+    // Never handed to `activity.fold`: a header the backward scan found outside the loaded
+    // window goes straight to `identity`, exactly as `live.ts` keeps it apart from the fold.
+    (header) => {
+      identity = latchRunIdentity(identity, [header])
     },
   )
   opened.push(sidecar)
@@ -68,9 +78,19 @@ async function theReaderReads(logDirectory: string) {
     const earlier = await readEarlier(logDirectory, from)
     from = earlier.from
     evicted.push(...activity.foldEarlier(earlier.envelopes))
+    identity = latchRunIdentity(identity, earlier.envelopes)
   }
 
-  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, evicted }
+  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, evicted, identity: () => identity }
+}
+
+/** Polls for the backward scan's result: it resolves off the read path, asynchronously. */
+async function eventually(satisfied: () => boolean, what: string) {
+  for (let attempt = 0; attempt < 150; attempt++) {
+    if (satisfied()) return
+    await Bun.sleep(20)
+  }
+  throw new Error(`${what} never happened`)
 }
 
 /** What a timeline event is, in one string: the query it ran or the line it printed. */
@@ -1308,5 +1328,54 @@ describe("load-earlier", () => {
     await reader.loadEarlier()
 
     expect(reader.evicted).toEqual([])
+  })
+})
+
+/**
+ * The shape reported directly against a real Host app: a dev server up long enough that its
+ * own `run_header` sits tens of thousands of events before the load-on-open window — four
+ * times over, in the reported case.
+ */
+async function aSidecarWithTheHeaderFarBehind(log: string, eventsAfterHeader: number) {
+  const server = aRun("srv-1")
+  // Unattributed, like `aSidecarWithHistory`'s own filler: one Run row holds all of it, which
+  // is what lets a test about row count stay a single, unambiguous number.
+  const filler = Array.from({ length: eventsAfterHeader }, (_, index) => server.log(null, `filler ${index}`))
+  await appendToSidecar(log, server.header(), ...filler)
+  return { server }
+}
+
+describe("recovering the live Run's header outside the load window", () => {
+  test("latches RunIdentity from a capped backward scan, without ever calling loadEarlier", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithTheHeaderFarBehind(log, LOAD_ON_OPEN_EVENTS * 4 + 500)
+    const reader = await theReaderReads(log)
+
+    await eventually(() => reader.identity() !== null, "the backward scan finding the header")
+
+    expect(reader.identity()).toEqual({
+      railsRoot: "/home/dev/example-app",
+      appName: "ExampleApp",
+      runKind: "server",
+      pid: 48_211,
+      railsVersion: "8.0.2",
+    })
+  })
+
+  test("leaves row count and eviction state exactly as the load-on-open window alone left them", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithTheHeaderFarBehind(log, LOAD_ON_OPEN_EVENTS * 4 + 500)
+    const reader = await theReaderReads(log)
+    const rowsBeforeIdentity = reader.rows.length
+    const evictedBeforeIdentity = reader.evicted.length
+
+    await eventually(() => reader.identity() !== null, "the backward scan finding the header")
+
+    // The found header fed `identity` directly rather than through `activity.fold`, so
+    // nothing about the table's own rows or its evictions moved while that resolved.
+    expect(reader.rows).toHaveLength(rowsBeforeIdentity)
+    expect(reader.evicted).toHaveLength(evictedBeforeIdentity)
+    expect(reader.rows).toHaveLength(1)
+    expect(reader.evicted).toHaveLength(0)
   })
 })

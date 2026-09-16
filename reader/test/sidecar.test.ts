@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { link, mkdir, mkdtemp, appendFile } from "node:fs/promises"
+import { link, mkdir, mkdtemp, appendFile, stat } from "node:fs/promises"
 import { watch } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { MAX_LINE_BYTES, openSidecar, readEarlier, type Sidecar } from "../src/server/sidecar"
+import {
+  findLiveRunHeader,
+  MAX_LINE_BYTES,
+  openSidecar,
+  readEarlier,
+  type RunHeaderEnvelope,
+  type Sidecar,
+} from "../src/server/sidecar"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { Envelope } from "../src/shared/wire"
 import {
@@ -31,6 +38,7 @@ afterEach(async () => {
 
 async function theReaderReads(logDirectory: string) {
   const delivered: Envelope[] = []
+  const runHeaders: RunHeaderEnvelope[] = []
   // Where the history the Reader was given begins, as the Sidecar announces it: the offset a
   // load-earlier continues the backward scan from, kept here exactly as the browser keeps it.
   let historyStart = 0
@@ -40,9 +48,10 @@ async function theReaderReads(logDirectory: string) {
     (from) => {
       historyStart = from
     },
+    (header) => runHeaders.push(header),
   )
   opened.push(sidecar)
-  return { delivered, caughtUp: () => sidecar.catchUp(), historyStart: () => historyStart }
+  return { delivered, runHeaders, caughtUp: () => sidecar.catchUp(), historyStart: () => historyStart }
 }
 
 /** Polls, because the watcher and the backstop are the two things under test here. */
@@ -254,5 +263,89 @@ describe("load-earlier", () => {
 
     expect(earlier.envelopes).toEqual([])
     expect(earlier.from).toBe(0)
+  })
+})
+
+describe("recovering the live Run's own run_header", () => {
+  test("delivers it through onRunHeader, never through onEnvelopes, once the window opens past it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const header = run.header()
+    // Four times the load-on-open window, the shape reported against a real Host app: the
+    // header the last ~5,000 events never reach, comfortably before EOF.
+    const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS * 4 }, (_, index) => run.log(null, `filler ${index}`))
+    await appendToSidecar(log, header, ...filler)
+
+    const reader = await theReaderReads(log)
+
+    await eventually(() => reader.runHeaders.length > 0, "the backward scan finding the header")
+
+    expect(reader.runHeaders).toEqual([header])
+    expect(reader.delivered.some((envelope) => envelope.type === "run_header")).toBe(false)
+  })
+
+  test("still scans when the loaded window holds a concurrent Run's header rather than the live Run's own", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const header = server.header()
+    const buried = Array.from({ length: LOAD_ON_OPEN_EVENTS * 4 }, (_, index) => server.log(null, `filler ${index}`))
+    // A `rails c` session, started and logged entirely inside the load-on-open window: its
+    // own `run_header` is right there, but it is not the live Run's — the last event in the
+    // window is srv-1's, so srv-1's header is what this scan must go and find.
+    const rake = aRun("rake-1")
+    await appendToSidecar(log, header, ...buried, rake.header("rake"), server.log(null, "back to srv-1"))
+
+    const reader = await theReaderReads(log)
+
+    await eventually(() => reader.runHeaders.length > 0, "the backward scan finding srv-1's own header")
+
+    expect(reader.runHeaders).toEqual([header])
+  })
+
+  test("memoizes the scan per (inode, run_id): a second call gets the same result without repeating it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS * 4 }, (_, index) => run.log(null, `filler ${index}`))
+    await appendToSidecar(log, run.header(), ...filler)
+    const path = sidecarPath(log)
+    const { ino, size } = await stat(path)
+
+    const first = findLiveRunHeader(path, ino, "srv-1", size)
+    const second = findLiveRunHeader(path, ino, "srv-1", size)
+
+    // The very same Promise, not merely an equal result: the second call never started a
+    // scan of its own to arrive at it.
+    expect(second).toBe(first)
+    expect(await first).toMatchObject({ run_id: "srv-1", type: "run_header" })
+  })
+
+  test("invalidates the memoized scan the same way read() detects a truncation: a new inode", async () => {
+    const log = await aLogDirectory()
+    const before = aRun("srv-1")
+    await appendToSidecar(log, before.header(), before.log(null, "before the truncation"))
+    const path = sidecarPath(log)
+    const beforeStat = await stat(path)
+    expect(await findLiveRunHeader(path, beforeStat.ino, "srv-1", beforeStat.size)).toMatchObject({ run_id: "srv-1" })
+
+    // What `rails c` does to a Sidecar a live server is still appending to.
+    const after = aRun("srv-2")
+    await truncateSidecar(log, after.header(), after.log(null, "after the truncation"))
+    const afterStat = await stat(path)
+
+    const found = await findLiveRunHeader(path, afterStat.ino, "srv-2", afterStat.size)
+
+    expect(found).toMatchObject({ run_id: "srv-2" })
+  })
+
+  test("gives up and resolves null once the scan reaches the top of the file with no match", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), run.log(null, "just one line"))
+    const path = sidecarPath(log)
+    const { size } = await stat(path)
+
+    // No Run in this file ever wrote this id — the same "not there at all" the 64 MB cap
+    // gives up on, reached here by running out of file instead of running out of budget.
+    expect(await findLiveRunHeader(path, 1, "no-such-run", size)).toBeNull()
   })
 })

@@ -139,6 +139,17 @@ export function useSidecar(): WireStatus {
       setEarlier((current) => ({ ...current, available: history.from > 0 }))
     })
 
+    // The live Run's own `run_header`, when the server's capped backward scan found it
+    // outside the history above: latched exactly as one arriving through the ordinary live
+    // fold would be, but never handed to `activity.fold`/`stream.fold` — this did not just
+    // get appended, and folding it as if it were an ordinary batch would open a row for it
+    // and touch `rows.length` and the *Memory bound*'s eviction, which finding this fact is
+    // not supposed to do.
+    sidecar.addEventListener("run-header", (message) => {
+      const header = JSON.parse((message as MessageEvent).data) as Envelope
+      setStatus((previous) => ({ ...previous, identity: latchRunIdentity(previous.identity, [header]) }))
+    })
+
     // Sent once the history's envelopes have been, which is what makes it the moment an
     // empty fold means an empty Sidecar.
     sidecar.addEventListener("loaded", () => setHistoryLoaded(true))

@@ -317,6 +317,15 @@ First `run_header` wins and is held for the rest of the session, never reconside
 later Run's own header — the same latch `appName` alone used before Run identity generalized
 it (#95, #97).
 
+Reached three ways, all landing in the same `latchRunIdentity`: the live stream, a
+*load-earlier* pull, and — since a Host app up long enough can leave its own `run_header`
+tens of thousands of events before the load-on-open window — a capped backward scan the
+server runs on attaching, separate from *load-earlier* and never routed through
+`activity.fold`, so finding this one fact never opens a row or moves the *Memory bound* the
+way a `load-earlier` pull's envelopes do. Capped at 64 MB scanned, past which the Reader
+gives up exactly as it did before this scan existed. See
+`docs/adr/0010-a-capped-backward-scan-recovers-the-live-runs-header.md` (#98).
+
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
 row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded — the
 exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
