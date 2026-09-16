@@ -6,11 +6,15 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
+import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
+import type { Envelope } from "../src/shared/wire"
+import type { RunIdentity } from "../src/shared/run-identity"
 
 const { act } = await import("react")
 const { createRoot } = await import("react-dom/client")
 const { Reader } = await import("../src/ui/Reader")
 const { activityTable } = await import("../src/shared/activity")
+const { latchRunIdentity } = await import("../src/shared/run-identity")
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean
@@ -41,19 +45,38 @@ afterAll(async () => {
  * Seam 2, reached the way a developer reaches it: the Reader is mounted over a seeded fold
  * and a row is *clicked*. Nothing here reads the detail column without selecting one first,
  * because "which row is showing" is the only thing the column is about.
+ *
+ * `railsRoot` is computed the same way `main.tsx` computes it — `latchRunIdentity` over the
+ * same envelopes, read off the raw stream rather than off any row — so this helper stays
+ * the same seam the browser actually reaches `Reader` through.
  */
 async function theReader(...envelopes: Parameters<ReturnType<typeof activityTable>["fold"]>[0]) {
+  const { container } = await theReaderReceiving(envelopes)
+  return container
+}
+
+/**
+ * The same seam as `theReader`, as more than one batch: what `useSidecar` calls `activity.fold`
+ * and `latchRunIdentity` with separately per `EventSource` message, rather than once. Needed
+ * wherever a test cares about the *order* batches arrive in — the *Memory bound* only evicts
+ * at the end of a batch, so evicting a row and then having its Run reopen one needs two.
+ */
+async function theReaderReceiving(...batches: (readonly Envelope[])[]) {
   const activity = activityTable()
-  activity.fold(envelopes)
+  let identity: RunIdentity = null
+  for (const batch of batches) {
+    activity.fold(batch)
+    identity = latchRunIdentity(identity, batch)
+  }
 
   const container = document.createElement("div")
   document.body.append(container)
   await act(async () => {
     const root = createRoot(container)
     mounted.push(root)
-    root.render(<Reader rows={activity.rows} />)
+    root.render(<Reader rows={activity.rows} railsRoot={identity?.railsRoot ?? null} />)
   })
-  return container
+  return { container, rows: activity.rows, identity }
 }
 
 function detail(container: HTMLElement) {
@@ -578,6 +601,45 @@ describe("highlighting a Host-app backtrace frame", () => {
     await select(container, "/orders")
 
     expect(frameElements(container).some((frame) => frame.classList.contains("backtrace-host"))).toBe(false)
+  })
+
+  test("keeps highlighting frames after the Run row that first proved rails_root is evicted and reopens", async () => {
+    const run = aRun("srv-1")
+
+    // The header lands, proving `rails_root` — then enough other traffic to push the row it
+    // opened, the oldest in the table, past the Memory bound and out. The same shape #44's
+    // "marks a Run row reopened" test (`activity-table.test.ts`) drives the eviction with.
+    const proves = [run.header(), run.sql(null)]
+    const filler = Array.from({ length: LOAD_ON_OPEN_EVENTS / 2 + 10 }, (_, index) => [
+      run.start(`req-filler-${index}`, "GET", `/posts/${index}`),
+      run.finish(`req-filler-${index}`),
+    ]).flat()
+    // The same Run, saying something unattributed again: a fresh, header-less row opens for
+    // it, whose own `railsRoot` is `null` — the fact this test exists to say does not matter.
+    const reopens = [run.log(null, "[ActiveJob] [SendDigestJob] Performing")]
+    const raises = [
+      run.start("req-boom", "POST", "/orders"),
+      run.finish("req-boom", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [HOST_FRAME, GEM_FRAME] },
+      }),
+    ]
+
+    const { container, rows, identity } = await theReaderReceiving(proves, filler, reopens, raises)
+
+    // The eviction and the reopen both happened: nothing here still says `rails_root`.
+    const reopened = rows.find((row) => row.kind === "run" && row.runId === "srv-1")
+    expect(reopened).toBeDefined()
+    expect(reopened?.railsRoot).toBeNull()
+    const boom = rows.find((row) => row.kind === "request" && row.path === "/orders")
+    expect(boom).toBeDefined()
+    expect(boom?.railsRoot).toBeNull()
+
+    // `RunIdentity` never lost it, and highlighting reads off that rather than off either row.
+    expect(identity?.railsRoot).toBe(RAILS_ROOT)
+    await select(container, "/orders")
+    const frames = frameElements(container)
+    expect(frames[0]?.classList.contains("backtrace-host")).toBe(true)
   })
 })
 

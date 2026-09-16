@@ -31,9 +31,9 @@ _Avoid_: flag file, lock file, config.
 
 **Host app** — the user's real Rails 8 application at their job. The Reader must work
 against it with only the Initializer added, opt-in per developer. Its display name, shown in
-the Reader's tab title and `reader-bar` header, is the wire's own `app_name` — the first
-`run_header`'s, latched for the rest of the session and never reconsidered against a later
-Run — unless `RAILS_LOG_READER_APP_NAME` overrides it, which always wins. See
+the Reader's tab title and `reader-bar` header, is the wire's own `app_name` — off *Run
+identity*, which is where that latching lives — unless `RAILS_LOG_READER_APP_NAME` overrides
+it, which always wins. See
 `docs/adr/0009-the-app-name-override-is-a-reader-side-env-var.md`.
 
 **Event** — a single thing the Rails process emitted. Three kinds in v1:
@@ -303,6 +303,19 @@ Run tag of its own. Drawn only on a row the header itself opened: where a Run's 
 already open — the Reader having seen that Run say something before its header reached it —
 the boundary belongs above rows the marker would then sit below, so none is drawn.
 _Avoid_: separator, divider, restart banner.
+
+**Run identity** — everything the live Run's own `run_header` said (`rails_root`, `app_name`,
+`runKind`, `pid`, `rails_version`), latched off the raw envelope stream — read the same way
+`liveWireVersion` and `liveRunId` are, not off a folded row — so it survives the *Memory
+bound* evicting whichever *Run row* first carried it. Distinct from a Run row's own copy of
+those same fields, which stays display-only: a Run row shows what *that row's own* header
+said, and reverts to `null` if the row is evicted and its Run reopens a fresh, header-less one
+— exactly the row-level regression Run identity exists so no *correctness-critical* read has
+to suffer. Two such reads: backtrace highlighting (`isHostFrame`'s caller) and the tab
+title/`reader-bar` header both read `railsRoot`/`appName` off Run identity, never off a row.
+First `run_header` wins and is held for the rest of the session, never reconsidered against a
+later Run's own header — the same latch `appName` alone used before Run identity generalized
+it (#95, #97).
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
 row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded — the

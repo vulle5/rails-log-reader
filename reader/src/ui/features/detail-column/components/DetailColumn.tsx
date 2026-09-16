@@ -41,7 +41,16 @@ export function detailItems(row: ActivityRow | null, filter: DetailFilter) {
   return eventsShown(row.timeline, filter).length + eventsShown(trailing, filter).length
 }
 
-export function DetailColumn({ row, filter }: { row: ActivityRow | null; filter: DetailFilter }) {
+export function DetailColumn({
+  row,
+  filter,
+  railsRoot,
+}: {
+  row: ActivityRow | null
+  filter: DetailFilter
+  /** The live Run's `rails_root`, off `RunIdentity` — see `RequestDetail`'s own doc. */
+  railsRoot: string | null
+}) {
   if (row === null) {
     return (
       <p className="placeholder">
@@ -50,10 +59,27 @@ export function DetailColumn({ row, filter }: { row: ActivityRow | null; filter:
     )
   }
 
-  return row.kind === "request" ? <RequestDetail row={row} filter={filter} /> : <RunDetail row={row} filter={filter} />
+  return row.kind === "request" ? (
+    <RequestDetail row={row} filter={filter} railsRoot={railsRoot} />
+  ) : (
+    <RunDetail row={row} filter={filter} />
+  )
 }
 
-function RequestDetail({ row, filter }: { row: RequestRow; filter: DetailFilter }) {
+function RequestDetail({
+  row,
+  filter,
+  railsRoot,
+}: {
+  row: RequestRow
+  filter: DetailFilter
+  /**
+   * The live Run's `rails_root`, off `RunIdentity` rather than `row.railsRoot`: the row's own
+   * copy is display-only and can revert to `null` when its Run row is evicted and reopens,
+   * where `RunIdentity`'s does not — see the *Run identity* glossary entry.
+   */
+  railsRoot: string | null
+}) {
   // Filtered once each, rather than where they are rendered: `trailing` is read twice below —
   // once for whether the section exists at all, once for what it holds — and a second pass
   // over the same array for the same filter would say nothing a first pass had not already.
@@ -75,7 +101,7 @@ function RequestDetail({ row, filter }: { row: RequestRow; filter: DetailFilter 
 
       <Timeline events={eventsShown(row.timeline, filter)} />
       {row.exception !== null && (
-        <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={row.railsRoot} />
+        <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
       )}
       {/* Checked on the filtered length rather than `row.trailing.length`: a trailing block of
           nothing but SCHEMA queries, hidden, must not leave an empty "After the request

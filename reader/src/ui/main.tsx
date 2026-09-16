@@ -20,7 +20,7 @@ if (container === null) throw new Error("index.html is missing its #root element
  * is empty.
  */
 function LiveReader() {
-  const { rows, lines, evictedRows, liveWireVersion, liveRunId, appName: wireAppName, historyLoaded, earlier, loadEarlier } =
+  const { rows, lines, evictedRows, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier } =
     useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
@@ -48,7 +48,8 @@ function LiveReader() {
       earlier={earlier}
       onLoadEarlier={loadEarlier}
       emptyState={detectEmptyState(fileStatus, historyLoaded)}
-      appName={resolveAppName(appNameOverride, wireAppName)}
+      appName={resolveAppName(appNameOverride, identity?.appName ?? null)}
+      railsRoot={identity?.railsRoot ?? null}
     />
   )
 }

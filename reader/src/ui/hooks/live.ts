@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow } from "../../shared/activity"
-import { latchAppName } from "../../shared/app-name"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
+import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
 
 /**
@@ -33,12 +33,13 @@ export type WireStatus = {
   liveWireVersion: number | null
   liveRunId: string | null
   /**
-   * The Host app's name, latched off the first `run_header` any envelope batch has carried —
-   * read off the raw stream rather than a folded `RunRow.appName`, so it survives that row's
-   * own eviction under the *Memory bound*. `null` until one has arrived, which `resolveAppName`
-   * treats as "nothing to override" the same as it treats an absent env-var override.
+   * The live Run's own `run_header`, latched — read off the raw stream rather than a folded
+   * `RunRow`/`RequestRow`, so it survives that row's own eviction under the *Memory bound*.
+   * `null` until one has arrived. `appName` here is the wire's own, pre-override; callers
+   * that show it to the developer go through `resolveAppName` first, which treats `null` as
+   * "nothing to override" the same as it treats an absent env-var override.
    */
-  appName: string | null
+  identity: RunIdentity
   /**
    * The server has said the load-on-open history is all here — so rows that are not here are
    * not coming, and an empty table is an empty Sidecar rather than one still being read.
@@ -90,8 +91,8 @@ export function useSidecar(): WireStatus {
     evictedRows: number
     liveWireVersion: number | null
     liveRunId: string | null
-    appName: string | null
-  }>({ rows: [], lines: [], evictedRows: 0, liveWireVersion: null, liveRunId: null, appName: null })
+    identity: RunIdentity
+  }>({ rows: [], lines: [], evictedRows: 0, liveWireVersion: null, liveRunId: null, identity: null })
   const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
   // Never set back: a reconnection re-reads a history the folds already hold, so what it
   // would be waiting for is already on screen.
@@ -125,7 +126,7 @@ export function useSidecar(): WireStatus {
         evictedRows: previous.evictedRows + evicted.length,
         liveWireVersion: latest?.v ?? previous.liveWireVersion,
         liveRunId: latest?.run_id ?? previous.liveRunId,
-        appName: latchAppName(previous.appName, envelopes),
+        identity: latchRunIdentity(previous.identity, envelopes),
       }))
     }
 
@@ -174,7 +175,7 @@ export function useSidecar(): WireStatus {
         evictedRows: previous.evictedRows + evicted.length,
         // A pull that reaches back far enough can turn up an earlier Run's own `run_header`
         // — this is latched exactly as the live stream's is, not only reached from it.
-        appName: latchAppName(previous.appName, block.envelopes),
+        identity: latchRunIdentity(previous.identity, block.envelopes),
       }))
       setEarlier({ available: block.from > 0, loading: false })
     } catch {
