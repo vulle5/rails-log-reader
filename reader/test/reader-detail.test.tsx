@@ -702,8 +702,6 @@ describe("collapsing gem frames in a backtrace", () => {
 
     await select(container, "/orders")
 
-    // Two markers, not one for the whole trace: call order is the fact a stack trace exists
-    // to carry, and folding it to a single blob would erase which frame called which.
     expect(backtraceItems(container)).toEqual([RAISED, "1 frame hidden", HOST_FRAME, "1 frame hidden"])
   })
 

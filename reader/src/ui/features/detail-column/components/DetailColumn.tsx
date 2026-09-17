@@ -374,7 +374,7 @@ function GapSegment({
   }
 
   return (
-    <li className="backtrace-gap">
+    <li>
       <button type="button" className="backtrace-reveal" onClick={onReveal}>
         {segment.frames.length === 1 ? "1 frame hidden" : `${segment.frames.length} frames hidden`}
       </button>

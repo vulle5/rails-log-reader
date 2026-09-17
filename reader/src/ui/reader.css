@@ -1330,8 +1330,6 @@ mark.search-match {
   color: var(--fg-strong);
 }
 
-/* One collapsed gem run's marker. Underlined rather than boxed like `.chip` — this is not
-   a filter to toggle, it is a one-way reveal, so it should not look like one. */
 .backtrace-reveal {
   padding: 0;
   border: none;
