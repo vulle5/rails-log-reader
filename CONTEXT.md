@@ -461,6 +461,22 @@ only once the load-on-open history has all arrived, so a Sidecar with rows on th
 flashes a cause it is about to take back; and re-read when the Reader's window regains focus,
 since the command is always run somewhere else.
 
+**Settings** — the Reader's own preferences surface: a native `<dialog>`, opened from a
+trigger in the `reader-bar`, holding a flat list of settings with no save action of its
+own — each setting applies and persists the moment it is set, the same way *Theme* always
+has. Never a Reader-side config file, for the same reason ADR-0004 and ADR-0009 already
+ruled one out for the Initializer and the app-name override: `localStorage`, guarded and
+namespaced per setting, is the only persistence a Reader-side, user-set preference has ever
+used here.
+_Avoid_: preferences, config, options.
+
+**Editor scheme** — a free-form URI template (e.g. `vscode://file/{path}:{line}`), set in
+*Settings*, naming how the developer's own editor opens a file at a line — never a fixed
+list of known editors to choose from. Unset by default: nothing is guessed, so a feature
+reading it has nothing to act on until the developer supplies one, rather than silently
+pointing at an editor they don't use.
+_Avoid_: editor URI, editor command.
+
 ## Standing constraints
 
 1. **`log/development.log` stays pristine.** A collaborator running `tail -f` must see
