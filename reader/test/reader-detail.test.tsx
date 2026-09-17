@@ -543,8 +543,7 @@ describe("a request that raised", () => {
 
     expect(exception?.textContent).toContain("NoMethodError")
     expect(exception?.textContent).toContain("undefined method `price_cents' for nil")
-    // The raise site always renders; the two gem frames behind it collapse into one marker
-    // rather than showing every frame by default (#90).
+    // The raise site always renders; the two gem frames behind it collapse into one marker.
     expect([...(exception?.querySelectorAll(".backtrace li") ?? [])].map((frame) => frame.textContent)).toEqual([
       "app/models/order.rb:44:in `block in recalculate_total!'",
       "2 frames hidden",
@@ -654,9 +653,8 @@ describe("highlighting a Host-app backtrace frame", () => {
 })
 
 /**
- * #90: a real trace is mostly framework internals, so everything outside `isHostFrame`
- * collapses to inline markers by default — the raised frame and any Host-app frame render
- * uncollapsed, in their real stack position.
+ * Everything outside `isHostFrame` collapses to inline markers by default — the raised
+ * frame and any Host-app frame render uncollapsed, in their real stack position.
  */
 describe("collapsing gem frames in a backtrace", () => {
   const RAILS_ROOT = "/home/dev/example-app"

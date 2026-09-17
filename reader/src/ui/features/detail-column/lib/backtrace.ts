@@ -16,12 +16,9 @@ export type BacktraceSegment =
 
 /**
  * Splits a backtrace into what the Detail column renders directly and what it collapses.
- * `backtrace[0]` — Ruby's own guarantee of the raise site — is always its own frame segment,
- * whatever `isHostFrame` says about it: collapsing it away by the same rule that hides
- * `ActiveSupport`'s dispatch chain would defeat the column on its most common case, a
- * `NoMethodError` several frames inside a gem. Every other non-Host-app frame joins the gap
- * segment it is contiguous with, rather than one marker for the whole trace, because call
- * order is the one fact a stack trace exists to carry.
+ * `backtrace[0]` is always its own frame segment regardless of `isHostFrame`; every other
+ * non-Host-app frame joins the gap segment contiguous with it, so a Host-app frame between
+ * two gem runs produces two gaps rather than one spanning both.
  */
 export function segmentBacktrace(backtrace: readonly string[], railsRoot: string | null): readonly BacktraceSegment[] {
   const [raised, ...rest] = backtrace

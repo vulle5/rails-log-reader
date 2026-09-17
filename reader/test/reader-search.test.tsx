@@ -171,7 +171,7 @@ describe("searching", () => {
     expect(lit(detail.querySelector(".timeline") as Element)).toEqual(["Feed"])
   })
 
-  test("reaches into a collapsed backtrace gap, forcing it open the way it does everywhere else (#90)", async () => {
+  test("reaches into a collapsed backtrace gap, forcing it open the way it does everywhere else", async () => {
     const rails = aRun("srv-1")
     const container = await theReader(
       rails.header(),
@@ -196,8 +196,6 @@ describe("searching", () => {
 
     await search(container, "puma")
 
-    // A hidden gap Search silently couldn't reach would be the one place this column's
-    // "highlights and never hides" promise quietly didn't hold.
     expect(detail.querySelector(".backtrace-reveal")).toBeNull()
     // The frame says "puma" twice — once naming the gem, once in its own path.
     expect(lit(detail.querySelector(".backtrace") as Element)).toEqual(["puma", "puma"])

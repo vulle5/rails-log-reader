@@ -322,18 +322,13 @@ function Exception({
 }
 
 /**
- * #90: full and uncleaned underneath — nothing here drops a frame for looking like someone
- * else's, `exceptionText` copies every one regardless of what is expanded — but a real
- * trace is mostly framework internals, so a contiguous run of non-Host-app frames renders
- * as one inline marker at its position rather than forty lines to scroll past. Collapse
- * state lives here, in `Backtrace`'s own `useState`, rather than on the exception or the
- * row: unmounted and remounted fresh whenever *Selection* moves elsewhere and back, which
- * is what "every fresh render starts fully collapsed again" means in practice.
+ * Collapse state lives in this component's own `useState`, not on the exception or the
+ * row: selecting elsewhere unmounts it, so the next selection starts from an empty
+ * `revealed` set with no explicit reset.
  */
 function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; railsRoot: string | null }) {
   const search = useContext(SearchContext)
-  // A marker's reveal is one-way: clicking adds its `from` and nothing ever removes one —
-  // there is no control to re-collapse.
+  // Only ever grows: nothing removes an entry once revealed.
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
   const segments = useMemo(() => segmentBacktrace(backtrace, railsRoot), [backtrace, railsRoot])
 
@@ -348,9 +343,6 @@ function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; rai
           <GapSegment
             key={segment.from}
             segment={segment}
-            // Search "highlights and never hides" everywhere else it reaches text, so a
-            // match inside a still-collapsed gap forces it open the same way, without
-            // that gap having to be clicked open first.
             revealed={revealed.has(segment.from) || segment.frames.some((frame) => search.find(frame).length > 0)}
             onReveal={() => setRevealed((prev) => new Set(prev).add(segment.from))}
           />
