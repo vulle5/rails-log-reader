@@ -528,7 +528,7 @@ describe("a request that raised", () => {
     "puma (6.6.0) lib/puma/server.rb:443:in `process_client'",
   ]
 
-  test("shows its exception with the backtrace full and uncleaned", async () => {
+  test("shows its exception message and the raised frame, gem frames collapsed", async () => {
     const run = aRun("srv-1")
     const container = await theReader(
       run.start("req-1", "POST", "/orders"),
@@ -543,10 +543,12 @@ describe("a request that raised", () => {
 
     expect(exception?.textContent).toContain("NoMethodError")
     expect(exception?.textContent).toContain("undefined method `price_cents' for nil")
-    // Every frame, gems included: "the bug was in a gem" stays an answer the Reader can give.
-    expect([...(exception?.querySelectorAll(".backtrace li") ?? [])].map((frame) => frame.textContent)).toEqual(
-      BACKTRACE,
-    )
+    // The raise site always renders; the two gem frames behind it collapse into one marker
+    // rather than showing every frame by default (#90).
+    expect([...(exception?.querySelectorAll(".backtrace li") ?? [])].map((frame) => frame.textContent)).toEqual([
+      "app/models/order.rb:44:in `block in recalculate_total!'",
+      "2 frames hidden",
+    ])
   })
 
   test("leaves a request that did not raise without an exception block", async () => {
@@ -568,6 +570,12 @@ describe("highlighting a Host-app backtrace frame", () => {
     return [...(detail(container).querySelectorAll(".backtrace li") ?? [])]
   }
 
+  async function revealGaps(container: HTMLElement) {
+    for (const button of [...detail(container).querySelectorAll(".backtrace-reveal")]) {
+      await act(async () => button.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    }
+  }
+
   test("gives only the frame under rails_root the full-contrast colour, style only", async () => {
     const run = aRun("srv-1")
     const container = await theReader(
@@ -580,6 +588,7 @@ describe("highlighting a Host-app backtrace frame", () => {
     )
 
     await select(container, "/orders")
+    await revealGaps(container)
     const frames = frameElements(container)
 
     expect(frames.map((frame) => frame.textContent)).toEqual([HOST_FRAME, GEM_FRAME])
@@ -599,6 +608,7 @@ describe("highlighting a Host-app backtrace frame", () => {
     )
 
     await select(container, "/orders")
+    await revealGaps(container)
 
     expect(frameElements(container).some((frame) => frame.classList.contains("backtrace-host"))).toBe(false)
   })
@@ -640,6 +650,156 @@ describe("highlighting a Host-app backtrace frame", () => {
     await select(container, "/orders")
     const frames = frameElements(container)
     expect(frames[0]?.classList.contains("backtrace-host")).toBe(true)
+  })
+})
+
+/**
+ * #90: a real trace is mostly framework internals, so everything outside `isHostFrame`
+ * collapses to inline markers by default — the raised frame and any Host-app frame render
+ * uncollapsed, in their real stack position.
+ */
+describe("collapsing gem frames in a backtrace", () => {
+  const RAILS_ROOT = "/home/dev/example-app"
+  const RAISED = "puma (6.6.0) lib/puma/server.rb:443:in `process_client'"
+  const HOST_FRAME = `${RAILS_ROOT}/app/models/order.rb:44:in \`block in recalculate_total!'`
+  const GEM_BEFORE = "actionpack (8.0.2) lib/action_controller/metal/rescue.rb:23:in `process_action'"
+  const GEM_AFTER = "rack (3.1.8) lib/rack/urlmap.rb:74:in `call'"
+
+  function backtraceItems(container: HTMLElement) {
+    return [...detail(container).querySelectorAll(".backtrace > li")].map((item) => item.textContent)
+  }
+
+  async function reveal(marker: Element) {
+    await act(async () => marker.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  }
+
+  test("renders the raised frame even when it is itself outside rails_root", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.header(),
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, HOST_FRAME] },
+      }),
+    )
+
+    await select(container, "/orders")
+
+    // The raise site is not folded into the marker's count, even though it fails
+    // `isHostFrame` the same as any other gem frame would.
+    expect(backtraceItems(container)).toEqual([RAISED, HOST_FRAME])
+  })
+
+  test("keeps a Host-app frame visible in its real stack position, gaps either side of it", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.header(),
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, GEM_BEFORE, HOST_FRAME, GEM_AFTER] },
+      }),
+    )
+
+    await select(container, "/orders")
+
+    // Two markers, not one for the whole trace: call order is the fact a stack trace exists
+    // to carry, and folding it to a single blob would erase which frame called which.
+    expect(backtraceItems(container)).toEqual([RAISED, "1 frame hidden", HOST_FRAME, "1 frame hidden"])
+  })
+
+  test("collapses a trace with no Host-app frame to one marker spanning everything but the raised frame", async () => {
+    const run = aRun("srv-1")
+    // No run.header(): railsRoot stays null, so nothing can ever be a Host-app frame.
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, GEM_BEFORE, GEM_AFTER] },
+      }),
+    )
+
+    await select(container, "/orders")
+    const exception = detail(container).querySelector(".exception")
+
+    // The class and message stay visible above the single marker either way.
+    expect(exception?.querySelector(".exception-class")?.textContent).toBe("NoMethodError")
+    expect(backtraceItems(container)).toEqual([RAISED, "2 frames hidden"])
+  })
+
+  test("reveals a marker's frames for good, with no control to re-collapse it", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, GEM_BEFORE, GEM_AFTER] },
+      }),
+    )
+
+    await select(container, "/orders")
+    const marker = detail(container).querySelector(".backtrace-reveal")
+    if (marker === null) throw new Error("no marker to reveal")
+    await reveal(marker)
+
+    expect(backtraceItems(container)).toEqual([RAISED, GEM_BEFORE, GEM_AFTER])
+    expect(detail(container).querySelector(".backtrace-reveal")).toBeNull()
+  })
+
+  test("starts fully collapsed again on the next fresh render, once Selection moves away and back", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, GEM_BEFORE, GEM_AFTER] },
+      }),
+      run.start("req-2", "GET", "/posts/12"),
+    )
+
+    await select(container, "/orders")
+    const marker = detail(container).querySelector(".backtrace-reveal")
+    if (marker === null) throw new Error("no marker to reveal")
+    await reveal(marker)
+    expect(backtraceItems(container)).toEqual([RAISED, GEM_BEFORE, GEM_AFTER])
+
+    await select(container, "/posts/12")
+    await select(container, "/orders")
+
+    expect(backtraceItems(container)).toEqual([RAISED, "2 frames hidden"])
+  })
+
+  test("leaves the wire's own Cut note alone — collapsing and truncation never reference each other", async () => {
+    const run = aRun("srv-1")
+    const finish = run.finish("req-1", {
+      status: 500,
+      exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, GEM_BEFORE, GEM_AFTER] },
+    })
+    const container = await theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
+
+    await select(container, "/orders")
+
+    expect(backtraceItems(container)).toEqual([RAISED, "2 frames hidden"])
+    expect(detail(container).querySelector(".exception .cut")?.textContent).toContain("backtrace was cut")
+  })
+
+  test("copies every frame regardless of what is still collapsed on screen", async () => {
+    const run = aRun("srv-1")
+    const backtrace = [RAISED, GEM_BEFORE, GEM_AFTER]
+    const container = await theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.finish("req-1", { status: 500, exception: { class: "NoMethodError", message: "boom", backtrace } }),
+    )
+
+    await select(container, "/orders")
+    // Nothing revealed — the marker is still on screen — yet the copy is the whole trace.
+    expect(detail(container).querySelector(".backtrace-reveal")).not.toBeNull()
+    const button = detail(container).querySelector(".exception .copy-button")
+    if (button === null) throw new Error("no copy control")
+    await act(async () => button.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+
+    expect(await navigator.clipboard.readText()).toBe(["NoMethodError: boom", ...backtrace].join("\n"))
   })
 })
 

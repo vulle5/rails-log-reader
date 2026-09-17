@@ -361,7 +361,8 @@ a collapsed marker exactly as it reaches everywhere else it renders text: a matc
 one force-opens it, because a hidden gap Search silently couldn't find would be the one
 place in this column that promise quietly didn't hold. Independent throughout of the cut a
 wire-truncated backtrace records: collapsing describes what the Reader chooses to show of
-what it holds, cutting describes what the wire sent, and neither reads the other.
+what it holds, cutting describes what the wire sent, and neither reads the other. See
+`docs/adr/0011-a-backtrace-collapses-gem-frames-into-inline-markers-by-default.md` (#90).
 
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed

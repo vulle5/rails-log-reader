@@ -1,11 +1,13 @@
+import { useContext, useMemo, useState } from "react"
+
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { controllerAction, methodClassName, ms, runDescription } from "../../../lib/format"
-import { Highlight, Marked, useMatches } from "../../../hooks/search"
+import { Highlight, Marked, SearchContext, useMatches } from "../../../hooks/search"
 import { CopyButton } from "./CopyButton"
 import { bytes } from "../lib/format"
-import { isHostFrame } from "../lib/backtrace"
+import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 
@@ -313,19 +315,78 @@ function Exception({
         </span>{" "}
         <Highlight text={exception.message} />
       </p>
-      {/* Full and uncleaned, gem frames and all, so "the bug was in a gem" stays an answer
-          the Reader can give. Nothing here drops a frame for looking like someone else's —
-          and on the one occasion the wire itself had to, it says so underneath. A Host-app
-          frame just renders at full contrast against the rest. */}
-      <ol className="backtrace">
-        {exception.backtrace.map((frame, at) => (
-          <li key={at} className={isHostFrame(frame, railsRoot) ? "backtrace-host" : undefined}>
+      <Backtrace backtrace={exception.backtrace} railsRoot={railsRoot} />
+      <Cut field="backtrace" original={cutFrom ?? undefined} />
+    </section>
+  )
+}
+
+/**
+ * #90: full and uncleaned underneath — nothing here drops a frame for looking like someone
+ * else's, `exceptionText` copies every one regardless of what is expanded — but a real
+ * trace is mostly framework internals, so a contiguous run of non-Host-app frames renders
+ * as one inline marker at its position rather than forty lines to scroll past. Collapse
+ * state lives here, in `Backtrace`'s own `useState`, rather than on the exception or the
+ * row: unmounted and remounted fresh whenever *Selection* moves elsewhere and back, which
+ * is what "every fresh render starts fully collapsed again" means in practice.
+ */
+function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; railsRoot: string | null }) {
+  const search = useContext(SearchContext)
+  // A marker's reveal is one-way: clicking adds its `from` and nothing ever removes one —
+  // there is no control to re-collapse.
+  const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
+  const segments = useMemo(() => segmentBacktrace(backtrace, railsRoot), [backtrace, railsRoot])
+
+  return (
+    <ol className="backtrace">
+      {segments.map((segment) =>
+        segment.type === "frame" ? (
+          <li key={segment.index} className={segment.host ? "backtrace-host" : undefined}>
+            <Highlight text={segment.frame} />
+          </li>
+        ) : (
+          <GapSegment
+            key={segment.from}
+            segment={segment}
+            // Search "highlights and never hides" everywhere else it reaches text, so a
+            // match inside a still-collapsed gap forces it open the same way, without
+            // that gap having to be clicked open first.
+            revealed={revealed.has(segment.from) || segment.frames.some((frame) => search.find(frame).length > 0)}
+            onReveal={() => setRevealed((prev) => new Set(prev).add(segment.from))}
+          />
+        ),
+      )}
+    </ol>
+  )
+}
+
+function GapSegment({
+  segment,
+  revealed,
+  onReveal,
+}: {
+  segment: Extract<BacktraceSegment, { type: "gap" }>
+  revealed: boolean
+  onReveal: () => void
+}) {
+  if (revealed) {
+    return (
+      <>
+        {segment.frames.map((frame, at) => (
+          <li key={segment.from + at}>
             <Highlight text={frame} />
           </li>
         ))}
-      </ol>
-      <Cut field="backtrace" original={cutFrom ?? undefined} />
-    </section>
+      </>
+    )
+  }
+
+  return (
+    <li className="backtrace-gap">
+      <button type="button" className="backtrace-reveal" onClick={onReveal}>
+        {segment.frames.length === 1 ? "1 frame hidden" : `${segment.frames.length} frames hidden`}
+      </button>
+    </li>
   )
 }
 

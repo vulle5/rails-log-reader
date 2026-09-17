@@ -171,6 +171,38 @@ describe("searching", () => {
     expect(lit(detail.querySelector(".timeline") as Element)).toEqual(["Feed"])
   })
 
+  test("reaches into a collapsed backtrace gap, forcing it open the way it does everywhere else (#90)", async () => {
+    const rails = aRun("srv-1")
+    const container = await theReader(
+      rails.header(),
+      rails.start("req-1", "POST", "/orders"),
+      rails.finish("req-1", {
+        status: 500,
+        exception: {
+          class: "NoMethodError",
+          message: "boom",
+          backtrace: [
+            "app/models/order.rb:44:in `block in recalculate_total!'",
+            "puma (6.6.0) lib/puma/server.rb:443:in `process_client'",
+          ],
+        },
+      }),
+    )
+
+    await click(requestRow(container, "req-1"))
+    const detail = column(container, "Detail column")
+    // Collapsed on open: the term below lives inside the marker, not on screen yet.
+    expect(detail.querySelector(".backtrace-reveal")).not.toBeNull()
+
+    await search(container, "puma")
+
+    // A hidden gap Search silently couldn't reach would be the one place this column's
+    // "highlights and never hides" promise quietly didn't hold.
+    expect(detail.querySelector(".backtrace-reveal")).toBeNull()
+    // The frame says "puma" twice — once naming the gem, once in its own path.
+    expect(lit(detail.querySelector(".backtrace") as Element)).toEqual(["puma", "puma"])
+  })
+
   test("hides nothing: every row and every line is still there, matching or not", async () => {
     const container = await theReader(...DENSE_TRAFFIC)
     const before = {
