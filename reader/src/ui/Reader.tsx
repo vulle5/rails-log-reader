@@ -81,6 +81,12 @@ type ReaderProps = {
    * an error: nothing has said a name yet.
    */
   appName?: string | null
+  /**
+   * The live Run's `rails_root`, off `RunIdentity` rather than off whichever row currently
+   * represents that Run — see the *Run identity* glossary entry. `null` until a `run_header`
+   * has been observed, which `isHostFrame` reads as "never guessed".
+   */
+  railsRoot?: string | null
 }
 
 export function Reader({
@@ -96,6 +102,7 @@ export function Reader({
   onLoadEarlier = () => {},
   emptyState = null,
   appName = null,
+  railsRoot = null,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -293,7 +300,7 @@ export function Reader({
             scroll={detailScroll}
             controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
           >
-            <DetailColumn row={showing} filter={detailFilter} />
+            <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
           </Column>
           {/* Over all three, because the rule belongs to none of them: it leaves the Console's
               gutter and lands on a row in the table beside it. `layoutKey` is everything that

@@ -37,6 +37,8 @@ const SCAN_CHUNK_BYTES = 1024 * 1024
 
 const NEWLINE = 0x0a
 
+export type RunHeaderEnvelope = Extract<Envelope, { type: "run_header" }>
+
 export type Sidecar = {
   /** Read everything appended since the last read. What the watcher and the backstop both call. */
   catchUp: () => Promise<void>
@@ -52,6 +54,13 @@ export async function openSidecar(
   logDirectory: string,
   onEnvelopes: (envelopes: Envelope[]) => void,
   onHistoryStart: (from: number) => void,
+  /**
+   * The live Run's own `run_header`, when `startOfHistory`'s window opened past it — a
+   * capped backward scan found it instead, and this is where it goes: never through
+   * `onEnvelopes`, because it did not just get appended and is not part of the history this
+   * attachment opened on. See `findLiveRunHeader`.
+   */
+  onRunHeader: (header: RunHeaderEnvelope) => void,
 ): Promise<Sidecar> {
   const path = join(logDirectory, SIDECAR_NAME)
 
@@ -108,6 +117,7 @@ export async function openSidecar(
     // A truncation that regrows past the old offset inside one tick would slip through, and
     // is left to: that is 64 MB of new events inside a second, and the alternative is a
     // liveness protocol this design deliberately does not add.
+    let attached = false
     if (inode !== sidecar.ino || sidecar.size < offset) {
       inode = sidecar.ino
       offset = await startOfHistory(path, sidecar.size)
@@ -115,9 +125,12 @@ export async function openSidecar(
       // the whole history, and a load-earlier cursor taken before it points into bytes that
       // are no longer the ones it was taken from.
       onHistoryStart(offset)
+      attached = true
     }
 
     if (sidecar.size <= offset) return
+
+    const historyStart = offset
 
     const handle = await open(path, "r")
     try {
@@ -133,6 +146,21 @@ export async function openSidecar(
       const envelopes = readEnvelopes(span.subarray(0, complete + 1))
       offset += complete + 1
       if (envelopes.length > 0) onEnvelopes(envelopes)
+
+      // Only on the attachment this tick just opened, and only when it opened past the top
+      // of the file: an ordinary catch-up tick that finds no header is not missing anything,
+      // it just has not been appended yet. The live Run is whichever wrote the most recent
+      // envelope in the window — a concurrent Run's own header sitting in the same window
+      // (`rails s` beside `rails c`) answers a different question and does not stand in for
+      // the live Run's own, so this checks for that `run_id` specifically rather than for
+      // any `run_header` at all.
+      const lastEnvelope = envelopes.at(-1)
+      const liveRunId = lastEnvelope?.run_id
+      if (attached && historyStart > 0 && liveRunId !== undefined && !envelopes.some((e) => isRunHeader(e) && e.run_id === liveRunId)) {
+        void findLiveRunHeader(path, sidecar.ino, liveRunId, historyStart).then((header) => {
+          if (header !== null) onRunHeader(header)
+        })
+      }
     } finally {
       await handle.close()
     }
@@ -204,6 +232,84 @@ async function startOfHistory(path: string, end: number) {
   } finally {
     await handle.close()
   }
+}
+
+/** How far past the load-on-open window this scan will look before giving up. */
+const MAX_HEADER_SCAN_BYTES = 64 * 1024 * 1024
+
+/**
+ * One scan's result per Sidecar path. `inode` and `run_id` both have to match the cached
+ * entry for it to answer; either one differing is a cache miss, same as a fresh scan.
+ */
+const liveHeaderScans = new Map<string, { inode: number; runId: string; header: Promise<RunHeaderEnvelope | null> }>()
+
+/** The live Run's own `run_header`, found by continuing `startOfHistory`'s scan past `from`. */
+export function findLiveRunHeader(path: string, inode: number, runId: string, from: number): Promise<RunHeaderEnvelope | null> {
+  const cached = liveHeaderScans.get(path)
+  if (cached !== undefined && cached.inode === inode && cached.runId === runId) return cached.header
+
+  const header = scanBackwardForRunHeader(path, from, runId)
+  liveHeaderScans.set(path, { inode, runId, header })
+  return header
+}
+
+const RUN_HEADER_NEEDLE = '"type":"run_header"'
+
+/**
+ * `startOfHistory`'s own backward chunked read, continued past `from` — but looking for one
+ * line rather than counting all of them, which is what lets this check a cheap substring
+ * (`RUN_HEADER_NEEDLE`) before paying for a `JSON.parse` on a single line at a time, rather
+ * than parsing everything the way `readEnvelopes` does for a block the Reader is about to
+ * show. The common case, a header within the first few MB, is close to free; the capped
+ * worst case is a bounded, asynchronous read that blocks nothing else this attachment is
+ * doing.
+ */
+async function scanBackwardForRunHeader(path: string, from: number, runId: string): Promise<RunHeaderEnvelope | null> {
+  const handle = await open(path, "r")
+  try {
+    let position = from
+    let scanned = 0
+    // Whatever this scan has read so far that comes after the newline closing the last line
+    // it checked — whole only once the next chunk, further back still, is joined in front of
+    // it. Mirrors `readEnvelopes`' own line-splitting, one chunk at a time instead of one
+    // pre-loaded block, because this scan does not know how much of the file it will need.
+    let pending = Buffer.alloc(0)
+
+    while (position > 0 && scanned < MAX_HEADER_SCAN_BYTES) {
+      const length = Math.min(SCAN_CHUNK_BYTES, position, MAX_HEADER_SCAN_BYTES - scanned)
+      position -= length
+      scanned += length
+
+      const chunk = Buffer.alloc(length)
+      await handle.read(chunk, 0, length, position)
+      const window = Buffer.concat([chunk, pending])
+
+      let end = window.length
+      for (let index = window.length - 1; index >= 0; index--) {
+        if (window[index] !== NEWLINE) continue
+        const found = asLiveRunHeader(window.subarray(index + 1, end), runId)
+        if (found !== null) return found
+        end = index
+      }
+      pending = window.subarray(0, end)
+    }
+
+    // `position` reached the top of the file with a line still pending: whole, because
+    // there is nothing before byte 0 left to complete it with.
+    return position === 0 ? asLiveRunHeader(pending, runId) : null
+  } finally {
+    await handle.close()
+  }
+}
+
+function isRunHeader(envelope: Envelope): envelope is RunHeaderEnvelope {
+  return envelope.type === "run_header"
+}
+
+function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null {
+  if (line.length === 0 || !line.includes(RUN_HEADER_NEEDLE)) return null
+  const envelope = readEnvelope(line)
+  return envelope !== null && isRunHeader(envelope) && envelope.run_id === runId ? envelope : null
 }
 
 /**
