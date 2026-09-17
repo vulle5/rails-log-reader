@@ -1330,6 +1330,23 @@ mark.search-match {
   color: var(--fg-strong);
 }
 
+.backtrace-reveal {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: italic;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.backtrace-reveal:hover,
+.backtrace-reveal:focus-visible {
+  color: var(--fg-muted);
+}
+
 /* Set apart and captioned, so a *Trailing event* cannot be mistaken for the timeline it
    sits below. */
 .trailing {
