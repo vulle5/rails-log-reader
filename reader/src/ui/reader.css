@@ -1080,6 +1080,16 @@ mark.search-match {
   border-bottom: 1px solid var(--border);
 }
 
+/* Off-screen rows skip layout and paint entirely, which is what keeps a scroll-driven
+   reflow over a thousand-row timeline cheap. `auto` in `contain-intrinsic-size` keeps
+   each row's last rendered height once the browser has measured it, so the estimate
+   after it only matters before that — for the first paint and for a row that never
+   becomes visible at all. */
+.entry-sql {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 110px;
+}
+
 .entry-head {
   display: flex;
   gap: 6px;
@@ -1218,6 +1228,8 @@ mark.search-match {
   align-items: baseline;
   background: var(--bg-sunken);
   font-size: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
 }
 
 .log-severity {

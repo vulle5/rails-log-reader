@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from "react"
+import { memo, useContext, useMemo, useState } from "react"
 
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
@@ -164,7 +164,7 @@ function Timeline({ events }: { events: readonly TimelineEvent[] }) {
   )
 }
 
-function Query({ event }: { event: SqlEvent }) {
+const Query = memo(function Query({ event }: { event: SqlEvent }) {
   const { sql, name, duration_ms, cached, async, binds } = event.payload
 
   return (
@@ -188,7 +188,7 @@ function Query({ event }: { event: SqlEvent }) {
       <Cut field="binds" original={event.truncated?.binds} />
     </li>
   )
-}
+})
 
 /**
  * One statement, coloured and searched. The search is matched on the statement whole and
@@ -198,13 +198,14 @@ function Query({ event }: { event: SqlEvent }) {
  */
 function Statement({ sql }: { sql: string }) {
   const matches = useMatches(sql)
+  const tokens = useMemo(() => tokenizeSql(sql), [sql])
   let from = 0
 
   return (
     <code className="sql">
       {/* The tokens partition one string in order, so a token's position is its identity —
           and the running length of the ones before it is where it starts in the statement. */}
-      {tokenizeSql(sql).map((token, at) => {
+      {tokens.map((token, at) => {
         const start = from
         from += token.text.length
         return (
@@ -273,7 +274,7 @@ function bindKind(value: BindValue): "null" | "string" | "number" | "boolean" {
   return "boolean"
 }
 
-function LogLine({ event }: { event: AppLogEvent }) {
+const LogLine = memo(function LogLine({ event }: { event: AppLogEvent }) {
   const { severity, message, source, tags } = event.payload
 
   return (
@@ -292,7 +293,7 @@ function LogLine({ event }: { event: AppLogEvent }) {
       <Cut field="message" original={event.truncated?.message} />
     </li>
   )
-}
+})
 
 function Exception({
   exception,

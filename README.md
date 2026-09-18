@@ -65,7 +65,7 @@ entry.
 
    ```sh
    cd ~/path/to/your-app
-   bun /path/to/rails-log-reader/reader/src/server/index.ts
+   NODE_ENV=production bun /path/to/rails-log-reader/reader/src/server/index.ts
    ```
 
 5. Open **http://localhost:5273** and use your app as normal.

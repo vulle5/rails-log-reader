@@ -11,7 +11,7 @@ import type { Envelope } from "../src/shared/wire"
 const { act } = await import("react")
 const { createRoot } = await import("react-dom/client")
 const { Reader } = await import("../src/ui/Reader")
-const { activityTable, requestRowId } = await import("../src/shared/activity")
+const { activityTable, requestRowId, runRowId } = await import("../src/shared/activity")
 const { consoleStream } = await import("../src/shared/console")
 const { LOAD_ON_OPEN_EVENTS } = await import("../src/shared/bounds")
 
@@ -218,6 +218,36 @@ async function selectRow(container: HTMLElement, requestId: string) {
   const row = container.querySelector(`[data-row="${requestRowId(requestId)}"]`)
   if (row === null) throw new Error(`no row for ${requestId}`)
   await click(row)
+}
+
+async function selectRunRow(container: HTMLElement, runId: string) {
+  const row = container.querySelector(`[data-row="${runRowId(runId)}"]`)
+  if (row === null) throw new Error(`no row for run ${runId}`)
+  await click(row)
+}
+
+function schemaChip(container: HTMLElement) {
+  const found = [...container.querySelectorAll("[aria-label='Filter by query kind'] button")].find(
+    (candidate) => candidate.textContent === "schema",
+  )
+  if (found === undefined) throw new Error("no schema chip")
+  return found
+}
+
+/** Typed the way React hears it — see `reader-search.test.tsx` for why `.value` alone won't do. */
+async function search(container: HTMLElement, term: string) {
+  const box = container.querySelector<HTMLInputElement>("input[type='search']")
+  if (box === null) throw new Error("the Reader has no search box")
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+  await act(async () => {
+    setValue?.call(box, term)
+    box.dispatchEvent(new Event("input", { bubbles: true }))
+  })
+}
+
+/** Every highlighted stretch inside `region`, as the text it lit. */
+function lit(region: Element) {
+  return [...region.querySelectorAll("mark.search-match")].map((mark) => mark.textContent)
 }
 
 const COLUMNS = ["Console", "Activity table", "Detail column"]
@@ -570,14 +600,6 @@ describe("the Detail column", () => {
  * a Console chip already is. Only a new *Selection* refollows.
  */
 describe("the Detail column's schema chip", () => {
-  function schemaChip(container: HTMLElement) {
-    const found = [...container.querySelectorAll("[aria-label='Filter by query kind'] button")].find(
-      (candidate) => candidate.textContent === "schema",
-    )
-    if (found === undefined) throw new Error("no schema chip")
-    return found
-  }
-
   test("re-derives what the Detail column is showing rather than adding to it", async () => {
     const { container, arrive } = await openTheReader(...HISTORY)
     await selectRow(container, HANGS)
@@ -611,5 +633,83 @@ describe("the Detail column's schema chip", () => {
 
     expect(pinnedToBottom(container, "Console")).toBe(false)
     expect(pinnedToBottom(container, "Activity table")).toBe(true)
+  })
+})
+
+/**
+ * A render count or a memo boundary is never asserted here — only external behaviour is —
+ * so what follows is the same behaviour the small-request tests above already cover,
+ * reproduced at a volume large enough that a regression in how a row's own rendering cost
+ * scales would show up as one of these assertions failing.
+ */
+describe("a request with a very large number of children", () => {
+  const LARGE = 1200
+
+  test("renders every SQL and log child, nothing thinned and nothing paginated", async () => {
+    const { container } = await openTheReader(...HISTORY, ...aRequest("big1", "/n-plus-one", LARGE))
+    await selectRow(container, "big1")
+
+    expect(scrollport(container, "Detail column").querySelectorAll(".entry")).toHaveLength(LARGE)
+  })
+
+  test("finds and highlights a match planted deep in the timeline, exactly as for any other match", async () => {
+    const { container } = await openTheReader(...HISTORY, ...aRequest("big2", "/n-plus-one", LARGE))
+    await selectRow(container, "big2")
+
+    await search(container, "step 901")
+
+    expect(lit(scrollport(container, "Detail column"))).toEqual(["step 901"])
+  })
+
+  test("keeps following across live-tail batches, and still pauses and resumes on scroll", async () => {
+    const { container, arrive } = await openTheReader(...HISTORY, ...aRequest("big3", "/n-plus-one", LARGE, false))
+    await selectRow(container, "big3")
+
+    await arrive(run.log("big3", "batch one"))
+    expect(pinnedToBottom(container, "Detail column")).toBe(true)
+
+    await scrollUp(container, "Detail column")
+    await arrive(run.log("big3", "batch two"))
+    expect(pinnedToBottom(container, "Detail column")).toBe(false)
+    expect(pill(container, "Detail column")?.textContent).toContain("1 new")
+
+    await scrollBackToTheBottom(container, "Detail column")
+    expect(pill(container, "Detail column")).toBeNull()
+    await arrive(run.log("big3", "batch three"))
+    expect(pinnedToBottom(container, "Detail column")).toBe(true)
+  })
+
+  test("keeps the SCHEMA/EXPLAIN chip and the trailing section working at this volume", async () => {
+    const { container, arrive } = await openTheReader(
+      ...HISTORY,
+      ...aRequest("big4", "/n-plus-one", LARGE, false),
+      run.sql("big4", 'PRAGMA table_info("posts")', { name: "SCHEMA" }),
+      run.finish("big4"),
+    )
+    await selectRow(container, "big4")
+    const timelineEntries = () => scrollport(container, "Detail column").querySelectorAll(".timeline .entry")
+
+    // SCHEMA hidden by default: one child of `LARGE + 1` does not show.
+    expect(timelineEntries()).toHaveLength(LARGE)
+
+    await click(schemaChip(container))
+    expect(timelineEntries()).toHaveLength(LARGE + 1)
+
+    await arrive(run.log("big4", "after the request finished"))
+    const trailing = column(container, "Detail column").querySelector("[aria-label='After the request finished']")
+    if (trailing === null) throw new Error("no trailing section")
+    expect(trailing.querySelectorAll(".entry")).toHaveLength(1)
+  })
+
+  test("a Run row's large timeline gets the same treatment, since Timeline is shared", async () => {
+    const burst: Envelope[] = []
+    for (let each = 0; each < LARGE; each += 1) {
+      burst.push(each % 2 === 0 ? run.sql(null) : run.log(null, `burst step ${each}`))
+    }
+    const { container } = await openTheReader(...HISTORY, ...burst)
+    await selectRunRow(container, run.runId)
+
+    // Plus the two boot lines `HISTORY` already opened this Run row with.
+    expect(scrollport(container, "Detail column").querySelectorAll(".entry")).toHaveLength(LARGE + 2)
   })
 })
