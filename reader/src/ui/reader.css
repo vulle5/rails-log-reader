@@ -417,6 +417,13 @@ body {
   gap: 4px;
 }
 
+/* Where the dialog was opened at, until it closes. */
+.setting-targeted {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 4px;
+}
+
 .setting-label {
   color: var(--fg-muted);
   font-weight: 600;
@@ -1518,6 +1525,12 @@ mark.search-match {
 /* The Host app's own frames, full contrast against `.backtrace`'s muted default. */
 .backtrace-host {
   color: var(--fg-strong);
+}
+
+/* Only the hovered frame's, and only while the open modifier is held. */
+.source-location-armed {
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .backtrace-reveal {

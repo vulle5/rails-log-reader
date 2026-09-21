@@ -1,8 +1,17 @@
-import { useRef, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react"
+
+export type SettingsHandle = {
+  /** Opens the dialog, and at `setting` — a `Setting`'s label — focused and outlined, if named. */
+  open: (setting?: string) => void
+}
 
 type SettingsProps = {
   children: ReactNode
+  ref?: Ref<SettingsHandle>
 }
+
+/** The label of the setting the dialog was opened at, until the dialog closes. */
+const Targeted = createContext<string | null>(null)
 
 /**
  * A trigger for the reader bar and the native `<dialog>` it opens modally. A click closes it
@@ -10,19 +19,28 @@ type SettingsProps = {
  * leaves showing nowhere but the backdrop — so a selection dragged out of the field and
  * released over the backdrop leaves it open.
  */
-export function Settings({ children }: SettingsProps) {
+export function Settings({ children, ref }: SettingsProps) {
   const dialog = useRef<HTMLDialogElement>(null)
   const pressedOn = useRef<EventTarget | null>(null)
+  const [targeted, setTargeted] = useState<string | null>(null)
+
+  function open(setting: string | null = null) {
+    setTargeted(setting)
+    dialog.current?.showModal()
+  }
+
+  useImperativeHandle(ref, () => ({ open }), [])
 
   return (
     <>
-      <button type="button" className="settings-trigger" onClick={() => dialog.current?.showModal()}>
+      <button type="button" className="settings-trigger" onClick={() => open()}>
         Settings
       </button>
       <dialog
         ref={dialog}
         className="settings"
         aria-label="Settings"
+        onClose={() => setTargeted(null)}
         onMouseDown={(event) => {
           pressedOn.current = event.target
         }}
@@ -37,7 +55,9 @@ export function Settings({ children }: SettingsProps) {
               Close
             </button>
           </header>
-          <ul className="settings-list">{children}</ul>
+          <Targeted value={targeted}>
+            <ul className="settings-list">{children}</ul>
+          </Targeted>
         </div>
       </dialog>
     </>
@@ -51,11 +71,21 @@ type SettingProps = {
   children: ReactNode
 }
 
+/** Focuses its first control when the dialog is opened at it — after `showModal`'s own focusing. */
 export function Setting({ label, description, children }: SettingProps) {
+  const targeted = useContext(Targeted) === label
+  const control = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (targeted) control.current?.querySelector<HTMLElement>("input, button, select, textarea")?.focus()
+  }, [targeted])
+
   return (
-    <li className="setting">
+    <li className={targeted ? "setting setting-targeted" : "setting"}>
       <span className="setting-label">{label}</span>
-      <div className="setting-control">{children}</div>
+      <div className="setting-control" ref={control}>
+        {children}
+      </div>
       {description !== undefined && <p className="setting-description">{description}</p>}
     </li>
   )

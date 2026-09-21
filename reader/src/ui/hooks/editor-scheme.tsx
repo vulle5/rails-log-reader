@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { createContext, useState } from "react"
 
 /**
  * The *Editor scheme*: a URI template with `{path}` and, optionally, `{line}` in it, or `null`
@@ -6,6 +6,9 @@ import { useState } from "react"
  */
 
 const REMEMBERED = "rails-log-reader.editor-scheme"
+
+/** The setting's label, which is also what Settings is opened at to ask for one. */
+export const EDITOR_SCHEME = "Editor scheme"
 
 export const EDITOR_SCHEME_EXAMPLE = "vscode://file/{path}:{line}"
 
@@ -20,6 +23,14 @@ export function useEditorScheme() {
 
   return { scheme, choose }
 }
+
+export type Editor = {
+  scheme: string | null
+  /** Asks the developer for a scheme, for a Source location opened while none is set. */
+  requestScheme: () => void
+}
+
+export const EditorContext = createContext<Editor>({ scheme: null, requestScheme: () => {} })
 
 type EditorSchemeFieldProps = {
   scheme: string | null
@@ -51,7 +62,7 @@ export function EditorSchemeField({ scheme, onChoose }: EditorSchemeFieldProps) 
       <input
         type="text"
         className="editor-scheme"
-        aria-label="Editor scheme"
+        aria-label={EDITOR_SCHEME}
         aria-invalid={erring || undefined}
         aria-errormessage={erring ? "editor-scheme-error" : undefined}
         spellCheck={false}
