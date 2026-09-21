@@ -52,6 +52,7 @@
   --shadow: rgb(0 0 0 / 18%);
   /* Behind the Settings dialog. Heavier in the dark theme, where a light dim barely shows. */
   --backdrop: rgb(20 24 29 / 22%);
+  --code-bg: #e4e7ec;
 }
 
 :root[data-theme="dark"] {
@@ -87,6 +88,7 @@
 
   --shadow: rgb(0 0 0 / 45%);
   --backdrop: rgb(0 0 0 / 50%);
+  --code-bg: var(--bg-sunken);
 }
 
 * {
@@ -327,11 +329,55 @@ body {
   box-shadow: 0 4px 16px var(--shadow);
 }
 
+/* Grows in and fades on open, and back out on close. `display` and `overlay` transition
+   discretely, so a closing dialog stays in the top layer until its fade has finished. */
+.settings,
+.settings::backdrop {
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out,
+    display 140ms allow-discrete,
+    overlay 140ms allow-discrete;
+}
+
+.settings {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.settings[open] {
+  opacity: 1;
+  transform: scale(1);
+}
+
 /* Dimmed and only lightly blurred: the columns behind stay legible, so a Theme change is
    still seen repainting them. */
 .settings::backdrop {
   background: var(--backdrop);
   backdrop-filter: blur(1px);
+  opacity: 0;
+}
+
+.settings[open]::backdrop {
+  opacity: 1;
+}
+
+@starting-style {
+  .settings[open],
+  .settings[open]::backdrop {
+    opacity: 0;
+  }
+
+  .settings[open] {
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings,
+  .settings::backdrop {
+    transition: none;
+  }
 }
 
 .settings-panel {
@@ -396,7 +442,7 @@ body {
 .setting-description code {
   padding: 1px 5px;
   border-radius: 4px;
-  background: var(--bg-sunken);
+  background: var(--code-bg);
   color: var(--fg);
   font-family: var(--mono);
   font-size: 11px;
