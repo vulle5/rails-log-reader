@@ -171,6 +171,62 @@ class SqlTest < ActiveSupport::TestCase
       payload["binds"]
   end
 
+  # The `↳` line `verbose_query_logs` prints under a query is the one place a developer
+  # already reads where a query came from, so the callsite is asked of the very cleaner that
+  # line is printed through, and has to come out byte for byte the same.
+  test "a query's callsite is the ↳ line Rails prints for it, relative to the app root" do
+    run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts"))
+
+    assert run.booted?, run.output
+    posts = run.events_of("sql").find { |event| event["payload"]["name"] == "Post Load" }
+    assert posts, "the query the page is made of never reached the Sidecar"
+    arrow = run.events_of("app_log").find do |event|
+      event["seq"] > posts["seq"] && event["payload"]["message"].lstrip.start_with?("↳ ")
+    end
+    assert arrow, "verbose_query_logs is on in this app, so the query has a ↳ line"
+
+    callsite = posts["payload"]["callsite"]
+    assert_equal arrow["payload"]["message"].lstrip.delete_prefix("↳ "), callsite
+    assert_match %r{\Aapp/views/posts/index\.html\.erb:\d+}, callsite
+  end
+
+  # This file sits under config/initializers/, which the cleaner lets through as app code —
+  # so a query issued from anywhere the cleaner silences would otherwise be credited to the
+  # Initializer's own `record`. A runner script at the app root is such a place, and has no
+  # ↳ line either.
+  test "a query issued from outside the app's own directories has no callsite, never this file's frame" do
+    run = DevelopmentRun.boot(script: "Post.first")
+
+    assert run.booted?, run.output
+    query = run.events_of("sql").find { |event| event["payload"]["name"] == "Post Load" }
+    assert query, "the query never reached the Sidecar"
+
+    assert_not query["payload"].key?("callsite"), "absent, exactly as it has no ↳ line"
+    callsites = run.events.filter_map { |event| event["payload"]["callsite"] if event["payload"].is_a?(Hash) }
+    assert_empty callsites.grep(/rails_log_reader/), "the Initializer is never where anything came from"
+  end
+
+  # The replay runs on whatever stack flushed the buffer, which says nothing about the code
+  # that issued the query. Replayed from an initializer here so that a stack walk would have a
+  # clean frame to find, and be wrong.
+  test "a finished Event replayed through publish_event carries no callsite" do
+    run = DevelopmentRun.boot do |root|
+      File.write(File.join(root, "config/initializers/z_replays_async.rb"), <<~RUBY)
+        event = ActiveSupport::Notifications::Event.new("sql.active_record", nil, nil, "async", {
+          sql: "SELECT 1", name: "Post Load", binds: [], type_casted_binds: [],
+          async: true, row_count: 54, lock_wait: 0.0
+        })
+        event.record { }
+        ActiveSupport::Notifications.publish_event(event)
+      RUBY
+    end
+
+    assert run.booted?, run.output
+    query = run.events_of("sql").find { |event| event["payload"]["sql"] == "SELECT 1" }
+    assert query, "the replayed query never reached the Sidecar"
+    assert_not query["payload"].key?("callsite")
+  end
+
   private
     # The Example app cannot produce a bind on its own. `query_log_tags_enabled` is on in
     # every generated Rails 8 development.rb — it is why our `sql` carries a QueryLogs

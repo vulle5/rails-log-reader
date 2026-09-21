@@ -37,6 +37,22 @@ class AppLogTest < ActiveSupport::TestCase
     assert_equal [], line["payload"]["tags"]
   end
 
+  # The frame that decided `app` or `rails` is the frame the Reader will open, so the two can
+  # never disagree about who wrote a line.
+  test "a line's callsite is the very frame its source was decided by" do
+    run = boot_logging_request("/posts")
+
+    assert run.booted?, run.output
+    mine = app_log(run, "a line from inside the request")
+    assert mine, "the controller's own log line never reached the Sidecar"
+    assert_match %r{/config/initializers/z_logs_in_request\.rb:2:in }, mine["payload"]["callsite"]
+
+    started = app_log(run) { |message| message.start_with?(%(Started GET "/posts")) }
+    assert_equal "rails", started["payload"]["source"]
+    assert_match %r{/rails/rack/logger\.rb:\d+:in }, started["payload"]["callsite"],
+      "Rails wrote it, and the frame that says so is Rails' own"
+  end
+
   # The Console would be strictly worse than the file it improves on if it dropped these: a
   # request that dies before reaching a controller emits no request_route, and `Started GET`
   # is then the only thing that says what was asked for.
