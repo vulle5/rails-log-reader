@@ -10,7 +10,7 @@ const REMEMBERED = "rails-log-reader.editor-scheme"
 /** The setting's label, which is also what Settings is opened at to ask for one. */
 export const EDITOR_SCHEME = "Editor scheme"
 
-export const EDITOR_SCHEME_EXAMPLE = "vscode://file/{path}:{line}"
+export const EDITOR_SCHEME_EXAMPLE = "vscode://file{path}:{line}"
 
 /** The scheme in force, and a way to replace it that also remembers it. */
 export function useEditorScheme() {

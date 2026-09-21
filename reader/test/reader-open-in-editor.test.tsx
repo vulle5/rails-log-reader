@@ -133,14 +133,14 @@ async function onPlatform<T>(platform: string, body: () => Promise<T>) {
 }
 
 describe("opening a backtrace frame in the editor", () => {
-  beforeEach(() => localStorage.setItem(SCHEME_KEY, "vscode://file/{path}:{line}"))
+  beforeEach(() => localStorage.setItem(SCHEME_KEY, "vscode://file{path}:{line}"))
 
   test("Ctrl-click on a relative frame's path:line opens it resolved against rails_root", async () => {
     const container = await aRaise([RELATIVE_FRAME])
 
     await click(locationIn(frames(container)[0]), { ctrlKey: true })
 
-    expect(opened.mock.calls).toEqual([[`vscode://file/${RAILS_ROOT}/app/models/order.rb:44`]])
+    expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/models/order.rb:44`]])
   })
 
   test("opens a gem frame from a revealed gap, its absolute path used as is", async () => {
@@ -150,7 +150,7 @@ describe("opening a backtrace frame in the editor", () => {
     expect(gem?.textContent).toBe(GEM_FRAME)
     await click(locationIn(gem), { ctrlKey: true })
 
-    expect(opened.mock.calls).toEqual([["vscode://file//home/dev/.gem/rack-3.1.8/lib/rack/urlmap.rb:74"]])
+    expect(opened.mock.calls).toEqual([["vscode://file/home/dev/.gem/rack-3.1.8/lib/rack/urlmap.rb:74"]])
   })
 
   test("marks only the path:line portion as openable, never the method", async () => {
@@ -331,7 +331,7 @@ describe("opening a frame with no Editor scheme set", () => {
     const field = schemeField(container)
 
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "vscode://file/{path}")
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "vscode://file{path}")
       field.dispatchEvent(new Event("input", { bubbles: true }))
     })
     await act(async () => {
@@ -344,6 +344,6 @@ describe("opening a frame with no Editor scheme set", () => {
 
     await click(locationIn(frames(container)[0]), { ctrlKey: true })
 
-    expect(opened.mock.calls).toEqual([[`vscode://file/${RAILS_ROOT}/app/models/order.rb`]])
+    expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/models/order.rb`]])
   })
 })

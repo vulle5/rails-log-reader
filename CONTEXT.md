@@ -501,7 +501,7 @@ namespaced per setting, is the only persistence a Reader-side, user-set preferen
 used here.
 _Avoid_: preferences, config, options.
 
-**Editor scheme** — a free-form URI template (e.g. `vscode://file/{path}:{line}`), set in
+**Editor scheme** — a free-form URI template (e.g. `vscode://file{path}:{line}`), set in
 *Settings*, naming how the developer's own editor opens a file at a line — never a fixed
 list of known editors to choose from. It must contain `{path}`; `{line}` is optional. One
 without `{path}` is refused when the field is left — the scheme already in force stays — and

@@ -74,8 +74,8 @@ describe("filling in the Editor scheme", () => {
   const location = { path: "/home/dev/my app/app/models/order#1.rb", line: 44, end: 0 }
 
   test("substitutes {path} a segment at a time, keeping its slashes, and {line} as a plain number", () => {
-    expect(fillScheme("vscode://file/{path}:{line}", location)).toBe(
-      "vscode://file//home/dev/my%20app/app/models/order%231.rb:44",
+    expect(fillScheme("vscode://file{path}:{line}", location)).toBe(
+      "vscode://file/home/dev/my%20app/app/models/order%231.rb:44",
     )
   })
 

@@ -151,7 +151,7 @@ describe("the Editor scheme setting", () => {
 
     expect(field.value).toBe("")
     expect(field.placeholder).toBe("")
-    expect(dialog.querySelector(".setting-description code")?.textContent).toBe("vscode://file/{path}:{line}")
+    expect(dialog.querySelector(".setting-description code")?.textContent).toBe("vscode://file{path}:{line}")
     expect(localStorage.getItem(SCHEME_KEY)).toBeNull()
   })
 
@@ -179,34 +179,34 @@ describe("the Editor scheme setting", () => {
   })
 
   test("is refused without a {path} in it, keeping the one saved before and saying why until it is fixed", async () => {
-    localStorage.setItem(SCHEME_KEY, "vscode://file/{path}")
+    localStorage.setItem(SCHEME_KEY, "vscode://file{path}")
     const container = await openTheReader()
     const field = schemeField(await openSettings(container))
 
-    await type(field, "vscode://file/{line}")
+    await type(field, "vscode://file{line}")
     await leave(field)
 
-    expect(localStorage.getItem(SCHEME_KEY)).toBe("vscode://file/{path}")
+    expect(localStorage.getItem(SCHEME_KEY)).toBe("vscode://file{path}")
     expect(field.getAttribute("aria-invalid")).toBe("true")
     expect(errorShown(container)).toContain("{path}")
 
-    await type(field, "vscode://file/{path}:{line}")
+    await type(field, "vscode://file{path}:{line}")
     await leave(field)
 
-    expect(localStorage.getItem(SCHEME_KEY)).toBe("vscode://file/{path}:{line}")
+    expect(localStorage.getItem(SCHEME_KEY)).toBe("vscode://file{path}:{line}")
     expect(field.getAttribute("aria-invalid")).toBeNull()
     expect(errorShown(container)).toBeNull()
   })
 
   test("reads a stored scheme with no {path} in it as unset", async () => {
-    localStorage.setItem(SCHEME_KEY, "vscode://file/{line}")
+    localStorage.setItem(SCHEME_KEY, "vscode://file{line}")
     const container = await openTheReader()
 
     expect(schemeField(await openSettings(container)).value).toBe("")
   })
 
   test("goes back to unset when the field is emptied", async () => {
-    localStorage.setItem(SCHEME_KEY, "vscode://file/{path}")
+    localStorage.setItem(SCHEME_KEY, "vscode://file{path}")
     const container = await openTheReader()
     const field = schemeField(await openSettings(container))
 
@@ -231,9 +231,9 @@ describe("the Editor scheme setting", () => {
       const field = schemeField(await openSettings(container))
       expect(field.value).toBe("")
 
-      await type(field, "vscode://file/{path}")
+      await type(field, "vscode://file{path}")
       await leave(field)
-      expect(field.value).toBe("vscode://file/{path}")
+      expect(field.value).toBe("vscode://file{path}")
     } finally {
       Storage.prototype.getItem = getItem
       Storage.prototype.setItem = setItem
@@ -265,7 +265,7 @@ describe("each setting's description", () => {
       { label: "Theme", description: null },
       {
         label: "Editor scheme",
-        description: "URI your editor opens files with, like vscode://file/{path}:{line}. Ctrl-click a file location in the Detail column to open it.",
+        description: "URI your editor opens files with, like vscode://file{path}:{line}. Ctrl-click a file location in the Detail column to open it.",
       },
     ])
   })
@@ -274,7 +274,7 @@ describe("each setting's description", () => {
     const [, scheme] = await onPlatform("MacIntel")
 
     expect(scheme?.description).toBe(
-      "URI your editor opens files with, like vscode://file/{path}:{line}. ⌘-click a file location in the Detail column to open it.",
+      "URI your editor opens files with, like vscode://file{path}:{line}. ⌘-click a file location in the Detail column to open it.",
     )
   })
 })
