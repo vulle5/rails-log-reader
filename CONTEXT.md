@@ -45,6 +45,24 @@ it, which always wins. See
   controller ever says about itself. Which one it is, is read from `caller_locations` —
   a frame inside a gem is not the developer — and never from the message's shape.
 
+**Callsite** — the file and line an SQL or App log event's own code ran at, captured as a
+`caller_locations` frame and carried on the wire in the same raw `"path:line:in `method'"`
+shape a backtrace frame already uses (`Thread::Backtrace::Location#to_s`) — one shape, one
+parser, shared with a backtrace frame's own. Two different questions share the one field
+name because each answers correctly for its own event kind: an SQL event's Callsite is the
+first frame outside *every* gem in the way, found by a private `ActiveSupport::BacktraceCleaner`
+— the same mechanism `verbose_query_logs`'s own `↳` line already uses, so the value is
+byte-identical to what that line already prints, captured without depending on the setting
+being on. An App log event's Callsite is whichever frame `source_of` already found when it
+decided `app` or `rails` — the first frame outside this file's own logging plumbing, stopping
+there even when what's left is a third-party gem's own code, because "who wrote this line" is
+answered correctly by stopping at the first boundary, not by hunting through every gem the way
+the SQL question needs to. Absent whenever nothing can be proven, for reasons that have nothing
+to do with an old Initializer: a `load_async` query is replayed on a thread whose stack
+reflects the flush, not the code that issued it, and a stack can also simply have no frame
+outside its own machinery. See
+`docs/adr/0002-the-event-envelope-and-ordering-key.md`.
+
 **Scenario** — a named, reproducible traffic pattern the Example app generates on demand:
 parallel in-flight requests, an N+1-shaped request, a slow query, a request that hangs, a
 rake-task query burst. Triggered from the Example app's own `/scenarios` page or by `curl`
@@ -119,7 +137,9 @@ Echo is recognised by **containment**: a `rails`-sourced line holding the previo
 SQL verbatim. Never by the message's shape, and never further back than the query directly
 before it, because Rails writes the line there and then. What that deliberately cannot
 prove, it leaves alone: the `↳` callsite `verbose_query_logs` prints under a query is the
-one thing in those two lines the SQL event does not carry, and it stays.
+one thing in those two lines the SQL event does not carry, and it stays — unlabelled, exactly
+as before. A *Callsite* now exists structurally on the SQL event itself for the same fact, and
+the two are not reconciled: #108 is what that split leaves open.
 
 **Console** — a dev-tools-style stream of every App log event its owning row still holds,
 attributed or not, in *append order*. Rendered as the **Console rail**, the leftmost of the
