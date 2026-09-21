@@ -271,15 +271,15 @@ module RailsLogReader
       #
       # This file's frames are skipped by hand: it sits under config/initializers/, which the
       # cleaner keeps as app code, so it would otherwise be the first clean frame of every
-      # query there is. `first_clean_frame` would do the walk itself, but only from Rails 8.0.
+      # query there is. A Ruby without `Thread.each_caller_location` pays for the whole stack
+      # up front, as ActiveRecord itself does there.
       def callsite
-        return unless Thread.respond_to?(:each_caller_location)
-
         cleaner = ActiveRecord::LogSubscriber.backtrace_cleaner
-        Thread.each_caller_location do |location|
-          next if location.absolute_path == __FILE__
+        clean = ->(location) { cleaner.clean_frame(location) unless location.path == __FILE__ }
+        return caller_locations.lazy.filter_map(&clean).first unless Thread.respond_to?(:each_caller_location)
 
-          frame = cleaner.clean_frame(location)
+        Thread.each_caller_location do |location|
+          frame = clean.(location)
           return frame if frame
         end
         nil
@@ -477,10 +477,8 @@ module RailsLogReader
       # happens to sit. An app carrying an engine as a `path:` gem is the coarse case: those
       # frames sit under a gem root too, and read as `rails`.
       #
-      # The frame comes back beside the verdict and becomes the line's callsite, so where a
-      # line is said to come from and who is said to have written it are one answer. It stops
-      # at the first frame outside the machinery even when that is a gem's own, because that
-      # gem is who wrote the line. Nil when nothing lies outside the machinery.
+      # The frame comes back beside the verdict and becomes the line's callsite — a gem's own
+      # frame when a gem wrote the line. Nil when nothing lies outside the machinery.
       def source_of(frames)
         frame = frames&.find { |location| !@machinery_paths.include?(location.path) }
         return [ "rails", nil ] unless frame&.path
