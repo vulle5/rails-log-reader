@@ -317,18 +317,38 @@ carried no file/line at all: `SqlSubscriber#record` never called `caller_locatio
   `"path:line:in `method'"` shape a backtrace frame already carries
   (`Thread::Backtrace::Location#to_s`), so one future frame parser reads both without caring
   which event kind it came from.
-- **SQL's `callsite` comes from a private `ActiveSupport::BacktraceCleaner`**, seeded with the
-  default gem filter plus a silencer for this file's own path, calling `first_clean_location`
-  from `record`. That is the exact class and method `ActiveRecord::LogSubscriber#log_query_source`
-  already calls to print the `↳ path:line` line under a query when `verbose_query_logs` is on —
-  so the captured value is byte-identical to what a developer already sees there, captured
-  unconditionally rather than depending on that setting. A hand-rolled alternative — walking
+- **SQL's `callsite` comes from the Host app's own cleaner,
+  `ActiveRecord::LogSubscriber.backtrace_cleaner`**, the one that prints the `↳ path:line`
+  line under a query when `verbose_query_logs` is on. After boot, that cleaner is
+  `Rails.backtrace_cleaner`. `record` walks `Thread.each_caller_location`, skips this file's
+  own frames, and keeps the first string `clean_frame` returns. That is the same loop
+  `ActiveRecord::LogSubscriber#query_source_location` itself runs on Rails 7.1 and 7.2. So the
+  captured value is byte-identical to what a developer already sees on the `↳` line, a
+  team's own cleaner customisations included, and it is captured whether or not that setting
+  is on. The frames of this file have to be skipped explicitly because they sit under
+  `config/initializers/`, which the cleaner's `app|config|lib|test` silencer lets through, so
+  without the skip the first clean frame would be the Initializer itself.
+  A hand-rolled alternative — walking
   `caller_locations` to a fixed depth, skipping a manually maintained list of
   `ActiveRecord`/`ActiveSupport` files — was rejected once a probe against the Example app showed
   `ActiveSupport::Notifications`' own dispatch alone costs 13 frames before `ActiveRecord`'s
   adapter internals even start, with a real finder chain going deeper still: reusing Rails' own
-  lazy, already-tested cleaner (`Thread.each_caller_location` under the hood, with its own
-  pre-3.4 fallback) costs less code and cannot drift from what `verbose_query_logs` prints.
+  lazy, already-tested cleaner costs less code and cannot drift from what `verbose_query_logs`
+  prints.
+
+  As first written, this bullet named a *private* `ActiveSupport::BacktraceCleaner.new` and
+  `first_clean_location`. That was corrected before anything was built (#108) for two
+  reasons:
+  - `first_clean_location` only arrived in Rails 8.0. On 7.1 and 7.2 it would raise inside
+    `guard` and lose the whole SQL event, not just its `callsite`.
+  - It returns a `Location` whose `to_s` is an absolute path with Rails' raw template method
+    name. That is not what the `↳` line prints, so the claim that the two values are
+    byte-identical was false.
+
+  The value's shape is still `"path:line:in 'method'"`. What changes is how it reads: the
+  path is usually relative to `rails_root`, and generated `_app_views_…` suffixes are already
+  stripped from the method name. A query issued from outside `app|config|lib|test` (seeds,
+  `script/`) has no `callsite`, exactly as it has no `↳` line.
 - **App log's `callsite` is the exact frame `source_of` already found**, never a second,
   independently computed one — `source_of` now returns the frame alongside its `app`/`rails`
   verdict, so classification and location can never disagree.
@@ -359,7 +379,8 @@ can turn off, where capture does not; it says nothing for `SCHEMA`/`EXPLAIN` que
 `ActiveRecord::LogSubscriber` never echoes at all but this project's own `SqlSubscriber`
 forwards on purpose; and it would stretch `isEcho`, a heuristic deliberately kept narrow —
 "never further back than the query directly before it" — into driving a file-opening action, a
-materially larger blast radius for being wrong than hiding a duplicate console line. What it
-leaves behind: the `↳` line still prints, unlabelled, exactly as before, and reconciling it with
-the new structural `callsite` is split into
-[#108](https://github.com/vulle5/rails-log-reader/issues/108).
+materially larger blast radius for being wrong than hiding a duplicate console line. The
+direction is reversed instead
+([#108](https://github.com/vulle5/rails-log-reader/issues/108)). The captured `callsite` is
+what proves the `↳` line to be an *Echo*, so the Detail column drops the loose line and shows
+the value on the query itself.

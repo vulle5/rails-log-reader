@@ -49,11 +49,14 @@ it, which always wins. See
 `caller_locations` frame and carried on the wire in the same raw `"path:line:in `method'"`
 shape a backtrace frame already uses (`Thread::Backtrace::Location#to_s`) — one shape, one
 parser, shared with a backtrace frame's own. Two different questions share the one field
-name because each answers correctly for its own event kind: an SQL event's Callsite is the
-first frame outside *every* gem in the way, found by a private `ActiveSupport::BacktraceCleaner`
-— the same mechanism `verbose_query_logs`'s own `↳` line already uses, so the value is
-byte-identical to what that line already prints, captured without depending on the setting
-being on. An App log event's Callsite is whichever frame `source_of` already found when it
+name because each answers correctly for its own event kind. An SQL event's Callsite is the
+first frame of the Host app's own code, found by the Host app's own backtrace cleaner — the
+very one `verbose_query_logs`'s `↳` line is printed through — so the value is byte-identical
+to what that line prints, a team's own cleaner customisations included, and is captured
+whether or not the setting is on. That makes it the one Callsite that is usually *relative*
+to `rails_root`, with Rails' generated template suffixes already stripped from its method
+name. A query issued from outside the app's own directories (`db/seeds.rb`, `script/`) has
+none, exactly as it has no `↳` line. An App log event's Callsite is whichever frame `source_of` already found when it
 decided `app` or `rails` — the first frame outside this file's own logging plumbing, stopping
 there even when what's left is a third-party gem's own code, because "who wrote this line" is
 answered correctly by stopping at the first boundary, not by hunting through every gem the way
@@ -127,19 +130,25 @@ attributed one is against its request. This is why every event needs an **orderi
 not just a parent id: a `request_id` alone cannot interleave logs with queries.
 The one qualification is the *Echo*, which is homed in the Console alone.
 
-**Echo** — an App log event that is ActiveRecord's own rendering of an SQL event the
-Reader already holds. Rails logs every query twice by design: once through
-`sql.active_record`, which is where the structured SQL event comes from, and once as a
-`debug` line for `development.log` to print. The *detail column* shows the SQL event and
-drops the Echo — the same query said again and worse, with no binds, no row count, a
-rounded duration and no highlighting — while the *Console*, being the log, keeps it. An
-Echo is recognised by **containment**: a `rails`-sourced line holding the previous query's
-SQL verbatim. Never by the message's shape, and never further back than the query directly
-before it, because Rails writes the line there and then. What that deliberately cannot
-prove, it leaves alone: the `↳` callsite `verbose_query_logs` prints under a query is the
-one thing in those two lines the SQL event does not carry, and it stays — unlabelled, exactly
-as before. A *Callsite* now exists structurally on the SQL event itself for the same fact, and
-the two are not reconciled: #108 is what that split leaves open.
+**Echo** — an App log event that is ActiveRecord's own rendering of an SQL event, or of
+part of one, that the Reader already holds. Rails logs every query twice by design: once
+through `sql.active_record`, which is where the structured SQL event comes from, and once as
+a `debug` line for `development.log` to print, followed, when `verbose_query_logs` is on, by
+a `↳` line naming the query's *Callsite*. So a query has up to two Echoes, and both are
+treated the same way: the *detail column* shows the SQL event and drops them, because the
+same query said again is said worse (no binds, no row count, a rounded duration, no
+highlighting), and the same Callsite said again is said as a loose line instead of on the
+query it belongs to. The *Console*, being the log, keeps them. There is one rule here, not
+an exception per line.
+
+Both are recognised by **containment**, never by the message's shape: a `rails`-sourced line
+holding the previous query's SQL verbatim, and the line directly after *that* Echo holding
+the same query's Callsite verbatim. Never further back than the query directly before them,
+because Rails writes both lines there and then. Whatever that deliberately cannot prove, it
+leaves alone, which is always the safe direction. A query with no Callsite (old Initializer,
+`load_async`, no clean frame) keeps its `↳` line, reading exactly as it did before the field
+existed. A query whose SQL the wire cut keeps both of its lines.
+_Avoid_: duplicate, query log line.
 
 **Console** — a dev-tools-style stream of every App log event its owning row still holds,
 attributed or not, in *append order*. Rendered as the **Console rail**, the leftmost of the
@@ -347,7 +356,9 @@ gives up exactly as it did before this scan existed. See
 `docs/adr/0010-a-capped-backward-scan-recovers-the-live-runs-header.md` (#98).
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
-row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded — the
+row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, an SQL
+event's *Callsite* shown under its query as `↳` plus the raw value, whether or not
+`verbose_query_logs` is on — the
 exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
 default — and its *trailing section*.
 Pinned once opened, so selecting never reflows the layout. Renders what the Initializer
@@ -496,6 +507,14 @@ list of known editors to choose from. Unset by default: nothing is guessed, so a
 reading it has nothing to act on until the developer supplies one, rather than silently
 pointing at an editor they don't use.
 _Avoid_: editor URI, editor command.
+
+**Source location** — a file and line the Reader can hand to the *Editor scheme*: an absolute
+path, or a relative one resolved against the Run's `rails_root`, and never a pseudo-path like
+`<internal:…>` or `(eval)`, which name no file to open. A backtrace frame and a *Callsite* each
+*contain* one; neither *is* one. ⌘-click (Ctrl off macOS) opens it, and a plain click never
+does, so frame text stays as selectable as it always was. Nothing is checked on disk first: the
+Reader is strictly local, so a location that no longer exists is the editor's to report.
+_Avoid_: link, editor link, file link.
 
 ## Standing constraints
 
