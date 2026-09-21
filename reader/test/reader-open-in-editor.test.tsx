@@ -48,11 +48,19 @@ const PSEUDO_FRAME = "<internal:kernel>:187:in `loop'"
 /** The Reader over a Run that raised with `backtrace`, the request already selected. */
 async function aRaise(backtrace: string[], { header = true } = {}) {
   const run = aRun("srv-1")
-  const envelopes: Envelope[] = [
+  const container = await theReaderShowing("/orders", [
     ...(header ? [run.header()] : []),
     run.start("req-1", "POST", "/orders"),
     run.finish("req-1", { status: 500, exception: { class: "NoMethodError", message: "boom", backtrace } }),
-  ]
+  ])
+  for (const reveal of [...container.querySelectorAll(".backtrace-reveal")]) {
+    await act(async () => reveal.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  }
+  return container
+}
+
+/** The Reader over `envelopes`, the row for `path` already selected. */
+async function theReaderShowing(path: string, envelopes: Envelope[]) {
   const activity = activityTable()
   activity.fold(envelopes)
   const identity: RunIdentity = latchRunIdentity(null, envelopes)
@@ -66,14 +74,11 @@ async function aRaise(backtrace: string[], { header = true } = {}) {
   })
 
   const row = [...container.querySelectorAll("tbody tr")].find(
-    (candidate) => candidate.querySelector(".cell-path")?.textContent === "/orders",
+    (candidate) => candidate.querySelector(".cell-path")?.textContent === path,
   )!
   await act(async () => {
     row.dispatchEvent(new MouseEvent("click", { bubbles: true }))
   })
-  for (const reveal of [...container.querySelectorAll(".backtrace-reveal")]) {
-    await act(async () => reveal.dispatchEvent(new MouseEvent("click", { bubbles: true })))
-  }
   return container
 }
 
@@ -345,5 +350,129 @@ describe("opening a frame with no Editor scheme set", () => {
     await click(locationIn(frames(container)[0]), { ctrlKey: true })
 
     expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/models/order.rb`]])
+  })
+})
+
+/** The Reader over one request's timeline, built by `children`, the request already selected. */
+async function aTimeline(children: (run: ReturnType<typeof aRun>) => Envelope[], { header = true } = {}) {
+  const run = aRun("srv-1")
+  return theReaderShowing("/feed", [
+    ...(header ? [run.header()] : []),
+    run.start("req-1", "GET", "/feed"),
+    ...children(run),
+    run.finish("req-1"),
+  ])
+}
+
+function callsites(container: HTMLElement) {
+  return [...container.querySelectorAll(".sql-callsite, .log-callsite")]
+}
+
+const SQL_CALLSITE = "app/controllers/feed_controller.rb:9:in 'FeedController#index'"
+const LOG_CALLSITE = "/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
+
+describe("opening a Callsite in the editor", () => {
+  beforeEach(() => localStorage.setItem(SCHEME_KEY, "vscode://file{path}:{line}"))
+
+  test("opens an SQL event's relative callsite resolved against rails_root", async () => {
+    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
+
+    await click(locationIn(callsites(container)[0]), { ctrlKey: true })
+
+    expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/controllers/feed_controller.rb:9`]])
+  })
+
+  test("opens an App log event's absolute callsite as is, a gem's included", async () => {
+    const container = await aTimeline((run) => [
+      run.log("req-1", "Rendered feed/index.html.erb", { source: "rails", callsite: LOG_CALLSITE }),
+    ])
+
+    await click(locationIn(callsites(container)[0]), { ctrlKey: true })
+
+    expect(opened.mock.calls).toEqual([["vscode://file/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251"]])
+  })
+
+  test("marks only the path:line as openable, never the ↳ or the method", async () => {
+    const container = await aTimeline((run) => [run.log("req-1", "Feed cache MISS", { callsite: SQL_CALLSITE })])
+    const line = callsites(container)[0]!
+
+    expect(line.textContent).toBe(`↳ ${SQL_CALLSITE}`)
+    expect(locationIn(line).textContent).toBe("app/controllers/feed_controller.rb:9")
+    await click(line, { ctrlKey: true })
+
+    expect(opened).not.toHaveBeenCalled()
+  })
+
+  test("a plain click opens nothing", async () => {
+    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
+
+    await click(locationIn(callsites(container)[0]))
+
+    expect(opened).not.toHaveBeenCalled()
+  })
+
+  test("leaves a relative callsite inert while rails_root is unknown", async () => {
+    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })], {
+      header: false,
+    })
+    const line = callsites(container)[0]!
+
+    expect(line.querySelector(".source-location")).toBeNull()
+    expect(line.textContent).toBe(`↳ ${SQL_CALLSITE}`)
+  })
+
+  test("leaves a pseudo-path or line-less callsite inert", async () => {
+    const container = await aTimeline((run) => [
+      run.log("req-1", "one", { callsite: "(eval at app/models/post.rb:3):1:in 'x'" }),
+      run.log("req-1", "two", { callsite: "app/models/post.rb" }),
+    ])
+
+    expect(callsites(container).map((line) => line.querySelector(".source-location"))).toEqual([null, null])
+  })
+
+  test("never opens a path written in a log message, not even a ↳ line kept in the timeline", async () => {
+    const container = await aTimeline((run) => [run.log("req-1", `  ↳ ${SQL_CALLSITE}`, { source: "rails" })])
+
+    expect(container.querySelector(".log-message .source-location")).toBeNull()
+    await click(container.querySelector(".log-message")!, { ctrlKey: true })
+
+    expect(opened).not.toHaveBeenCalled()
+  })
+
+  test("underlines only the hovered callsite, only while the modifier is down", async () => {
+    const container = await aTimeline((run) => [
+      run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE }),
+      run.log("req-1", "Rendered", { callsite: LOG_CALLSITE }),
+    ])
+    const [first, second] = callsites(container).map(locationIn)
+
+    await press("Control")
+    expect(armed(container)).toEqual([])
+
+    await hover(second!)
+    expect(armed(container)).toEqual([second!.textContent])
+
+    await unhover(second!)
+    await hover(first!)
+    expect(armed(container)).toEqual([first!.textContent])
+
+    await release("Control")
+    expect(armed(container)).toEqual([])
+
+    await press("Control")
+    await act(async () => {
+      window.dispatchEvent(new Event("blur"))
+    })
+    expect(armed(container)).toEqual([])
+  })
+
+  test("with no Editor scheme set, opens Settings instead and opens nothing", async () => {
+    localStorage.clear()
+    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
+
+    await click(locationIn(callsites(container)[0]), { ctrlKey: true })
+
+    expect(container.querySelector<HTMLDialogElement>("dialog[aria-label='Settings']")!.open).toBe(true)
+    expect(opened).not.toHaveBeenCalled()
   })
 })

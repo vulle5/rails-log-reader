@@ -1396,7 +1396,8 @@ mark.search-match {
   font-style: italic;
 }
 
-.sql-callsite {
+.sql-callsite,
+.log-callsite {
   margin: 4px 0 0;
   font-family: var(--mono);
   font-size: 11px;
@@ -1419,6 +1420,7 @@ mark.search-match {
   display: flex;
   gap: 6px;
   align-items: baseline;
+  flex-wrap: wrap;
   background: var(--bg-sunken);
   font-size: 12px;
   content-visibility: auto;
@@ -1464,9 +1466,18 @@ mark.search-match {
   color: var(--fg-muted);
 }
 
+/* Grows into the row rather than wrapping under the severity: `.entry-log` wraps only so
+   that a callsite can start a line of its own. */
 .log-message {
+  flex: 1 1 0;
+  min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.log-callsite {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .exception {

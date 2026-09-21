@@ -227,6 +227,54 @@ describe("the timeline", () => {
     expect(entries(container, ".entry-log")[1]?.className).toContain("log-from-rails")
   })
 
+  test("shows an App log event's callsite under its line, as emitted, whoever logged it", async () => {
+    const own = "app/controllers/feed_controller.rb:7:in 'FeedController#index'"
+    const gem = "/home/dev/.gem/ruby/3.4.0/gems/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.header(),
+      run.start("req-1", "GET", "/feed"),
+      run.log("req-1", "Feed cache MISS", { callsite: own }),
+      run.log("req-1", "Rendered feed/index.html.erb", { source: "rails", callsite: gem }),
+    )
+
+    await select(container, "/feed")
+
+    // Raw: never shortened against rails_root or a gem directory.
+    expect(entries(container, ".entry-log .log-callsite").map((line) => line.textContent)).toEqual([
+      `\u21b3 ${own}`,
+      `\u21b3 ${gem}`,
+    ])
+    expect(timeline(container)).toEqual(["Feed cache MISS", "Rendered feed/index.html.erb"])
+  })
+
+  test("shows no callsite line for a log event that carries none", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(run.start("req-1", "GET", "/feed"), run.log("req-1", "Feed cache MISS"))
+
+    await select(container, "/feed")
+
+    expect(entries(container, ".log-callsite")).toHaveLength(0)
+  })
+
+  test("drops an Echo's callsite along with the Echo", async () => {
+    const statement = "SELECT 1"
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/feed"),
+      run.sql("req-1", statement),
+      run.log("req-1", `  Post Load (0.2ms)  ${statement}`, {
+        severity: "debug",
+        source: "rails",
+        callsite: "/home/dev/.gem/activerecord/lib/active_record/log_subscriber.rb:30:in 'sql'",
+      }),
+    )
+
+    await select(container, "/feed")
+
+    expect(entries(container, ".log-callsite")).toHaveLength(0)
+  })
+
   test("shows a log event's tags, for the team that invested most in logging", async () => {
     const run = aRun("srv-1")
     const container = await theReader(

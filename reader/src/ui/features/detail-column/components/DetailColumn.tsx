@@ -4,12 +4,12 @@ import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../..
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { controllerAction, methodClassName, ms, runDescription } from "../../../lib/format"
-import { Highlight, Marked, SearchContext, useMatches } from "../../../hooks/search"
+import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
 import { CopyButton } from "./CopyButton"
 import { bytes } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
-import { useOpenModifierHeld } from "../hooks/open-modifier"
+import { OpenModifierHeld, useOpenModifierHeld } from "../hooks/open-modifier"
 import { EditorContext } from "../../../hooks/editor-scheme"
 import { withOpenModifier } from "../../../lib/platform"
 import { exceptionText } from "../lib/exception-text"
@@ -57,6 +57,8 @@ export function DetailColumn({
   /** The live Run's `rails_root`, off `RunIdentity` — see `RequestDetail`'s own doc. */
   railsRoot: string | null
 }) {
+  const held = useOpenModifierHeld()
+
   if (row === null) {
     return (
       <p className="placeholder">
@@ -65,10 +67,14 @@ export function DetailColumn({
     )
   }
 
-  return row.kind === "request" ? (
-    <RequestDetail row={row} filter={filter} railsRoot={railsRoot} />
-  ) : (
-    <RunDetail row={row} filter={filter} />
+  return (
+    <OpenModifierHeld value={held}>
+      {row.kind === "request" ? (
+        <RequestDetail row={row} filter={filter} railsRoot={railsRoot} />
+      ) : (
+        <RunDetail row={row} filter={filter} railsRoot={railsRoot} />
+      )}
+    </OpenModifierHeld>
   )
 }
 
@@ -105,7 +111,7 @@ function RequestDetail({
         </span>
       </header>
 
-      <Timeline events={eventsShown(row.timeline, filter)} />
+      <Timeline events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
       {row.exception !== null && (
         <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
       )}
@@ -113,7 +119,7 @@ function RequestDetail({
           nothing but SCHEMA queries, hidden, must not leave an empty "After the request
           finished" section behind — the section is about there being something to show
           under it. */}
-      {trailing.length > 0 && <Trailing events={trailing} />}
+      {trailing.length > 0 && <Trailing events={trailing} railsRoot={railsRoot} />}
     </article>
   )
 }
@@ -127,7 +133,7 @@ function RequestDetail({
  * No trailing section and no exception: a Run has no finish for anything to trail, and an
  * exception on the wire belongs to a request.
  */
-function RunDetail({ row, filter }: { row: RunRow; filter: DetailFilter }) {
+function RunDetail({ row, filter, railsRoot }: { row: RunRow; filter: DetailFilter; railsRoot: string | null }) {
   const { kind, facts } = runDescription(row)
 
   return (
@@ -144,7 +150,7 @@ function RunDetail({ row, filter }: { row: RunRow; filter: DetailFilter }) {
         </span>
       </header>
 
-      <Timeline events={eventsShown(row.timeline, filter)} />
+      <Timeline events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
     </article>
   )
 }
@@ -152,23 +158,23 @@ function RunDetail({ row, filter }: { row: RunRow; filter: DetailFilter }) {
 /** Renders whatever it is handed — filtering is each caller's own job, done exactly once,
  * because this is reused from three call sites and a filter applied here would run again for
  * every one of them. */
-function Timeline({ events }: { events: readonly TimelineEvent[] }) {
+function Timeline({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
     <ol className="timeline">
       {/* `(run_id, seq)` is the event identity everywhere else in the Reader, and a key is
           one more place it saves inventing one. */}
       {events.map((event) =>
         event.type === "sql" ? (
-          <Query key={`${event.run_id} ${event.seq}`} event={event} />
+          <Query key={`${event.run_id} ${event.seq}`} event={event} railsRoot={railsRoot} />
         ) : (
-          <LogLine key={`${event.run_id} ${event.seq}`} event={event} />
+          <LogLine key={`${event.run_id} ${event.seq}`} event={event} railsRoot={railsRoot} />
         ),
       )}
     </ol>
   )
 }
 
-const Query = memo(function Query({ event }: { event: SqlEvent }) {
+const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
 
   return (
@@ -191,13 +197,8 @@ const Query = memo(function Query({ event }: { event: SqlEvent }) {
       <Binds values={binds} />
       <Cut field="binds" original={event.truncated?.binds} />
       {/* Where `verbose_query_logs`' own `↳` line would sit, and shown whatever that setting
-          is: the Initializer captures a query's *Callsite* regardless of it. Not when empty,
-          which a hand-written Sidecar line can be: a bare `↳` says nothing. */}
-      {callsite !== undefined && callsite !== "" && (
-        <p className="sql-callsite">
-          <Highlight text={`↳ ${callsite}`} />
-        </p>
-      )}
+          is: the Initializer captures a query's *Callsite* regardless of it. */}
+      <Callsite className="sql-callsite" callsite={callsite} railsRoot={railsRoot} />
     </li>
   )
 })
@@ -286,8 +287,8 @@ function bindKind(value: BindValue): "null" | "string" | "number" | "boolean" {
   return "boolean"
 }
 
-const LogLine = memo(function LogLine({ event }: { event: AppLogEvent }) {
-  const { severity, message, source, tags } = event.payload
+const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent; railsRoot: string | null }) {
+  const { severity, message, source, tags, callsite } = event.payload
 
   return (
     // Rails' own lines are kept and labelled apart rather than dropped: `Started GET` is all
@@ -303,6 +304,9 @@ const LogLine = memo(function LogLine({ event }: { event: AppLogEvent }) {
         <Highlight text={message} />
       </span>
       <Cut field="message" original={event.truncated?.message} />
+      {/* The message itself is never searched for a path to open, a `↳` line kept in the
+          timeline included: only the structured field is known to be a Callsite. */}
+      <Callsite className="log-callsite" callsite={callsite} railsRoot={railsRoot} />
     </li>
   )
 })
@@ -344,7 +348,7 @@ function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; rai
   // Only ever grows: nothing removes an entry once revealed.
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
   const segments = useMemo(() => segmentBacktrace(backtrace, railsRoot), [backtrace, railsRoot])
-  const held = useOpenModifierHeld()
+  const held = useContext(OpenModifierHeld)
 
   return (
     <ol className="backtrace">
@@ -402,20 +406,62 @@ function GapSegment({
   )
 }
 
+function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | null; held: boolean }) {
+  return <Openable frame={frame} matches={useMatches(frame)} railsRoot={railsRoot} held={held} />
+}
+
 /**
- * One raw frame. Where it holds a *Source location*, its `path:line` — and never the method
- * after it — opens in the editor on an open-modifier click, and a plain click stays a text
+ * An SQL or App log event's *Callsite*, as `verbose_query_logs` prints one: `↳ ` and the raw
+ * value, never shortened. Searched as the whole line, so a term can run across the `↳`. Not
+ * when empty, which a hand-written Sidecar line can be: a bare `↳` says nothing.
+ */
+function Callsite({
+  className,
+  callsite,
+  railsRoot,
+}: {
+  className: string
+  callsite: string | undefined
+  railsRoot: string | null
+}) {
+  const matches = useMatches(`↳ ${callsite ?? ""}`)
+  const held = useContext(OpenModifierHeld)
+  if (callsite === undefined || callsite === "") return null
+
+  return (
+    <p className={className}>
+      <Marked text="↳ " matches={matches} />
+      <Openable frame={callsite} from={2} matches={matches} railsRoot={railsRoot} held={held} />
+    </p>
+  )
+}
+
+/**
+ * One raw frame, a backtrace's or a Callsite's, starting at `from` in the text `matches` were
+ * found in. Where it holds a *Source location*, its `path:line` — and never the method after
+ * it — opens in the editor on an open-modifier click, and a plain click stays a text
  * selection. Underlined only while it is hovered *and* `held`, so pressing the modifier alone
  * restyles nothing. A click with no *Editor scheme* set asks for one and opens nothing, not
  * even once one has been given.
  */
-function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | null; held: boolean }) {
-  const matches = useMatches(frame)
+function Openable({
+  frame,
+  from = 0,
+  matches,
+  railsRoot,
+  held,
+}: {
+  frame: string
+  from?: number
+  matches: readonly Match[]
+  railsRoot: string | null
+  held: boolean
+}) {
   const editor = useContext(EditorContext)
   const [hovered, setHovered] = useState(false)
   const location = sourceLocation(frame, railsRoot)
 
-  if (location === null) return <Marked text={frame} matches={matches} />
+  if (location === null) return <Marked text={frame} from={from} matches={matches} />
 
   return (
     <>
@@ -434,9 +480,9 @@ function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | 
           else window.location.assign(fillScheme(editor.scheme, location))
         }}
       >
-        <Marked text={frame.slice(0, location.end)} matches={matches} />
+        <Marked text={frame.slice(0, location.end)} from={from} matches={matches} />
       </span>
-      <Marked text={frame.slice(location.end)} from={location.end} matches={matches} />
+      <Marked text={frame.slice(location.end)} from={from + location.end} matches={matches} />
     </>
   )
 }
@@ -447,11 +493,11 @@ function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | 
  * after its request finished is genuinely surprising, and folding it in would read as a
  * Reader bug rather than as the truth about the file.
  */
-function Trailing({ events }: { events: readonly TimelineEvent[] }) {
+function Trailing({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
     <section className="trailing" aria-label="After the request finished">
       <h3>After the request finished</h3>
-      <Timeline events={events} />
+      <Timeline events={events} railsRoot={railsRoot} />
     </section>
   )
 }

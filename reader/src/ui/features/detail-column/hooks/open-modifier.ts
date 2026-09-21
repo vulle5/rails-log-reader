@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { createContext, useEffect, useState } from "react"
 
 import { openModifierKey } from "../../../lib/platform"
 
@@ -31,3 +31,6 @@ export function useOpenModifierHeld() {
 
   return held
 }
+
+/** `useOpenModifierHeld`, read once for the whole Detail column and handed down to every Source location in it. */
+export const OpenModifierHeld = createContext(false)

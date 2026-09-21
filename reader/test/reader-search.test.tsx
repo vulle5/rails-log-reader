@@ -169,6 +169,21 @@ describe("searching", () => {
     expect(lit(callsite)).toEqual(["posts_controller"])
   })
 
+  test("lights up a match in a log line's callsite, the ↳ included", async () => {
+    const rails = aRun("srv-1")
+    const container = await theReader(
+      rails.header(),
+      rails.start("req-1"),
+      rails.log("req-1", "Feed cache MISS", { callsite: "app/controllers/feed_controller.rb:7:in 'FeedController#index'" }),
+    )
+
+    await click(requestRow(container, "req-1"))
+    await search(container, "\u21b3 app/controllers")
+
+    const callsite = column(container, "Detail column").querySelector(".log-callsite") as Element
+    expect(lit(callsite)).toEqual(["\u21b3 ", "app/controllers"])
+  })
+
   test("lights up the timeline's log lines and the heading in the Detail column", async () => {
     const rails = aRun("srv-1")
     const container = await theReader(
