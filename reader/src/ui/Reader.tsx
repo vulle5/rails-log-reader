@@ -23,8 +23,11 @@ import type { RepairState } from "./features/setup-status/lib/initializer-repair
 import type { EarlierState } from "./hooks/live"
 import { LoadEarlier } from "./features/activity-table/components/LoadEarlier"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./features/activity-table/components/RowKindTabs"
+import { Setting, Settings } from "./features/settings/components/Settings"
 import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
+import { EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
+import { openModifier } from "./lib/platform"
 
 /**
  * The Reader's three persistent columns. All three are present from the first paint and
@@ -126,6 +129,7 @@ export function Reader({
   // Up here with the other hooks, and not only where its switch is drawn: the refusal screen
   // below returns before the bar exists, and the theme still has to follow the OS behind it.
   const theme = useTheme()
+  const editorScheme = useEditorScheme()
 
   // The one side effect this component reaches outside itself for, and set here rather than
   // in `main.tsx` for the reason the theme is: it is this component's own name for itself,
@@ -254,7 +258,17 @@ export function Reader({
         <span className="app-name">{appName ?? "Rails log reader"}</span>
         <div className="reader-bar-controls">
           <SearchBox term={term} onChange={setTerm} />
-          <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
+          <Settings>
+            <Setting label="Theme">
+              <ThemeSwitch choice={theme.choice} onChoose={theme.choose} />
+            </Setting>
+            <Setting
+              label="Editor scheme"
+              description={`URI your editor opens files with. ${openModifier()}-click a file location in the Detail column to open it.`}
+            >
+              <EditorSchemeField scheme={editorScheme.scheme} onChoose={editorScheme.choose} />
+            </Setting>
+          </Settings>
         </div>
       </header>
       <SearchContext value={search}>

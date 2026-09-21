@@ -46,9 +46,9 @@
      colour it was already saying something with — a keyword, a warning, a Rails line. */
   --match: #ffe58f;
 
-  /* The one thing in the Reader that floats over its own column, and the only place a shadow
-     is what says so. Darker in the dark theme, where a light pill on a dark column needs more
-     under it to lift, not less. */
+  /* What floats over the columns — the new-activity pill and the Settings dialog — and the
+     only places a shadow is what says so. Darker in the dark theme, where a light surface on a
+     dark column needs more under it to lift, not less. */
   --shadow: rgb(0 0 0 / 18%);
 }
 
@@ -240,7 +240,7 @@ body {
 }
 
 /* Never shrunk, so it is `.app-name` alone that gives ground and truncates under an ellipsis
-   when the bar is narrow — the search box and theme switch stay their full width. */
+   when the bar is narrow — the search box and Settings trigger stay their full width. */
 .reader-bar-controls {
   display: flex;
   flex-shrink: 0;
@@ -292,6 +292,122 @@ body {
   border-color: var(--border);
   background: var(--selected);
   color: var(--fg);
+}
+
+.settings-trigger,
+.settings-close {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-trigger:hover,
+.settings-close:hover {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+/* No padding and no border on the dialog's own box: `.settings-panel` fills it exactly, so the
+   dialog itself is a click target only over the backdrop. */
+.settings {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+/* Transparent, so the columns behind stay in view while the dialog is open. */
+.settings::backdrop {
+  background: transparent;
+}
+
+.settings-panel {
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  font-family: var(--ui);
+  font-size: 12px;
+}
+
+.settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-heading h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-label {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.setting-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-description,
+.setting-error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.setting-description {
+  color: var(--fg-faint);
+}
+
+.setting-error {
+  color: var(--error);
+}
+
+.editor-scheme {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.editor-scheme:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+.editor-scheme[aria-invalid="true"] {
+  border-color: var(--error);
 }
 
 /* Lit, never hidden: a background under the characters that matched, and nothing done to
