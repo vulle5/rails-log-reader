@@ -169,7 +169,7 @@ function Timeline({ events }: { events: readonly TimelineEvent[] }) {
 }
 
 const Query = memo(function Query({ event }: { event: SqlEvent }) {
-  const { sql, name, duration_ms, cached, async, binds } = event.payload
+  const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
 
   return (
     <li className="entry entry-sql">
@@ -190,6 +190,14 @@ const Query = memo(function Query({ event }: { event: SqlEvent }) {
       <Cut field="sql" original={event.truncated?.sql} />
       <Binds values={binds} />
       <Cut field="binds" original={event.truncated?.binds} />
+      {/* Where `verbose_query_logs`' own `↳` line would sit, and shown whatever that setting
+          is: the Initializer captures a query's *Callsite* regardless of it. Not when empty,
+          which a hand-written Sidecar line can be: a bare `↳` says nothing. */}
+      {callsite !== undefined && callsite !== "" && (
+        <p className="sql-callsite">
+          <Highlight text={`↳ ${callsite}`} />
+        </p>
+      )}
     </li>
   )
 })

@@ -154,6 +154,21 @@ describe("searching", () => {
     expect(sql.textContent).toBe(statement)
   })
 
+  test("lights up a match in a query's callsite", async () => {
+    const rails = aRun("srv-1")
+    const container = await theReader(
+      rails.header(),
+      rails.start("req-1"),
+      rails.sql("req-1", "SELECT 1", { callsite: "app/controllers/posts_controller.rb:9:in 'PostsController#show'" }),
+    )
+
+    await click(requestRow(container, "req-1"))
+    await search(container, "posts_controller")
+
+    const callsite = column(container, "Detail column").querySelector(".sql-callsite") as Element
+    expect(lit(callsite)).toEqual(["posts_controller"])
+  })
+
   test("lights up the timeline's log lines and the heading in the Detail column", async () => {
     const rails = aRun("srv-1")
     const container = await theReader(

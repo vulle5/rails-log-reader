@@ -1396,6 +1396,14 @@ mark.search-match {
   font-style: italic;
 }
 
+.sql-callsite {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
 /* Not styled as an error — nothing failed. It is the file saying what it could not carry,
    and it has to be legible without pretending the query is broken. */
 .cut {

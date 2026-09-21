@@ -525,17 +525,37 @@ describe("a request's timeline", () => {
     expect(theOnlyRequest(rows).railsRoot).toBeNull()
   })
 
-  test("drops the line Rails logs beside a query it already holds, keeping the callsite under it", async () => {
+  test("drops the lines Rails logs beside a query it already holds, callsite line included", async () => {
     const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = 58 LIMIT 1 /*action='show'*/`
+    const callsite = "app/controllers/posts_controller.rb:9:in 'PostsController#show'"
     const log = await aLogDirectory()
     const run = aRun("srv-1")
     await appendToSidecar(
       log,
       run.start("req-1"),
-      run.sql("req-1", statement),
+      run.sql("req-1", statement, { callsite }),
       // What ActiveRecord's own log subscriber writes for that same query, and then the
       // callsite `verbose_query_logs` puts under it.
       run.log("req-1", `  Post Load (0.2ms)  ${statement}`, { severity: "debug", source: "rails" }),
+      run.log("req-1", `  \u21b3 ${callsite}`, { severity: "debug", source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual([statement])
+    // The count and the timeline are one thing counted and the same thing listed.
+    expect(theOnlyRequest(rows)).toMatchObject({ sqlCount: 1, logCount: 0 })
+  })
+
+  test("keeps the callsite line of a query that carries no callsite of its own", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1"),
+      run.log("req-1", "  Post Load (0.2ms)  SELECT 1", { severity: "debug", source: "rails" }),
       run.log("req-1", "  \u21b3 app/controllers/posts_controller.rb:9", { severity: "debug", source: "rails" }),
       run.finish("req-1"),
     )
@@ -543,11 +563,76 @@ describe("a request's timeline", () => {
     const { rows } = await theReaderReads(log)
 
     expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual([
-      statement,
+      "SELECT 1",
       "  \u21b3 app/controllers/posts_controller.rb:9",
     ])
-    // The count and the timeline are one thing counted and the same thing listed.
-    expect(theOnlyRequest(rows)).toMatchObject({ sqlCount: 1, logCount: 1 })
+  })
+
+  test("keeps the callsite line of a query whose own line was not recognised", async () => {
+    const callsite = "app/controllers/posts_controller.rb:9:in 'PostsController#show'"
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const query = run.sql("req-1", "SELECT huge FROM enormous WHERE it = 'was cut here", { callsite })
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      { ...query, truncated: { sql: 812_400 } },
+      run.log("req-1", "  Load (9.1ms)  SELECT huge FROM enormous WHERE it = 'was cut", {
+        severity: "debug",
+        source: "rails",
+      }),
+      run.log("req-1", `  \u21b3 ${callsite}`, { severity: "debug", source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual([
+      "SELECT huge FROM enormous WHERE it = 'was cut here",
+      "  Load (9.1ms)  SELECT huge FROM enormous WHERE it = 'was cut",
+      `  \u21b3 ${callsite}`,
+    ])
+  })
+
+  test("keeps a line naming the callsite that does not directly follow the query's own line", async () => {
+    const callsite = "app/controllers/posts_controller.rb:9:in 'PostsController#show'"
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.sql("req-1", "SELECT 1", { callsite }),
+      run.log("req-1", "  Post Load (0.2ms)  SELECT 1", { severity: "debug", source: "rails" }),
+      run.log("req-1", "Rendering posts/show.html.erb", { source: "rails" }),
+      run.log("req-1", `  \u21b3 ${callsite}`, { severity: "debug", source: "rails" }),
+      run.finish("req-1"),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).timeline.map(describeEvent)).toEqual([
+      "SELECT 1",
+      "Rendering posts/show.html.erb",
+      `  \u21b3 ${callsite}`,
+    ])
+  })
+
+  test("drops the same lines beside a query with no owning request, on its Run row", async () => {
+    const callsite = "db/seeds.rb:4:in '<main>'"
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.header(),
+      run.sql(null, "SELECT 1", { callsite }),
+      run.log(null, "  Post Load (0.2ms)  SELECT 1", { severity: "debug", source: "rails" }),
+      run.log(null, `  \u21b3 ${callsite}`, { severity: "debug", source: "rails" }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(runRow(rows, "srv-1").timeline.map(describeEvent)).toEqual(["SELECT 1"])
+    expect(runRow(rows, "srv-1")).toMatchObject({ sqlCount: 1, logCount: 0 })
   })
 
   test("keeps a line the developer wrote themselves, even when they logged the query into it", async () => {

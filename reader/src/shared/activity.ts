@@ -92,7 +92,7 @@ export type RequestRow = {
   /**
    * The request's own timeline: its SQL and App log events interleaved, in the order they
    * were emitted, which is what lets a log line be read as the explanation of the query
-   * that follows it. Minus the *Echoes* — the query lines Rails logs for
+   * that follows it. Minus the *Echoes* — the query and callsite lines Rails logs for
    * `development.log`'s benefit, which are the SQL events beside them said again and worse.
    */
   timeline: readonly TimelineEvent[]
@@ -452,35 +452,42 @@ export function activityTable(): ActivityTable {
    * `sql.active_record`, which is where the Reader's structured event comes from, and once
    * as a `debug` line for `development.log` to print — so a timeline that kept both would
    * show every query twice, the second time worse: no binds, no row count, a rounded
-   * duration and no highlighting.
+   * duration and no highlighting. With `verbose_query_logs` on, the `↳` line naming the
+   * query's *Callsite* that follows is an Echo too.
    *
    * The test is containment, not the message's shape: this line, written by Rails rather
-   * than by the developer, holds the previous query's SQL verbatim inside it. That is a
-   * fact about two payloads rather than a guess at a format, which is the same standard
-   * `source` is held to — and it is deliberately unable to prove anything about a line that
-   * is *not* an echo. So `↳ app/views/posts/index.html.erb:11`, the callsite Rails prints
-   * under a query when `verbose_query_logs` is on, stays: it is the one thing in those two
-   * lines the SQL event does not carry, and dropping it would cost the N+1 hunt its answer.
+   * than by the developer, holds the previous query's SQL verbatim inside it — or, directly
+   * after that line, the same query's `callsite` verbatim. That is a fact about two payloads
+   * rather than a guess at a format, which is the same standard `source` is held to — and it
+   * is deliberately unable to prove anything about a line that is *not* an echo.
    *
-   * Two ways this deliberately declines to fire, both of them the safe direction. A query
+   * Three ways this deliberately declines to fire, all of them the safe direction. A query
    * whose SQL the wire had to cut cannot be found inside a line the wire also cut, so a
    * truncated query keeps its echo and the developer sees the duplication rather than a
-   * silent guess. And an echo only ever answers for the query directly before it, because
-   * Rails writes it there and then — a match further back would be a coincidence.
+   * silent guess — and keeps its `↳` line too, which is only ever looked for directly after
+   * a recognised echo. A query with no `callsite` has nothing to find, so its `↳` line stays.
+   * And an echo only ever answers for
+   * the query directly before it, because Rails writes it there and then — a match further
+   * back would be a coincidence.
    *
    * Held per owner rather than globally — one *Echoing* on each request's fold and one on
    * each Run's — because two requests interleaving in one process put other events between
-   * a query and the line Rails wrote for it, and a `rake` burst is echoed exactly as a
+   * a query and the lines Rails wrote for it, and a `rake` burst is echoed exactly as a
    * request's queries are.
    */
   function isEcho(owner: Echoing, event: AppLogEvent) {
-    const query = owner.echoing
+    const echoing = owner.echoing
     owner.echoing = null
 
-    if (query === null || event.payload.source !== "rails") return false
-    // A hand-written Sidecar line can carry an empty statement, and `includes("")` is true
-    // of every string there is.
-    return query.payload.sql !== "" && event.payload.message.includes(query.payload.sql)
+    if (echoing === null || event.payload.source !== "rails") return false
+    const { query, due } = echoing
+    // A hand-written Sidecar line can carry an empty statement or callsite, and
+    // `includes("")` is true of every string there is.
+    const echoed = due === "sql" ? query.payload.sql : (query.payload.callsite ?? "")
+    if (echoed === "" || !event.payload.message.includes(echoed)) return false
+
+    if (due === "sql") owner.echoing = { query, due: "callsite" }
+    return true
   }
 
   /**
@@ -663,7 +670,7 @@ export function activityTable(): ActivityTable {
         break
       case "sql":
         row.sqlCount += 1
-        folding.echoing = envelope
+        folding.echoing = { query: envelope, due: "sql" }
         place(folding, envelope)
         break
       case "app_log":
@@ -680,7 +687,7 @@ export function activityTable(): ActivityTable {
 
     if (event.type === "sql") {
       row.sqlCount += 1
-      running.echoing = event
+      running.echoing = { query: event, due: "sql" }
     } else {
       if (isEcho(running, event)) return
       row.logCount += 1
@@ -807,8 +814,12 @@ function keepLatest(remembered: Set<string>, limit: number) {
 
 /** What both kinds of owner keep so an *Echo* can be recognised against the query above it. */
 type Echoing = {
-  /** The query an *Echo* could still be echoing: the last SQL event, until the next App log event. */
-  echoing: SqlEvent | null
+  /**
+   * The query an *Echo* could still be echoing, and which of its lines is due next: the last
+   * SQL event's own line, until the next App log event, and then — only if that was its
+   * echo — the line naming its *Callsite*, until the one after.
+   */
+  echoing: { query: SqlEvent; due: "sql" | "callsite" } | null
 }
 
 /**
