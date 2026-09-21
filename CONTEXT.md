@@ -356,9 +356,9 @@ gives up exactly as it did before this scan existed. See
 `docs/adr/0010-a-capped-backward-scan-recovers-the-live-runs-header.md` (#98).
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
-row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, an SQL
-event's *Callsite* shown under its query as `↳` plus the raw value, whether or not
-`verbose_query_logs` is on — the
+row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, each event's
+*Callsite* shown under it as `↳` plus the raw value, an SQL event's whether or not
+`verbose_query_logs` is on and an App log event's whichever source it has — the
 exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
 default — and its *trailing section*.
 Pinned once opened, so selecting never reflows the layout. Renders what the Initializer
@@ -513,7 +513,9 @@ _Avoid_: editor URI, editor command.
 **Source location** — a file and line the Reader can hand to the *Editor scheme*: an absolute
 path, or a relative one resolved against the Run's `rails_root`, and never a pseudo-path like
 `<internal:…>` or `(eval)`, which name no file to open. A backtrace frame and a *Callsite* each
-*contain* one; neither *is* one. ⌘-click (Ctrl off macOS) opens it, and a plain click never
+*contain* one; neither *is* one. Nothing else does: a path sitting in a log message's own text
+(an un-dropped `↳` line, say) is never one, since finding it would mean reading the message's
+shape. ⌘-click (Ctrl off macOS) opens it, and a plain click never
 does, so frame text stays as selectable as it always was. Nothing is checked on disk first: the
 Reader is strictly local, so a location that no longer exists is the editor's to report.
 _Avoid_: link, editor link, file link.

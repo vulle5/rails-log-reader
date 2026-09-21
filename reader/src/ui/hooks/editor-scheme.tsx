@@ -7,7 +7,7 @@ import { useState } from "react"
 
 const REMEMBERED = "rails-log-reader.editor-scheme"
 
-const EXAMPLE = "vscode://file/{path}:{line}"
+export const EDITOR_SCHEME_EXAMPLE = "vscode://file/{path}:{line}"
 
 /** The scheme in force, and a way to replace it that also remembers it. */
 export function useEditorScheme() {
@@ -54,7 +54,6 @@ export function EditorSchemeField({ scheme, onChoose }: EditorSchemeFieldProps) 
         aria-label="Editor scheme"
         aria-invalid={erring || undefined}
         aria-errormessage={erring ? "editor-scheme-error" : undefined}
-        placeholder={EXAMPLE}
         spellCheck={false}
         autoComplete="off"
         value={draft}

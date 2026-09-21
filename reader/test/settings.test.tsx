@@ -144,12 +144,14 @@ async function leave(field: HTMLInputElement) {
 const SCHEME_KEY = "rails-log-reader.editor-scheme"
 
 describe("the Editor scheme setting", () => {
-  test("is empty until set, with the VS Code template only as a hint", async () => {
+  test("is empty until set, with the VS Code template shown as code in its description and never in the field", async () => {
     const container = await openTheReader()
-    const field = schemeField(await openSettings(container))
+    const dialog = await openSettings(container)
+    const field = schemeField(dialog)
 
     expect(field.value).toBe("")
-    expect(field.placeholder).toBe("vscode://file/{path}:{line}")
+    expect(field.placeholder).toBe("")
+    expect(dialog.querySelector(".setting-description code")?.textContent).toBe("vscode://file/{path}:{line}")
     expect(localStorage.getItem(SCHEME_KEY)).toBeNull()
   })
 
@@ -263,7 +265,7 @@ describe("each setting's description", () => {
       { label: "Theme", description: null },
       {
         label: "Editor scheme",
-        description: "URI your editor opens files with. Ctrl-click a file location in the Detail column to open it.",
+        description: "URI your editor opens files with, like vscode://file/{path}:{line}. Ctrl-click a file location in the Detail column to open it.",
       },
     ])
   })
@@ -272,7 +274,7 @@ describe("each setting's description", () => {
     const [, scheme] = await onPlatform("MacIntel")
 
     expect(scheme?.description).toBe(
-      "URI your editor opens files with. ⌘-click a file location in the Detail column to open it.",
+      "URI your editor opens files with, like vscode://file/{path}:{line}. ⌘-click a file location in the Detail column to open it.",
     )
   })
 })

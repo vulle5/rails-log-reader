@@ -50,6 +50,8 @@
      only places a shadow is what says so. Darker in the dark theme, where a light surface on a
      dark column needs more under it to lift, not less. */
   --shadow: rgb(0 0 0 / 18%);
+  /* Behind the Settings dialog. Heavier in the dark theme, where a light dim barely shows. */
+  --backdrop: rgb(20 24 29 / 22%);
 }
 
 :root[data-theme="dark"] {
@@ -84,6 +86,7 @@
   --match: rgb(187 128 9 / 55%);
 
   --shadow: rgb(0 0 0 / 45%);
+  --backdrop: rgb(0 0 0 / 50%);
 }
 
 * {
@@ -324,9 +327,11 @@ body {
   box-shadow: 0 4px 16px var(--shadow);
 }
 
-/* Transparent, so the columns behind stay in view while the dialog is open. */
+/* Dimmed and only lightly blurred: the columns behind stay legible, so a Theme change is
+   still seen repainting them. */
 .settings::backdrop {
-  background: transparent;
+  background: var(--backdrop);
+  backdrop-filter: blur(1px);
 }
 
 .settings-panel {
@@ -385,6 +390,17 @@ body {
 
 .setting-description {
   color: var(--fg-faint);
+  line-height: 1.6;
+}
+
+.setting-description code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .setting-error {

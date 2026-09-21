@@ -26,7 +26,7 @@ import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./feature
 import { Setting, Settings } from "./features/settings/components/Settings"
 import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
-import { EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
+import { EDITOR_SCHEME_EXAMPLE, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
 /**
@@ -264,7 +264,12 @@ export function Reader({
             </Setting>
             <Setting
               label="Editor scheme"
-              description={`URI your editor opens files with. ${openModifier()}-click a file location in the Detail column to open it.`}
+              description={
+                <>
+                  URI your editor opens files with, like <code>{EDITOR_SCHEME_EXAMPLE}</code>. {openModifier()}-click
+                  a file location in the Detail column to open it.
+                </>
+              }
             >
               <EditorSchemeField scheme={editorScheme.scheme} onChoose={editorScheme.choose} />
             </Setting>
