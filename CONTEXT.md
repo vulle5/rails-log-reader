@@ -356,11 +356,22 @@ gives up exactly as it did before this scan existed. See
 `docs/adr/0010-a-capped-backward-scan-recovers-the-live-runs-header.md` (#98).
 
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
-row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, each event's
-*Callsite* shown under it as `↳` plus the raw value, an SQL event's whether or not
-`verbose_query_logs` is on and an App log event's whichever source it has — the
-exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
+row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, each
+*Callsite* shown as `↳` plus the raw value once under its *Callsite run*, an SQL event's
+whether or not `verbose_query_logs` is on and an App log event's whichever source it has —
+the exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
 default — and its *trailing section*.
+
+A **Callsite run** is a stretch of consecutive events of one kind, as shown, whose Callsites
+are the same raw string: a loop's twenty `Author Load`s, or a job's `update!`s with their
+`TRANSACTION`s between them. It prints its `↳` once, after its last event, with a rule
+spanning the events it speaks for, so a lone event is a run of one and reads exactly as it
+always did. Layout, never a claim: nothing is hidden, counted or summed, and it says nothing
+about the queries beyond where they came from — the Reader is not an N+1 detector. Anything
+else shown between two events ends a run, whatever its source, and so does the edge of the
+*trailing section*; an event with no Callsite is never in one with another, absence not
+being sameness. Grouped over what is shown, so the SCHEMA chip regroups as it thins.
+_Avoid_: group (implies collapsing), batch (`find_each` owns it), N+1.
 Pinned once opened, so selecting never reflows the layout. Renders what the Initializer
 emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
 cut says so where it is read rather than passing as whole.
