@@ -358,7 +358,8 @@ gives up exactly as it did before this scan existed. See
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
 row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, each event's
 *Callsite* shown under it as `↳` plus the raw value, an SQL event's whether or not
-`verbose_query_logs` is on and an App log event's whichever source it has — the
+`verbose_query_logs` is on and an App log event's only when it is `app`-sourced, since a
+`rails`-sourced line's Callsite is by construction the gem frame where Rails formatted it — the
 exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
 default — and its *trailing section*.
 Pinned once opened, so selecting never reflows the layout. Renders what the Initializer

@@ -184,6 +184,23 @@ describe("searching", () => {
     expect(lit(callsite)).toEqual(["\u21b3 ", "app/controllers"])
   })
 
+  test("finds nothing in a rails-sourced log line's callsite, which is not shown", async () => {
+    const rails = aRun("srv-1")
+    const container = await theReader(
+      rails.header(),
+      rails.start("req-1"),
+      rails.log("req-1", "Rendered feed/index.html.erb", {
+        source: "rails",
+        callsite: "/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'",
+      }),
+    )
+
+    await click(requestRow(container, "req-1"))
+    await search(container, "action_view")
+
+    expect(lit(column(container, "Detail column"))).toEqual([])
+  })
+
   test("lights up the timeline's log lines and the heading in the Detail column", async () => {
     const rails = aRun("srv-1")
     const container = await theReader(

@@ -369,7 +369,7 @@ function callsites(container: HTMLElement) {
 }
 
 const SQL_CALLSITE = "app/controllers/feed_controller.rb:9:in 'FeedController#index'"
-const LOG_CALLSITE = "/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
+const LOG_CALLSITE = "/home/dev/example-app/app/services/feed_cache.rb:14:in 'FeedCache#fetch'"
 
 describe("opening a Callsite in the editor", () => {
   beforeEach(() => localStorage.setItem(SCHEME_KEY, "vscode://file{path}:{line}"))
@@ -382,14 +382,12 @@ describe("opening a Callsite in the editor", () => {
     expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/controllers/feed_controller.rb:9`]])
   })
 
-  test("opens an App log event's absolute callsite as is, a gem's included", async () => {
-    const container = await aTimeline((run) => [
-      run.log("req-1", "Rendered feed/index.html.erb", { source: "rails", callsite: LOG_CALLSITE }),
-    ])
+  test("opens an App log event's absolute callsite as is", async () => {
+    const container = await aTimeline((run) => [run.log("req-1", "Feed cache MISS", { callsite: LOG_CALLSITE })])
 
     await click(locationIn(callsites(container)[0]), { ctrlKey: true })
 
-    expect(opened.mock.calls).toEqual([["vscode://file/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251"]])
+    expect(opened.mock.calls).toEqual([["vscode://file/home/dev/example-app/app/services/feed_cache.rb:14"]])
   })
 
   test("marks only the path:line as openable, never the ↳ or the method", async () => {
@@ -442,7 +440,7 @@ describe("opening a Callsite in the editor", () => {
   test("underlines only the hovered callsite, only while the modifier is down", async () => {
     const container = await aTimeline((run) => [
       run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE }),
-      run.log("req-1", "Rendered", { callsite: LOG_CALLSITE }),
+      run.log("req-1", "Feed cache MISS", { callsite: LOG_CALLSITE }),
     ])
     const [first, second] = callsites(container).map(locationIn)
 

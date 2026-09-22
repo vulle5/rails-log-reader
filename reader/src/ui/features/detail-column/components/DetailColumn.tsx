@@ -305,8 +305,10 @@ const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent
       </span>
       <Cut field="message" original={event.truncated?.message} />
       {/* The message itself is never searched for a path to open, a `↳` line kept in the
-          timeline included: only the structured field is known to be a Callsite. */}
-      <Callsite className="log-callsite" callsite={callsite} railsRoot={railsRoot} />
+          timeline included: only the structured field is known to be a Callsite. None on a
+          `rails`-sourced line: `source_of` labels a line `rails` exactly when its Callsite
+          is inside a gem, so it only ever says where Rails formatted the message. */}
+      {source === "app" && <Callsite className="log-callsite" callsite={callsite} railsRoot={railsRoot} />}
     </li>
   )
 })

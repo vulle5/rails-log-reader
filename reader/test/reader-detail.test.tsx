@@ -227,7 +227,7 @@ describe("the timeline", () => {
     expect(entries(container, ".entry-log")[1]?.className).toContain("log-from-rails")
   })
 
-  test("shows an App log event's callsite under its line, as emitted, whoever logged it", async () => {
+  test("shows an app-sourced log event's callsite under its line, as emitted, and a rails-sourced one's not at all", async () => {
     const own = "app/controllers/feed_controller.rb:7:in 'FeedController#index'"
     const gem = "/home/dev/.gem/ruby/3.4.0/gems/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
     const run = aRun("srv-1")
@@ -240,10 +240,10 @@ describe("the timeline", () => {
 
     await select(container, "/feed")
 
-    // Raw: never shortened against rails_root or a gem directory.
+    // Raw: never shortened against rails_root. A rails-sourced line's Callsite is by
+    // construction a gem frame — where Rails formatted the message — so it is not shown.
     expect(entries(container, ".entry-log .log-callsite").map((line) => line.textContent)).toEqual([
       `\u21b3 ${own}`,
-      `\u21b3 ${gem}`,
     ])
     expect(timeline(container)).toEqual(["Feed cache MISS", "Rendered feed/index.html.erb"])
   })
