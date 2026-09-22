@@ -1,7 +1,3 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
@@ -66,11 +62,10 @@ beforeAll(() => {
   })
 })
 
-afterAll(async () => {
+afterAll(() => {
   Object.defineProperty(Element.prototype, "scrollHeight", geometry.scrollHeight!)
   Object.defineProperty(HTMLElement.prototype, "clientHeight", geometry.clientHeight!)
   Object.defineProperty(Element.prototype, "scrollTop", geometry.scrollTop!)
-  await GlobalRegistrator.unregister()
 })
 
 const mounted: { unmount: () => void }[] = []

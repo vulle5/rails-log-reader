@@ -1,8 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 
 const { act } = await import("react")
 const { createRoot } = await import("react-dom/client")
@@ -25,10 +21,6 @@ afterEach(() => {
   unmountAll()
   localStorage.clear()
   document.body.innerHTML = ""
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 async function openTheReader() {

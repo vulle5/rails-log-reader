@@ -1,8 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean
@@ -44,10 +40,6 @@ afterEach(() => {
   localStorage.clear()
   delete document.documentElement.dataset.theme
   document.body.innerHTML = ""
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 /**

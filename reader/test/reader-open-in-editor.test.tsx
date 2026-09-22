@@ -1,8 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
 import type { Envelope } from "../src/shared/wire"
@@ -33,10 +29,6 @@ afterEach(() => {
   document.body.innerHTML = ""
   localStorage.clear()
   opened.mockRestore()
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 const SCHEME_KEY = "rails-log-reader.editor-scheme"

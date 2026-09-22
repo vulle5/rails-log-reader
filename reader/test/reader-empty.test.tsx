@@ -1,8 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 
 import type { EmptyState } from "../src/shared/initializer-status"
 import { aRun } from "./sidecar.fixtures"
@@ -24,10 +20,6 @@ afterEach(() => {
     for (const root of mounted.splice(0)) root.unmount()
   })
   document.body.innerHTML = ""
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 const MASTER = "/home/dev/rails-log-reader/reader/rails/rails_log_reader.rb"

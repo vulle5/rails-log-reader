@@ -1,8 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
@@ -28,10 +24,6 @@ afterEach(() => {
   })
   document.body.innerHTML = ""
   localStorage.clear()
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 /**

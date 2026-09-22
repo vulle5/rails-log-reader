@@ -1,8 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
@@ -46,10 +42,6 @@ afterEach(() => {
   // The level chips persist by design, which between tests is one test writing another's
   // filter.
   localStorage.clear()
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 /**
