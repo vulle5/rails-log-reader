@@ -137,6 +137,12 @@ export type SqlPayload = {
   row_count?: number
   /** Empty is the normal case on mysql2 and trilogy, not a degraded one. */
   binds: BindValue[]
+  /**
+   * The Host app's own code that issued the query, as `verbose_query_logs`' `↳` line prints
+   * it: usually relative to the app root. Absent from an older Initializer, on a `load_async`
+   * replay, and for a query issued from outside the app's own directories.
+   */
+  callsite?: string
 }
 
 /** Every level `Rails.logger` can be called at, quietest first; shared with the Console's chips. */
@@ -151,6 +157,12 @@ export type AppLogPayload = {
   /** Classified by `caller_locations`, so Rails' own lines are labelled rather than dropped. */
   source: "app" | "rails"
   tags: string[]
+  /**
+   * The frame `source` was decided by, as `"path:line:in 'method'"` — a gem's own when a gem
+   * wrote the line. Absent from an older Initializer, and when no frame lies outside the
+   * logging machinery.
+   */
+  callsite?: string
 }
 
 export type RunHeaderEvent = EventEnvelope<"run_header", RunHeaderPayload>

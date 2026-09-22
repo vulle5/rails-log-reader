@@ -231,13 +231,14 @@ module RailsLogReader
       # one would be a worse answer than the one boot-time query this costs.
       return unless started_at
 
-      RailsLogReader.guard { record(payload, (now_ns - started_at) / 1_000_000.0) }
+      RailsLogReader.guard { record(payload, (now_ns - started_at) / 1_000_000.0, callsite:) }
     end
 
     # `event.time` is float milliseconds off the same CLOCK_MONOTONIC everything else here
     # reads, taken on the background thread when the query really went to the database — so
     # it, and not this moment, is what `at_mono` carries, while `seq` records the replay.
-    # `event.duration` is Rails' own measurement of a query this thread never saw run.
+    # `event.duration` is Rails' own measurement of a query this thread never saw run. No
+    # callsite: this stack is the flush's, and says nothing about the code that issued it.
     def publish_event(event)
       RailsLogReader.guard do
         record(event.payload, event.duration, at_mono: (event.time * 1_000_000).round)
@@ -249,7 +250,7 @@ module RailsLogReader
 
       def now_ns = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
 
-      def record(payload, duration_ms, at_mono: nil)
+      def record(payload, duration_ms, at_mono: nil, callsite: nil)
         query = { sql: payload[:sql], name: payload[:name], duration_ms:,
                   cached: payload[:cached] || false, async: payload[:async] || false }
         # Rails 7.1 and 7.2 carry no `:row_count` at all — nor the `:transaction` this file
@@ -257,8 +258,31 @@ module RailsLogReader
         # than sent as a zero that would read as a query returning nothing.
         query[:row_count] = payload[:row_count] if payload.key?(:row_count)
         query[:binds] = binds(payload)
+        query[:callsite] = callsite if callsite
 
         RailsLogReader.emit("sql", query, request_id: Current.request_id, at_mono:)
+      end
+
+      # The first frame the Host app's own backtrace cleaner keeps — the loop
+      # ActiveRecord::LogSubscriber runs for the `↳` line `verbose_query_logs` prints, so this
+      # is that line's text byte for byte, a team's own cleaner customisations included, and
+      # captured whether the setting is on or not. Usually relative to the app root, and nil
+      # for a query issued from anywhere the cleaner silences, which has no `↳` line either.
+      #
+      # This file's frames are skipped by hand: it sits under config/initializers/, which the
+      # cleaner keeps as app code, so it would otherwise be the first clean frame of every
+      # query there is. A Ruby without `Thread.each_caller_location` pays for the whole stack
+      # up front, as ActiveRecord itself does there.
+      def callsite
+        cleaner = ActiveRecord::LogSubscriber.backtrace_cleaner
+        clean = ->(location) { cleaner.clean_frame(location) unless location.path == __FILE__ }
+        return caller_locations.lazy.filter_map(&clean).first unless Thread.respond_to?(:each_caller_location)
+
+        Thread.each_caller_location do |location|
+          frame = clean.(location)
+          return frame if frame
+        end
+        nil
       end
 
       # Filtered here, by us, with the filter `ActiveRecord::Base#inspect` uses, because
@@ -433,12 +457,16 @@ module RailsLogReader
 
     private
       def record(severity, message, frames)
-        RailsLogReader.emit("app_log", {
+        source, frame = source_of(frames)
+        line = {
           severity: SEVERITIES.fetch(severity, "unknown"),
           message: message.to_s.gsub(ANSI, ""),
-          source: source_of(frames),
+          source:,
           tags: current_tags
-        }, request_id: Current.request_id)
+        }
+        line[:callsite] = frame.to_s if frame
+
+        RailsLogReader.emit("app_log", line, request_id: Current.request_id)
       end
 
       # Deterministic, and never a guess at the message's shape: the first frame that is not
@@ -448,11 +476,14 @@ module RailsLogReader
       # `lib/tasks`, from an initializer or typed into `rails c` is `app` wherever its file
       # happens to sit. An app carrying an engine as a `path:` gem is the coarse case: those
       # frames sit under a gem root too, and read as `rails`.
+      #
+      # The frame comes back beside the verdict and becomes the line's callsite — a gem's own
+      # frame when a gem wrote the line. Nil when nothing lies outside the machinery.
       def source_of(frames)
         frame = frames&.find { |location| !@machinery_paths.include?(location.path) }
-        return "rails" unless frame&.path
+        return [ "rails", nil ] unless frame&.path
 
-        frame.path.start_with?(*@gem_roots) ? "rails" : "app"
+        [ frame.path.start_with?(*@gem_roots) ? "rails" : "app", frame ]
       end
 
       # Read, and only ever read. `Rails.logger.formatter` is dispatched to every sink and

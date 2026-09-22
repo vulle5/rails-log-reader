@@ -304,3 +304,83 @@ always did.
   render wrong the way an absent `duration_ms` once did, the rule this file bumps under is
   "when a field changes meaning" rather than "when a field could crash an older Reader" — and
   the moment `status` names is exactly what changed.
+
+### From #105 (a callsite for SQL and App log events): reusing `ActiveSupport::BacktraceCleaner` over reading it off a log line
+
+Click-to-editor ([#71](https://github.com/vulle5/rails-log-reader/issues/71)) needs every path
+the Detail column shows to be openable, not just backtrace frames. SQL and App log events
+carried no file/line at all: `SqlSubscriber#record` never called `caller_locations`, and
+`LoggerSink#add` already computed one — `caller_locations(1, FRAME_DEPTH)` — but only to feed
+`source_of`'s `app`/`rails` classification, discarding it afterward.
+
+- **Both payloads gain an optional `callsite: string`**, in the same raw
+  `"path:line:in `method'"` shape a backtrace frame already carries
+  (`Thread::Backtrace::Location#to_s`), so one future frame parser reads both without caring
+  which event kind it came from.
+- **SQL's `callsite` comes from the Host app's own cleaner,
+  `ActiveRecord::LogSubscriber.backtrace_cleaner`**, the one that prints the `↳ path:line`
+  line under a query when `verbose_query_logs` is on. After boot, that cleaner is
+  `Rails.backtrace_cleaner`. `record` walks `Thread.each_caller_location`, skips this file's
+  own frames, and keeps the first string `clean_frame` returns. That is the same loop
+  `ActiveRecord::LogSubscriber#query_source_location` itself runs on Rails 7.1 and 7.2. So the
+  captured value is byte-identical to what a developer already sees on the `↳` line, a
+  team's own cleaner customisations included, and it is captured whether or not that setting
+  is on. The frames of this file have to be skipped explicitly because they sit under
+  `config/initializers/`, which the cleaner's `app|config|lib|test` silencer lets through, so
+  without the skip the first clean frame would be the Initializer itself.
+  A hand-rolled alternative — walking
+  `caller_locations` to a fixed depth, skipping a manually maintained list of
+  `ActiveRecord`/`ActiveSupport` files — was rejected once a probe against the Example app showed
+  `ActiveSupport::Notifications`' own dispatch alone costs 13 frames before `ActiveRecord`'s
+  adapter internals even start, with a real finder chain going deeper still: reusing Rails' own
+  lazy, already-tested cleaner costs less code and cannot drift from what `verbose_query_logs`
+  prints.
+
+  As first written, this bullet named a *private* `ActiveSupport::BacktraceCleaner.new` and
+  `first_clean_location`. That was corrected before anything was built (#108) for two
+  reasons:
+  - `first_clean_location` only arrived in Rails 8.0. On 7.1 and 7.2 it would raise inside
+    `guard` and lose the whole SQL event, not just its `callsite`.
+  - It returns a `Location` whose `to_s` is an absolute path with Rails' raw template method
+    name. That is not what the `↳` line prints, so the claim that the two values are
+    byte-identical was false.
+
+  The value's shape is still `"path:line:in 'method'"`. What changes is how it reads: the
+  path is usually relative to `rails_root`, and generated `_app_views_…` suffixes are already
+  stripped from the method name. A query issued from outside `app|config|lib|test` (seeds,
+  `script/`) has no `callsite`, exactly as it has no `↳` line.
+- **App log's `callsite` is the exact frame `source_of` already found**, never a second,
+  independently computed one — `source_of` now returns the frame alongside its `app`/`rails`
+  verdict, so classification and location can never disagree.
+- **The two fields mean different things on purpose.** SQL's Callsite skips every gem in the
+  way to find genuine Host-app code, because "what triggered this query" should read past
+  framework and library alike. App log's Callsite stops at the very first frame outside this
+  file's own plumbing, even when what's left is a third-party gem's own line — the same
+  reasoning that already lets an engine's own log call read as `rails` rather than crediting
+  whichever Host-app line happened to call the engine. Same field name, two correct answers to
+  two different questions.
+- **Absence is unconditional**, not just an old-Initializer concern. A `load_async` query is
+  replayed by `EventBuffer#flush` on the request thread, whose stack reflects the flush rather
+  than the code that issued the query — the same divergence this ADR already names for
+  `seq`/`at_mono` on this exact path — so its `callsite` is left off rather than captured
+  misleadingly. A stack with no frame outside its own machinery leaves it off too. All three
+  reasons are handled the way `row_count`'s Rails 7.1/7.2 absence already is: absence, never an
+  error.
+- **No `WIRE_VERSION` bump.** `callsite` is a wholly new, optional field on both payloads;
+  nothing an older Reader already understood changes meaning, which is the one thing this file
+  bumps under.
+
+Considered and rejected: reading the callsite off the `↳` line `verbose_query_logs` already
+prints, rather than capturing anything new. That line is its own separate App log event, not
+part of the *Echo* — it holds no SQL text, so it never matches `isEcho`'s containment test (see
+the *Echo* entry, `CONTEXT.md`). Correlating it back to the query above it would have avoided a
+wire change entirely, and was rejected on three counts: it depends on a setting the developer
+can turn off, where capture does not; it says nothing for `SCHEMA`/`EXPLAIN` queries, which
+`ActiveRecord::LogSubscriber` never echoes at all but this project's own `SqlSubscriber`
+forwards on purpose; and it would stretch `isEcho`, a heuristic deliberately kept narrow —
+"never further back than the query directly before it" — into driving a file-opening action, a
+materially larger blast radius for being wrong than hiding a duplicate console line. The
+direction is reversed instead
+([#108](https://github.com/vulle5/rails-log-reader/issues/108)). The captured `callsite` is
+what proves the `↳` line to be an *Echo*, so the Detail column drops the loose line and shows
+the value on the query itself.

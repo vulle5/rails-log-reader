@@ -46,10 +46,13 @@
      colour it was already saying something with — a keyword, a warning, a Rails line. */
   --match: #ffe58f;
 
-  /* The one thing in the Reader that floats over its own column, and the only place a shadow
-     is what says so. Darker in the dark theme, where a light pill on a dark column needs more
-     under it to lift, not less. */
+  /* What floats over the columns — the new-activity pill and the Settings dialog — and the
+     only places a shadow is what says so. Darker in the dark theme, where a light surface on a
+     dark column needs more under it to lift, not less. */
   --shadow: rgb(0 0 0 / 18%);
+  /* Behind the Settings dialog. Heavier in the dark theme, where a light dim barely shows. */
+  --backdrop: rgb(20 24 29 / 22%);
+  --code-bg: #e4e7ec;
 }
 
 :root[data-theme="dark"] {
@@ -84,6 +87,8 @@
   --match: rgb(187 128 9 / 55%);
 
   --shadow: rgb(0 0 0 / 45%);
+  --backdrop: rgb(0 0 0 / 50%);
+  --code-bg: var(--bg-sunken);
 }
 
 * {
@@ -240,7 +245,7 @@ body {
 }
 
 /* Never shrunk, so it is `.app-name` alone that gives ground and truncates under an ellipsis
-   when the bar is narrow — the search box and theme switch stay their full width. */
+   when the bar is narrow — the search box and Settings trigger stay their full width. */
 .reader-bar-controls {
   display: flex;
   flex-shrink: 0;
@@ -292,6 +297,186 @@ body {
   border-color: var(--border);
   background: var(--selected);
   color: var(--fg);
+}
+
+.settings-trigger,
+.settings-close {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-trigger:hover,
+.settings-close:hover {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+
+/* No padding and no border on the dialog's own box: `.settings-panel` fills it exactly, so the
+   dialog itself is a click target only over the backdrop. */
+.settings {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+
+/* Grows in and fades on open, and back out on close. `display` and `overlay` transition
+   discretely, so a closing dialog stays in the top layer until its fade has finished. */
+.settings,
+.settings::backdrop {
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out,
+    display 140ms allow-discrete,
+    overlay 140ms allow-discrete;
+}
+
+.settings {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.settings[open] {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Dimmed and only lightly blurred: the columns behind stay legible, so a Theme change is
+   still seen repainting them. */
+.settings::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(1px);
+  opacity: 0;
+}
+
+.settings[open]::backdrop {
+  opacity: 1;
+}
+
+@starting-style {
+  .settings[open],
+  .settings[open]::backdrop {
+    opacity: 0;
+  }
+
+  .settings[open] {
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings,
+  .settings::backdrop {
+    transition: none;
+  }
+}
+
+.settings-panel {
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  font-family: var(--ui);
+  font-size: 12px;
+}
+
+.settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-heading h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Where the dialog was opened at, until it closes. */
+.setting-targeted {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 4px;
+}
+
+.setting-label {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+.setting-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-description,
+.setting-error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.setting-description {
+  color: var(--fg-faint);
+  line-height: 1.6;
+}
+
+.setting-description code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.setting-error {
+  color: var(--error);
+}
+
+.editor-scheme {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.editor-scheme:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+.editor-scheme[aria-invalid="true"] {
+  border-color: var(--error);
 }
 
 /* Lit, never hidden: a background under the characters that matched, and nothing done to
@@ -1211,6 +1396,15 @@ mark.search-match {
   font-style: italic;
 }
 
+.sql-callsite,
+.log-callsite {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
 /* Not styled as an error — nothing failed. It is the file saying what it could not carry,
    and it has to be legible without pretending the query is broken. */
 .cut {
@@ -1226,6 +1420,7 @@ mark.search-match {
   display: flex;
   gap: 6px;
   align-items: baseline;
+  flex-wrap: wrap;
   background: var(--bg-sunken);
   font-size: 12px;
   content-visibility: auto;
@@ -1271,9 +1466,18 @@ mark.search-match {
   color: var(--fg-muted);
 }
 
+/* Grows into the row rather than wrapping under the severity: `.entry-log` wraps only so
+   that a callsite can start a line of its own. */
 .log-message {
+  flex: 1 1 0;
+  min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.log-callsite {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .exception {
@@ -1340,6 +1544,12 @@ mark.search-match {
 /* The Host app's own frames, full contrast against `.backtrace`'s muted default. */
 .backtrace-host {
   color: var(--fg-strong);
+}
+
+/* Only the hovered frame's, and only while the open modifier is held. */
+.source-location-armed {
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .backtrace-reveal {

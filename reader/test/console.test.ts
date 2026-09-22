@@ -56,16 +56,18 @@ describe("the Console stream", () => {
     expect(messages(stream)).toEqual(["the only line here"])
   })
 
-  test("keeps the Echo, which is the one place it is kept", () => {
-    // The detail column drops this line — the same query said again and worse. The Console
-    // is the log, so the log is what it shows.
+  test("keeps both Echoes, which is the one place they are kept", () => {
+    // The detail column drops these lines — the same query and callsite said again and worse.
+    // The Console is the log, so the log is what it shows.
+    const callsite = "app/controllers/posts_controller.rb:9:in 'PostsController#show'"
     const run = aRun("srv-1")
     const stream = theConsole(
-      run.sql("req-1", 'SELECT "posts".* FROM "posts"'),
+      run.sql("req-1", 'SELECT "posts".* FROM "posts"', { callsite }),
       run.log("req-1", '  Post Load (0.4ms)  SELECT "posts".* FROM "posts"', { source: "rails" }),
+      run.log("req-1", `  \u21b3 ${callsite}`, { source: "rails" }),
     )
 
-    expect(messages(stream)).toHaveLength(1)
+    expect(messages(stream)).toHaveLength(2)
   })
 
   test("names the Activity table row each line selects: its request's, or its Run's", () => {

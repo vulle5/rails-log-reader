@@ -191,23 +191,26 @@ describe("the timeline", () => {
     expect(timeline(container)).toEqual(["SELECT 1", "Feed cache MISS", "SELECT 2", "Feed cache WRITE"])
   })
 
-  test("shows a query once, not beside the line Rails logged it as", async () => {
+  test("shows a query once, not beside the lines Rails logged it as, with its callsite under it", async () => {
     const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = 12 LIMIT 1 /*action='show'*/`
+    const callsite = "app/controllers/posts_controller.rb:9:in 'PostsController#show'"
     const run = aRun("srv-1")
     const container = await theReader(
       run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", statement, { name: "Post Load" }),
+      run.sql("req-1", statement, { name: "Post Load", callsite }),
       run.log("req-1", `  Post Load (0.2ms)  ${statement}`, { severity: "debug", source: "rails" }),
-      run.log("req-1", "  \u21b3 app/controllers/posts_controller.rb:9", { severity: "debug", source: "rails" }),
+      run.log("req-1", `  \u21b3 ${callsite}`, { severity: "debug", source: "rails" }),
       run.finish("req-1"),
     )
 
     await select(container, "/posts/12")
 
-    // The highlighted, bind-carrying event and its callsite — and not Rails' rounded,
-    // unhighlighted rendering of the query in between them.
-    expect(timeline(container)).toEqual([statement, "  \u21b3 app/controllers/posts_controller.rb:9"])
-    expect(entries(container, ".entry-sql")).toHaveLength(1)
+    // The highlighted, bind-carrying event with its callsite — and not Rails' rounded,
+    // unhighlighted rendering of the query, nor its loose line naming the same callsite.
+    expect(timeline(container)).toEqual([statement])
+    expect(entries(container, ".entry-sql .sql-callsite").map((line) => line.textContent)).toEqual([
+      `\u21b3 ${callsite}`,
+    ])
   })
 
   test("shows an App log event's severity and keeps a Rails line labelled apart", async () => {
@@ -222,6 +225,53 @@ describe("the timeline", () => {
 
     expect(entries(container, ".entry-log")[0]?.querySelector(".log-severity")?.textContent).toBe("warn")
     expect(entries(container, ".entry-log")[1]?.className).toContain("log-from-rails")
+  })
+
+  test("shows an app-sourced log event's callsite under its line, as emitted, and a rails-sourced one's not at all", async () => {
+    const own = "app/controllers/feed_controller.rb:7:in 'FeedController#index'"
+    const gem = "/home/dev/.gem/ruby/3.4.0/gems/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.header(),
+      run.start("req-1", "GET", "/feed"),
+      run.log("req-1", "Feed cache MISS", { callsite: own }),
+      run.log("req-1", "Rendered feed/index.html.erb", { source: "rails", callsite: gem }),
+    )
+
+    await select(container, "/feed")
+
+    // Raw: never shortened against rails_root.
+    expect(entries(container, ".entry-log .log-callsite").map((line) => line.textContent)).toEqual([
+      `\u21b3 ${own}`,
+    ])
+    expect(timeline(container)).toEqual(["Feed cache MISS", "Rendered feed/index.html.erb"])
+  })
+
+  test("shows no callsite line for a log event that carries none", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(run.start("req-1", "GET", "/feed"), run.log("req-1", "Feed cache MISS"))
+
+    await select(container, "/feed")
+
+    expect(entries(container, ".log-callsite")).toHaveLength(0)
+  })
+
+  test("drops an Echo's callsite along with the Echo", async () => {
+    const statement = "SELECT 1"
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/feed"),
+      run.sql("req-1", statement),
+      run.log("req-1", `  Post Load (0.2ms)  ${statement}`, {
+        severity: "debug",
+        source: "rails",
+        callsite: "/home/dev/.gem/activerecord/lib/active_record/log_subscriber.rb:30:in 'sql'",
+      }),
+    )
+
+    await select(container, "/feed")
+
+    expect(entries(container, ".log-callsite")).toHaveLength(0)
   })
 
   test("shows a log event's tags, for the team that invested most in logging", async () => {
@@ -254,6 +304,25 @@ describe("a query", () => {
 
     // What is read is what pastes into a console: the highlighting added spans, not text.
     expect((await theQuery(container)).querySelector(".sql")?.textContent).toBe(QUERY_LOGS)
+  })
+
+  test("shows its callsite as emitted, whether or not Rails printed a line for it", async () => {
+    const callsite = "app/views/posts/index.html.erb:11:in 'block in _app_views_posts_index_html_erb'"
+    const run = aRun("srv-1")
+    const container = await theReader(run.start("req-1", "GET", "/posts"), run.sql("req-1", QUERY_LOGS, { callsite }))
+
+    await select(container, "/posts")
+
+    expect((await theQuery(container)).querySelector(".sql-callsite")?.textContent).toBe(`\u21b3 ${callsite}`)
+  })
+
+  test("shows no callsite line for a query that carries none", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
+
+    await select(container, "/posts/12")
+
+    expect((await theQuery(container)).querySelector(".sql-callsite")).toBeNull()
   })
 
   test("is highlighted by the tokenizer, keyword and comment apart", async () => {
@@ -380,6 +449,19 @@ describe("the schema chip", () => {
 
     expect(timeline(container)).toEqual(["SELECT 1"])
     expect(chip(container).getAttribute("aria-pressed")).toBe("false")
+  })
+
+  test("hides a hidden query's callsite along with it", async () => {
+    const run = aRun("srv-1")
+    const container = await theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", callsite: "app/models/post.rb:3:in '<class:Post>'" }),
+      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+    )
+
+    await select(container, "/posts/12")
+
+    expect(entries(container, ".sql-callsite")).toHaveLength(0)
   })
 
   test("brings them back, interleaved where they were emitted, once the chip is on", async () => {
