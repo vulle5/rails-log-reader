@@ -240,8 +240,7 @@ describe("the timeline", () => {
 
     await select(container, "/feed")
 
-    // Raw: never shortened against rails_root. A rails-sourced line's Callsite is by
-    // construction a gem frame — where Rails formatted the message — so it is not shown.
+    // Raw: never shortened against rails_root.
     expect(entries(container, ".entry-log .log-callsite").map((line) => line.textContent)).toEqual([
       `\u21b3 ${own}`,
     ])
