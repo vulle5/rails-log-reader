@@ -293,7 +293,7 @@ body {
   background: var(--bg-raised);
 }
 
-.theme-choice-chosen {
+:where(.theme-choice)[aria-pressed="true"] {
   border-color: var(--border);
   background: var(--selected);
   color: var(--fg);
@@ -418,7 +418,7 @@ body {
 }
 
 /* Where the dialog was opened at, until it closes. */
-.setting-targeted {
+:where(.setting)[data-targeted] {
   outline: 2px solid var(--accent);
   outline-offset: 6px;
   border-radius: 4px;
@@ -694,8 +694,8 @@ mark.search-match {
 
 /* The selected row and the detail column are one thing seen twice, so the mark has to be
    readable at a glance from across the table — a background, not a hairline. */
-.activity-row-selected,
-.activity-row-selected:hover {
+:where(.activity-row)[aria-current="true"],
+:where(.activity-row)[aria-current="true"]:hover {
   background: var(--selected);
 }
 
@@ -784,7 +784,7 @@ mark.search-match {
   background: var(--bg-sunken);
 }
 
-.row-kind-tab-showing {
+:where(.row-kind-tab)[aria-selected="true"] {
   border-color: var(--border);
   background: var(--selected);
   color: var(--fg);
@@ -838,9 +838,9 @@ mark.search-match {
 
 /* A finished request that never had a status: it raised before there was a response to read
    one off. In the error colour, unlike the dot above, because this one did fail — the same
-   reason `.status-5xx` below shares it rather than getting a colour of its own. */
+   reason `[data-status="5xx"]` below shares it rather than getting a colour of its own. */
 .no-status,
-.status-5xx {
+[data-status="5xx"] {
   color: var(--error);
 }
 
@@ -849,11 +849,11 @@ mark.search-match {
    logged `.warn` or `.error` call. 5xx has no token of its own: it is `--error`, above, one
    fewer colour for the same failure `.no-status` already means. 1xx, 2xx and 3xx carry no
    class at all and stay exactly as they render today. */
-.status-4xx {
+[data-status="4xx"] {
   color: var(--status-4xx);
 }
 
-/* The method colours (`.method-*`) live beside `.detail-method` below, rather than here:
+/* The method colours (`[data-method]`) live beside `.detail-method` below, rather than here:
    they override that rule's own default and have to come after it in the cascade to do so. */
 
 /* The climbing elapsed, in the column a finished request shows its total in: the same
@@ -869,7 +869,7 @@ mark.search-match {
 
 /* Frozen where its Run ended: the number stopped being about a request that is still
    running, so it stops looking like one. */
-.elapsed-frozen {
+[data-elapsed="frozen"] {
   background: var(--bg-sunken);
   color: var(--fg-faint);
 }
@@ -896,23 +896,23 @@ mark.search-match {
 
 /* Set apart and set back, and deliberately not in the error colour: a request whose Run was
    reaped did not fail, it stopped being answerable. */
-.activity-row-interrupted {
+[data-state="interrupted"] {
   background: var(--bg-sunken);
 }
 
-.activity-row-interrupted .cell-path,
-.activity-row-interrupted .cell-action,
-.activity-row-interrupted .cell-method {
+[data-state="interrupted"] .cell-path,
+[data-state="interrupted"] .cell-action,
+[data-state="interrupted"] .cell-method {
   color: var(--fg-faint);
 }
 
-.activity-row-interrupted td:first-child {
+[data-state="interrupted"] td:first-child {
   box-shadow: inset 3px 0 0 var(--fg-faint);
 }
 
 /* A *Run row*: what one Run emitted with no owning request. It spans the columns a request
    fills with its method, path and outcome, because a Run has none of those. */
-.activity-row-run {
+[data-kind="run"] {
   background: var(--bg-sunken);
 }
 
@@ -930,7 +930,7 @@ mark.search-match {
 /* The *Run marker*: a rule across the row where a `run_header` landed, meaning literally
    *this Run started here* — never *everything below belongs to it*, which is why it is a
    line at one position and not a band over the rows under it. */
-.activity-row-marker td {
+[data-marker] td {
   border-top: 2px solid var(--accent);
 }
 
@@ -992,16 +992,16 @@ mark.search-match {
 
 /* The lit group: the line under the pointer, its siblings, and — across the gutter — their
    row. Additive and nothing more. */
-.console-line-lit,
-.console-line-lit:hover {
+:where(.console-line)[data-grouping~="lit"],
+:where(.console-line)[data-grouping~="lit"]:hover {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
 }
 
 /* The pinned group, marked harder and declared last so it survives a hover passing over it —
    which is the whole reason a pin exists. Sweeping the rail after clicking is what happens
    next, and the group you just fixed in place has to still be there when you stop. */
-.console-line-pinned,
-.console-line-pinned:hover {
+:where(.console-line)[data-grouping~="pinned"],
+:where(.console-line)[data-grouping~="pinned"]:hover {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg));
   box-shadow: inset 2px 0 0 var(--accent);
 }
@@ -1039,19 +1039,19 @@ mark.search-match {
   white-space: nowrap;
 }
 
-.log-from-rails .console-message {
+[data-source="rails"] .console-message {
   color: var(--fg-muted);
 }
 
-.log-warn .console-severity,
-.log-warn .console-message {
+[data-level="warn"] .console-severity,
+[data-level="warn"] .console-message {
   color: var(--warn);
 }
 
-.log-error .console-severity,
-.log-error .console-message,
-.log-fatal .console-severity,
-.log-fatal .console-message {
+[data-level="error"] .console-severity,
+[data-level="error"] .console-message,
+[data-level="fatal"] .console-severity,
+[data-level="fatal"] .console-message {
   color: var(--error);
 }
 
@@ -1102,7 +1102,7 @@ mark.search-match {
    this control must never blur. It is the same mark whichever axis is off, because "hidden"
    is the same fact about the rail either way — and `rails` wears it on open, which is how
    the Console says out loud that it is not showing everything it holds. */
-.chip-off {
+:where(.chip)[aria-pressed="false"] {
   background: none;
   color: var(--fg-faint);
   text-decoration: line-through;
@@ -1117,9 +1117,9 @@ mark.search-match {
   color: var(--error);
 }
 
-.chip-off.chip-level-warn,
-.chip-off.chip-level-error,
-.chip-off.chip-level-fatal {
+.chip-level-warn[aria-pressed="false"],
+.chip-level-error[aria-pressed="false"],
+.chip-level-fatal[aria-pressed="false"] {
   color: var(--fg-faint);
 }
 
@@ -1149,8 +1149,8 @@ mark.search-match {
 /* A stub is a rule that stopped, so it has to look stopped rather than aimed. Both ways of
    failing to reach a row are drawn alike — what differs between them is what the caption
    says, because they are two different facts about where the row is. */
-.grouping-rule-off-screen,
-.grouping-rule-not-shown {
+[data-rule="off-screen"],
+[data-rule="not-shown"] {
   stroke-dasharray: 3 3;
 }
 
@@ -1170,15 +1170,15 @@ mark.search-match {
 
 /* The far end of the group, hovered and pinned. The row keeps whatever else it was saying
    about itself — in flight, Interrupted, selected — and gains an accent tint on top of it. */
-.activity-row-lit td {
+:where(.activity-row)[data-grouping~="lit"] td {
   background: color-mix(in srgb, var(--accent) 7%, var(--bg));
 }
 
-.activity-row-pinned td {
+:where(.activity-row)[data-grouping~="pinned"] td {
   background: color-mix(in srgb, var(--accent) 14%, var(--bg));
 }
 
-.activity-row-pinned td:first-child {
+:where(.activity-row)[data-grouping~="pinned"] td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -1224,30 +1224,30 @@ mark.search-match {
 }
 
 /* The same lookup as `.cell-method` above, so a verb reads one colour in the Activity
-   table and the same colour here — `format.ts`'s `methodClassName` is what makes it one
+   table and the same colour here — `format.ts`'s `methodCategory` is what makes it one
    function rather than two copies of this list. Declared after `.detail-method`, above,
    because these override its default `--accent` and — tied on specificity — only later rules
-   in the file win. `.method-get` restates that default explicitly rather than leaving GET to
-   fall through to it, so nothing here depends on staying below `.detail-method` by accident.
-   A *Run row*'s kind (`server`, `rake`, …) carries none of these classes and keeps
+   in the file win. `[data-method="get"]` restates that default explicitly rather than leaving
+   GET to fall through to it, so nothing here depends on staying below `.detail-method` by
+   accident. A *Run row*'s kind (`server`, `rake`, …) carries no `data-method` and keeps
    `.detail-method`'s own colour untouched — it is not a method to begin with. */
-.method-get {
+[data-method="get"] {
   color: var(--accent);
 }
 
-.method-post {
+[data-method="post"] {
   color: var(--method-post);
 }
 
-.method-put-patch {
+[data-method="put-patch"] {
   color: var(--method-put-patch);
 }
 
-.method-delete {
+[data-method="delete"] {
   color: var(--method-delete);
 }
 
-.method-other {
+[data-method="other"] {
   color: var(--fg);
 }
 
@@ -1314,29 +1314,29 @@ mark.search-match {
   overflow-wrap: anywhere;
 }
 
-.sql-keyword {
+[data-token="keyword"] {
   color: var(--sql-keyword);
   font-weight: 600;
 }
 
-.sql-identifier {
+[data-token="identifier"] {
   color: var(--sql-identifier);
 }
 
-.sql-string {
+[data-token="string"] {
   color: var(--sql-string);
 }
 
-.sql-number {
+[data-token="number"] {
   color: var(--sql-number);
 }
 
-.sql-placeholder {
+[data-token="placeholder"] {
   color: var(--sql-placeholder);
   font-weight: 600;
 }
 
-.sql-comment {
+[data-token="comment"] {
   color: var(--sql-comment);
   font-style: italic;
 }
@@ -1437,21 +1437,21 @@ mark.search-match {
   color: var(--fg-faint);
 }
 
-.log-warn .log-severity,
-.log-warn .log-message {
+[data-level="warn"] .log-severity,
+[data-level="warn"] .log-message {
   color: var(--warn);
 }
 
-.log-error .log-severity,
-.log-error .log-message,
-.log-fatal .log-severity,
-.log-fatal .log-message {
+[data-level="error"] .log-severity,
+[data-level="error"] .log-message,
+[data-level="fatal"] .log-severity,
+[data-level="fatal"] .log-message {
   color: var(--error);
 }
 
 /* Rails' own lines are kept and set back, never dropped: the developer's own calls are the
    ones the eye should land on first. */
-.log-from-rails .log-message {
+[data-source="rails"] .log-message {
   color: var(--fg-muted);
 }
 
@@ -1542,12 +1542,12 @@ mark.search-match {
 }
 
 /* The Host app's own frames, full contrast against `.backtrace`'s muted default. */
-.backtrace-host {
+[data-frame="host"] {
   color: var(--fg-strong);
 }
 
 /* Only the hovered frame's, and only while the open modifier is held. */
-.source-location-armed {
+:where(.source-location)[data-armed] {
   text-decoration: underline;
   cursor: pointer;
 }

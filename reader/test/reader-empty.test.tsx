@@ -1,26 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import { screen, within } from "@testing-library/react"
 
 import type { EmptyState } from "../src/shared/initializer-status"
+import type { Envelope } from "../src/shared/wire"
 import { aRun } from "./sidecar.fixtures"
-
-const { act } = await import("react")
-const { createRoot } = await import("react-dom/client")
-const { Reader } = await import("../src/ui/Reader")
-const { activityTable } = await import("../src/shared/activity")
-
-declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = true
-
-const mounted: { unmount: () => void }[] = []
-
-afterEach(() => {
-  act(() => {
-    for (const root of mounted.splice(0)) root.unmount()
-  })
-  document.body.innerHTML = ""
-})
+import { activityRows, column, openTheReader } from "./reader.harness"
 
 const MASTER = "/home/dev/rails-log-reader/reader/rails/rails_log_reader.rb"
 
@@ -29,95 +13,82 @@ const MASTER = "/home/dev/rails-log-reader/reader/rails/rails_log_reader.rb"
  * `/initializer-status` read and the Sidecar's `loaded` message, handed straight in — the
  * way #29's banner is tested — over a fold seeded from whatever envelopes the test gives.
  */
-async function theReader(emptyState: EmptyState | null, ...envelopes: Parameters<ReturnType<typeof activityTable>["fold"]>[0]) {
-  const activity = activityTable()
-  activity.fold(envelopes)
-
-  const container = document.createElement("div")
-  document.body.append(container)
-  await act(async () => {
-    const root = createRoot(container)
-    mounted.push(root)
-    root.render(<Reader rows={activity.rows} emptyState={emptyState} />)
-  })
-  return container
+function theReader(emptyState: EmptyState | null, ...envelopes: Envelope[]) {
+  return openTheReader(envelopes, { emptyState })
 }
 
-function emptyScreen(container: HTMLElement) {
-  return container.querySelector('[aria-label="Activity table"] .empty-state')
-}
+const EMPTY_SCREEN = { name: "Why the Activity table is empty" }
 
-function theEmptyScreen(container: HTMLElement) {
-  const found = emptyScreen(container)
-  if (found === null) throw new Error("the Activity table is not saying why it is empty")
-  return found
+function theEmptyScreen() {
+  return within(column("Activity table")).getByRole("status", EMPTY_SCREEN)
 }
 
 /** The one command a state names — and there is only ever one. */
-function command(container: HTMLElement) {
-  const commands = theEmptyScreen(container).querySelectorAll("code.empty-command")
+function command() {
+  const commands = within(theEmptyScreen()).getAllByRole("code")
   expect(commands).toHaveLength(1)
   return commands[0]?.textContent
 }
 
 describe("an empty Reader says why (#28)", () => {
-  test("names a missing Initializer, and the command that copies it in", async () => {
-    const container = await theReader({ kind: "not_installed", masterPath: MASTER })
+  test("names a missing Initializer, and the command that copies it in", () => {
+    theReader({ kind: "not_installed", masterPath: MASTER })
 
-    expect(theEmptyScreen(container).textContent).toContain("not installed")
-    expect(command(container)).toBe(`cp ${MASTER} config/initializers/rails_log_reader.rb`)
+    expect(theEmptyScreen()).toHaveTextContent("not installed")
+    expect(command()).toBe(`cp ${MASTER} config/initializers/rails_log_reader.rb`)
   })
 
-  test("quotes a master copy whose path the shell would otherwise split", async () => {
-    const container = await theReader({ kind: "not_installed", masterPath: "/Users/dev/My Code/reader/rails/rails_log_reader.rb" })
+  test("quotes a master copy whose path the shell would otherwise split", () => {
+    theReader({ kind: "not_installed", masterPath: "/Users/dev/My Code/reader/rails/rails_log_reader.rb" })
 
-    expect(command(container)).toBe(
+    expect(command()).toBe(
       "cp '/Users/dev/My Code/reader/rails/rails_log_reader.rb' config/initializers/rails_log_reader.rb",
     )
   })
 
-  test("names an Initializer that is not enabled, and the command that enables it", async () => {
-    const container = await theReader({ kind: "not_enabled" })
+  test("names an Initializer that is not enabled, and the command that enables it", () => {
+    theReader({ kind: "not_enabled" })
 
-    expect(theEmptyScreen(container).textContent).toContain("not enabled")
-    expect(command(container)).toBe("touch log/rails_log_reader.enabled")
+    expect(theEmptyScreen()).toHaveTextContent("not enabled")
+    expect(command()).toBe("touch log/rails_log_reader.enabled")
   })
 
-  test("names an enabled Initializer with nothing written yet, and the command that boots it", async () => {
-    const container = await theReader({ kind: "idle" })
+  test("names an enabled Initializer with nothing written yet, and the command that boots it", () => {
+    theReader({ kind: "idle" })
 
-    expect(theEmptyScreen(container).textContent).toContain("nothing has happened yet")
-    expect(command(container)).toBe("bin/rails restart")
+    expect(theEmptyScreen()).toHaveTextContent("nothing has happened yet")
+    expect(command()).toBe("bin/rails restart")
   })
 
-  test("says three different things for the three causes", async () => {
+  test("says three different things for the three causes", () => {
     const said = new Set<string | null>()
     for (const state of [{ kind: "not_installed", masterPath: MASTER }, { kind: "not_enabled" }, { kind: "idle" }] as const) {
-      const container = await theReader(state)
-      said.add(theEmptyScreen(container).querySelector("h3")?.textContent ?? null)
+      const { unmount } = theReader(state)
+      said.add(within(theEmptyScreen()).getByRole("heading").textContent)
+      unmount()
     }
 
     expect(said.size).toBe(3)
   })
 
-  test("goes the moment there is a row to show, whatever the files said", async () => {
+  test("goes the moment there is a row to show, whatever the files said", () => {
     const rails = aRun("srv-1")
-    const container = await theReader({ kind: "not_enabled" }, rails.header())
+    theReader({ kind: "not_enabled" }, rails.header())
 
-    expect(emptyScreen(container)).toBeNull()
-    expect(container.querySelectorAll(".activity-row")).toHaveLength(1)
+    expect(screen.queryByRole("status", EMPTY_SCREEN)).not.toBeInTheDocument()
+    expect(activityRows()).toHaveLength(1)
   })
 
-  test("says nothing while it does not know yet", async () => {
-    const container = await theReader(null)
+  test("says nothing while it does not know yet", () => {
+    theReader(null)
 
-    expect(emptyScreen(container)).toBeNull()
+    expect(screen.queryByRole("status", EMPTY_SCREEN)).not.toBeInTheDocument()
   })
 
-  test("keeps the three columns, and the table's headings, around what it says", async () => {
-    const container = await theReader({ kind: "idle" })
+  test("keeps the three columns, and the table's headings, around what it says", () => {
+    theReader({ kind: "idle" })
 
-    expect(container.querySelectorAll("[role='region']")).toHaveLength(3)
-    expect(container.querySelectorAll("table.activity thead th").length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("region")).toHaveLength(3)
+    expect(within(column("Activity table")).getAllByRole("columnheader").length).toBeGreaterThan(0)
   })
 })

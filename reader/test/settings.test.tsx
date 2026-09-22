@@ -1,212 +1,164 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import { screen, within } from "@testing-library/react"
+import type { UserEvent } from "@testing-library/user-event"
 
-const { act } = await import("react")
-const { createRoot } = await import("react-dom/client")
-const { Reader } = await import("../src/ui/Reader")
+import { openTheReader } from "./reader.harness"
 
-declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = true
-
-const mounted: { unmount: () => void }[] = []
-
-function unmountAll() {
-  act(() => {
-    for (const root of mounted.splice(0)) root.unmount()
-  })
+function settingsDialog() {
+  return screen.getByRole("dialog", { hidden: true })
 }
 
-afterEach(() => {
-  unmountAll()
-  localStorage.clear()
-  document.body.innerHTML = ""
-})
-
-async function openTheReader() {
-  const container = document.createElement("div")
-  document.body.append(container)
-  await act(async () => {
-    const root = createRoot(container)
-    mounted.push(root)
-    root.render(<Reader />)
-  })
-  return container
+async function openSettings(user: UserEvent) {
+  await user.click(screen.getByRole("button", { name: "Settings" }))
+  return screen.getByRole("dialog", { name: "Settings" })
 }
 
-function settingsDialog(container: HTMLElement) {
-  const dialog = container.querySelector<HTMLDialogElement>("dialog[aria-label='Settings']")
-  if (dialog === null) throw new Error("the Reader has no Settings dialog")
-  return dialog
+function schemeField(dialog: HTMLElement) {
+  return within(dialog).getByRole("textbox", { name: "Editor scheme", hidden: true })
 }
 
-function button(scope: Element, named: string) {
-  const found = [...scope.querySelectorAll("button")].find((each) => each.textContent === named)
-  if (found === undefined) throw new Error(`no ${named} button`)
-  return found
+/** Typed as a person types it, replacing what was there. */
+async function type(user: UserEvent, field: HTMLElement, text: string) {
+  await user.clear(field)
+  // `{` opens a key descriptor in `user.type`; doubled, it is the character itself.
+  await user.type(field, text.replaceAll("{", "{{"))
 }
 
-async function click(element: Element) {
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-  })
-}
-
-async function openSettings(container: HTMLElement) {
-  await click(button(container.querySelector(".reader-bar-controls")!, "Settings"))
-  return settingsDialog(container)
+/** Leaving the field is what commits it: focus moving on to the next control. */
+async function leave(user: UserEvent) {
+  await user.tab()
 }
 
 describe("the Settings dialog", () => {
   test("is closed until its trigger in the reader bar is clicked", async () => {
-    const container = await openTheReader()
+    const { user } = openTheReader()
 
-    expect(settingsDialog(container).open).toBe(false)
+    expect(settingsDialog()).not.toHaveAttribute("open")
 
-    const dialog = await openSettings(container)
+    const dialog = await openSettings(user)
 
-    expect(dialog.open).toBe(true)
+    expect(dialog).toHaveAttribute("open")
   })
 
   test("closes on its Close button", async () => {
-    const container = await openTheReader()
-    const dialog = await openSettings(container)
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
 
-    await click(button(dialog, "Close"))
+    await user.click(within(dialog).getByRole("button", { name: "Close" }))
 
-    expect(dialog.open).toBe(false)
+    expect(dialog).not.toHaveAttribute("open")
   })
 
   test("closes on a click on the backdrop, and not on a click inside it", async () => {
-    const container = await openTheReader()
-    const dialog = await openSettings(container)
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
 
-    await click(dialog.querySelector("[role='group'][aria-label='Theme'] button")!)
-    expect(dialog.open).toBe(true)
+    await user.click(within(within(dialog).getByRole("group", { name: "Theme" })).getAllByRole("button")[0]!)
+    expect(dialog).toHaveAttribute("open")
 
-    await act(async () => {
-      dialog.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
-      dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-    })
-    expect(dialog.open).toBe(false)
+    // The dialog's own box is what the stylesheet leaves showing as the backdrop.
+    await user.click(dialog)
+    expect(dialog).not.toHaveAttribute("open")
   })
 
   test("stays open when a drag that began inside it is released over the backdrop", async () => {
-    const container = await openTheReader()
-    const dialog = await openSettings(container)
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
 
-    await act(async () => {
-      schemeField(dialog).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
-      dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-    })
+    await user.pointer([
+      { keys: "[MouseLeft>]", target: schemeField(dialog) },
+      { target: dialog },
+      { keys: "[/MouseLeft]", target: dialog },
+    ])
 
-    expect(dialog.open).toBe(true)
+    expect(dialog).toHaveAttribute("open")
   })
 
-  test("holds the Theme control, which the reader bar no longer does", async () => {
-    const container = await openTheReader()
+  test("holds the Theme control, which the reader bar no longer does", () => {
+    openTheReader()
 
-    const themes = [...container.querySelectorAll("[role='group'][aria-label='Theme']")]
+    const themes = screen.getAllByRole("group", { name: "Theme", hidden: true })
 
     expect(themes).toHaveLength(1)
-    expect(settingsDialog(container).contains(themes[0]!)).toBe(true)
+    expect(settingsDialog()).toContainElement(themes[0]!)
   })
 })
-
-function schemeField(dialog: HTMLDialogElement) {
-  const field = dialog.querySelector<HTMLInputElement>("input[aria-label='Editor scheme']")
-  if (field === null) throw new Error("the Settings dialog has no Editor scheme field")
-  return field
-}
-
-/** Typed as a person types it: a value React's own input tracking sees change, then an `input`. */
-async function type(field: HTMLInputElement, text: string) {
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, text)
-    field.dispatchEvent(new Event("input", { bubbles: true }))
-  })
-}
-
-async function leave(field: HTMLInputElement) {
-  await act(async () => {
-    field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-  })
-}
 
 const SCHEME_KEY = "rails-log-reader.editor-scheme"
 
 describe("the Editor scheme setting", () => {
   test("is empty until set, with the VS Code template shown as code in its description and never in the field", async () => {
-    const container = await openTheReader()
-    const dialog = await openSettings(container)
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
     const field = schemeField(dialog)
 
-    expect(field.value).toBe("")
-    expect(field.placeholder).toBe("")
-    expect(dialog.querySelector(".setting-description code")?.textContent).toBe("vscode://file{path}:{line}")
+    expect(field).toHaveValue("")
+    expect(field).not.toHaveAttribute("placeholder")
+    const setting = within(dialog).getByRole("listitem", { name: "Editor scheme" })
+    expect(within(setting).getByRole("code")).toHaveTextContent(/^vscode:\/\/file\{path\}:\{line\}$/)
     expect(localStorage.getItem(SCHEME_KEY)).toBeNull()
   })
 
   test("is not saved while it is being typed, only once the field is left", async () => {
-    const container = await openTheReader()
-    const field = schemeField(await openSettings(container))
+    const { user } = openTheReader()
+    const field = schemeField(await openSettings(user))
 
-    await type(field, "idea://open?file={path}&line={line}")
+    await type(user, field, "idea://open?file={path}&line={line}")
     expect(localStorage.getItem(SCHEME_KEY)).toBeNull()
 
-    await leave(field)
+    await leave(user)
     expect(localStorage.getItem(SCHEME_KEY)).toBe("idea://open?file={path}&line={line}")
   })
 
   test("is still set on the next page load", async () => {
-    const container = await openTheReader()
-    const field = schemeField(await openSettings(container))
-    await type(field, "subl://open?url=file://{path}&line={line}")
-    await leave(field)
+    const { user, unmount } = openTheReader()
+    const field = schemeField(await openSettings(user))
+    await type(user, field, "subl://open?url=file://{path}&line={line}")
+    await leave(user)
 
-    unmountAll()
-    const reopened = await openTheReader()
+    unmount()
+    openTheReader()
 
-    expect(schemeField(settingsDialog(reopened)).value).toBe("subl://open?url=file://{path}&line={line}")
+    expect(schemeField(settingsDialog())).toHaveValue("subl://open?url=file://{path}&line={line}")
   })
 
   test("is refused without a {path} in it, keeping the one saved before and saying why until it is fixed", async () => {
     localStorage.setItem(SCHEME_KEY, "vscode://file{path}")
-    const container = await openTheReader()
-    const field = schemeField(await openSettings(container))
+    const { user } = openTheReader()
+    const field = schemeField(await openSettings(user))
 
-    await type(field, "vscode://file{line}")
-    await leave(field)
+    await type(user, field, "vscode://file{line}")
+    await leave(user)
 
     expect(localStorage.getItem(SCHEME_KEY)).toBe("vscode://file{path}")
-    expect(field.getAttribute("aria-invalid")).toBe("true")
-    expect(errorShown(container)).toContain("{path}")
+    expect(field).toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByRole("alert")).toHaveTextContent("{path}")
 
-    await type(field, "vscode://file{path}:{line}")
-    await leave(field)
+    await type(user, field, "vscode://file{path}:{line}")
+    await leave(user)
 
     expect(localStorage.getItem(SCHEME_KEY)).toBe("vscode://file{path}:{line}")
-    expect(field.getAttribute("aria-invalid")).toBeNull()
-    expect(errorShown(container)).toBeNull()
+    expect(field).not.toHaveAttribute("aria-invalid")
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   test("reads a stored scheme with no {path} in it as unset", async () => {
     localStorage.setItem(SCHEME_KEY, "vscode://file{line}")
-    const container = await openTheReader()
+    const { user } = openTheReader()
 
-    expect(schemeField(await openSettings(container)).value).toBe("")
+    expect(schemeField(await openSettings(user))).toHaveValue("")
   })
 
   test("goes back to unset when the field is emptied", async () => {
     localStorage.setItem(SCHEME_KEY, "vscode://file{path}")
-    const container = await openTheReader()
-    const field = schemeField(await openSettings(container))
+    const { user } = openTheReader()
+    const field = schemeField(await openSettings(user))
 
-    await type(field, "  ")
-    await leave(field)
+    await type(user, field, "  ")
+    await leave(user)
 
     expect(localStorage.getItem(SCHEME_KEY)).toBeNull()
-    expect(errorShown(container)).toBeNull()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   test("reads as unset, and still opens, when site data is blocked and storage throws", async () => {
@@ -219,13 +171,13 @@ describe("the Editor scheme setting", () => {
     Storage.prototype.setItem = blocked
 
     try {
-      const container = await openTheReader()
-      const field = schemeField(await openSettings(container))
-      expect(field.value).toBe("")
+      const { user } = openTheReader()
+      const field = schemeField(await openSettings(user))
+      expect(field).toHaveValue("")
 
-      await type(field, "vscode://file{path}")
-      await leave(field)
-      expect(field.value).toBe("vscode://file{path}")
+      await type(user, field, "vscode://file{path}")
+      await leave(user)
+      expect(field).toHaveValue("vscode://file{path}")
     } finally {
       Storage.prototype.getItem = getItem
       Storage.prototype.setItem = setItem
@@ -234,18 +186,18 @@ describe("the Editor scheme setting", () => {
 })
 
 describe("each setting's description", () => {
-  function descriptions(dialog: HTMLDialogElement) {
-    return [...dialog.querySelectorAll(".setting")].map((setting) => ({
-      label: setting.querySelector(".setting-label")?.textContent,
-      description: setting.querySelector(".setting-description")?.textContent ?? null,
-    }))
+  /** What the description says, read off the text it is described by. */
+  function description(setting: HTMLElement | undefined) {
+    expect(setting).toHaveAccessibleDescription()
+    return within(setting!).getByText(/^URI your editor/)
   }
 
-  async function onPlatform(platform: string) {
+  async function settingsOn(platform: string) {
     const own = Object.getOwnPropertyDescriptor(navigator, "platform")
     Object.defineProperty(navigator, "platform", { value: platform, configurable: true })
     try {
-      return descriptions(await openSettings(await openTheReader()))
+      const { user } = openTheReader()
+      return within(await openSettings(user)).getAllByRole("listitem")
     } finally {
       if (own === undefined) delete (navigator as { platform?: string }).platform
       else Object.defineProperty(navigator, "platform", own)
@@ -253,24 +205,22 @@ describe("each setting's description", () => {
   }
 
   test("is Ctrl-worded off macOS, and absent for the Theme", async () => {
-    expect(await onPlatform("Linux x86_64")).toEqual([
-      { label: "Theme", description: null },
-      {
-        label: "Editor scheme",
-        description: "URI your editor opens files with, like vscode://file{path}:{line}. Ctrl-click a file location in the Detail column to open it.",
-      },
-    ])
+    const [theme, scheme, ...others] = await settingsOn("Linux x86_64")
+
+    expect(others).toEqual([])
+    expect(theme).toHaveAccessibleName("Theme")
+    expect(theme).not.toHaveAccessibleDescription()
+    expect(scheme).toHaveAccessibleName("Editor scheme")
+    expect(description(scheme)).toHaveTextContent(
+      "URI your editor opens files with, like vscode://file{path}:{line}. Ctrl-click a file location in the Detail column to open it.",
+    )
   })
 
   test("is ⌘-worded on macOS", async () => {
-    const [, scheme] = await onPlatform("MacIntel")
+    const [, scheme] = await settingsOn("MacIntel")
 
-    expect(scheme?.description).toBe(
+    expect(description(scheme)).toHaveTextContent(
       "URI your editor opens files with, like vscode://file{path}:{line}. ⌘-click a file location in the Detail column to open it.",
     )
   })
 })
-
-function errorShown(container: HTMLElement) {
-  return container.querySelector("[role='alert']")?.textContent ?? null
-}

@@ -1,119 +1,104 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import { screen, within } from "@testing-library/react"
 
-const { act } = await import("react")
-const { createRoot } = await import("react-dom/client")
-const { Reader } = await import("../src/ui/Reader")
-
-declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = true
-
-afterEach(() => {
-  document.body.innerHTML = ""
-})
-
-async function openTheReader(props: { appName?: string | null } = {}) {
-  const container = document.createElement("div")
-  document.body.append(container)
-  await act(async () => createRoot(container).render(<Reader {...props} />))
-  return container
-}
-
-function column(container: HTMLElement, name: string) {
-  const region = container.querySelector(`[aria-label="${name}"]`)
-  if (region === null) throw new Error(`the Reader has no ${name}`)
-  return region
-}
-
-function body(region: Element) {
-  const content = region.querySelector(".column-body")
-  if (content === null) throw new Error(`${region.getAttribute("aria-label")} has no content area`)
-  return content
-}
+import { activityRows, column, consoleLines, openTheReader } from "./reader.harness"
 
 describe("opening the Reader", () => {
-  test("lays out the Console, the Activity table and the Detail column, in that order", async () => {
-    const container = await openTheReader()
+  test("lays out the Console, the Activity table and the Detail column, in that order", () => {
+    openTheReader()
 
-    const labels = [...container.querySelectorAll("[role='region']")].map((region) =>
-      region.getAttribute("aria-label"),
-    )
+    const regions = screen.getAllByRole("region")
 
-    expect(labels).toEqual(["Console", "Activity table", "Detail column"])
+    expect(regions).toHaveLength(3)
+    expect(regions[0]).toHaveAccessibleName("Console")
+    expect(regions[1]).toHaveAccessibleName("Activity table")
+    expect(regions[2]).toHaveAccessibleName("Detail column")
   })
 
-  test("heads each column with the name the glossary gives it", async () => {
-    const container = await openTheReader()
+  test("heads each column with the name the glossary gives it", () => {
+    openTheReader()
 
-    for (const name of ["Console", "Activity table", "Detail column"]) {
-      expect(column(container, name).querySelector("h2")?.textContent).toBe(name)
+    for (const name of ["Console", "Activity table", "Detail column"] as const) {
+      expect(within(column(name)).getByRole("heading", { level: 2 })).toHaveTextContent(name)
     }
   })
 
-  test("shows the Console empty, because nothing is captured yet", async () => {
-    const container = await openTheReader()
+  test("shows the Console empty, because nothing is captured yet", () => {
+    openTheReader()
 
     // The rail itself is present with no lines in it, for the reason the Activity table is
     // present with no rows: the first line of the session must not be what introduces the
     // column's contents and pushes the layout around.
-    expect(body(column(container, "Console")).querySelector(".console-lines")).not.toBeNull()
-    expect(container.querySelectorAll(".console-line")).toHaveLength(0)
+    expect(within(column("Console")).getByRole("list")).toBeInTheDocument()
+    expect(consoleLines()).toHaveLength(0)
   })
 
-  test("offers every level chip before there is a single line to thin", async () => {
-    const container = await openTheReader()
+  test("offers every level chip before there is a single line to thin", () => {
+    openTheReader()
 
-    expect(column(container, "Console").querySelectorAll("[aria-label='Filter by level'] button")).toHaveLength(6)
+    const levels = within(column("Console")).getByRole("group", { name: "Filter by level" })
+    expect(within(levels).getAllByRole("button")).toHaveLength(6)
   })
 
-  test("opens with Rails' own lines off, and says so on the chip rather than silently", async () => {
-    const container = await openTheReader()
-    const rails = column(container, "Console").querySelector("[aria-label='Filter by source'] button")
+  test("opens with Rails' own lines off, and says so on the chip rather than silently", () => {
+    openTheReader()
+    const sources = within(column("Console")).getByRole("group", { name: "Filter by source" })
+    const [rails] = within(sources).getAllByRole("button")
 
     // The Console is thinned from the first paint, which is a thing it has to admit to: a
     // rail quietly not showing what it holds is indistinguishable from a rail that is broken.
-    expect(rails?.textContent).toBe("rails")
-    expect(rails?.getAttribute("aria-pressed")).toBe("false")
-    expect(rails?.className).toContain("chip-off")
+    // `aria-pressed` is also what the stylesheet strikes an off chip through by.
+    expect(rails).toHaveTextContent("rails")
+    expect(rails).toHaveAttribute("aria-pressed", "false")
   })
 
-  test("heads the Activity table with its columns before there is a single row to put under them", async () => {
-    const container = await openTheReader()
-    const table = body(column(container, "Activity table")).querySelector("table.activity")
+  test("heads the Activity table with its columns before there is a single row to put under them", () => {
+    openTheReader()
 
-    expect(table?.querySelectorAll("thead th").length).toBeGreaterThan(0)
-    expect(table?.querySelectorAll("tbody tr")).toHaveLength(0)
+    expect(within(column("Activity table")).getAllByRole("columnheader").length).toBeGreaterThan(0)
+    expect(activityRows()).toHaveLength(0)
   })
 
-  test("holds the Detail column open on a placeholder, so selecting never reflows the layout", async () => {
-    const container = await openTheReader()
+  test("holds the Detail column open on a placeholder, so selecting never reflows the layout", () => {
+    openTheReader()
 
-    expect(body(column(container, "Detail column")).textContent).toContain("Nothing selected")
+    expect(within(column("Detail column")).getByText(/Nothing selected/)).toBeInTheDocument()
   })
 })
 
 describe("the Host app's name in the title and the reader-bar (#95)", () => {
-  test("shows the generic fallback in both places before any Run has said anything", async () => {
-    const container = await openTheReader()
+  function readerBar() {
+    // The column headings are `header`s too, but inside their sections, so only this one is
+    // the page's banner — and the only one the Settings trigger sits in.
+    const bar = screen
+      .getAllByRole("banner")
+      .find((banner) => within(banner).queryByRole("button", { name: "Settings" }) !== null)
+    if (bar === undefined) throw new Error("the Reader has no reader-bar")
+    return bar
+  }
 
-    expect(container.querySelector(".app-name")?.textContent).toBe("Rails log reader")
+  test("shows the generic fallback in both places before any Run has said anything", () => {
+    openTheReader()
+
+    expect(within(readerBar()).getByText("Rails log reader")).toBeInTheDocument()
     expect(document.title).toBe("Rails log reader")
   })
 
-  test("shows the Host app's own name in both places once one is known", async () => {
-    const container = await openTheReader({ appName: "MyApp" })
+  test("shows the Host app's own name in both places once one is known", () => {
+    openTheReader([], { appName: "MyApp" })
 
-    expect(container.querySelector(".app-name")?.textContent).toBe("MyApp")
+    expect(within(readerBar()).getByText("MyApp")).toBeInTheDocument()
     expect(document.title).toBe("MyApp — Rails log reader")
   })
 
-  test("the header label sits beside the search box and the theme switch, as plain text with no icon", async () => {
-    const container = await openTheReader({ appName: "MyApp" })
-    const bar = container.querySelector(".reader-bar")
+  test("the header label sits beside the search box and the theme switch, as plain text with no icon", () => {
+    openTheReader([], { appName: "MyApp" })
+    const bar = readerBar()
 
-    expect(bar?.querySelector(".app-name svg, .app-name img")).toBeNull()
-    expect(bar?.querySelector(".search-box")).not.toBeNull()
-    expect(bar?.querySelector(".theme-switch")).not.toBeNull()
+    // Plain text: the label holds no element at all, so no icon either.
+    expect(within(bar).getByText("MyApp").childElementCount).toBe(0)
+    expect(within(bar).getByRole("searchbox")).toBeInTheDocument()
+    // The theme switch sits behind the Settings dialog, which is closed until asked for.
+    expect(within(bar).getByRole("group", { name: "Theme", hidden: true })).toBeInTheDocument()
   })
 })

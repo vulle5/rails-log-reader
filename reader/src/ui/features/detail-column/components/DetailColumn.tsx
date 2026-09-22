@@ -3,7 +3,7 @@ import { memo, useContext, useMemo, useState } from "react"
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
-import { controllerAction, methodClassName, ms, runDescription } from "../../../lib/format"
+import { controllerAction, methodCategory, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
 import { CopyButton } from "./CopyButton"
 import { bytes } from "../lib/format"
@@ -100,7 +100,7 @@ function RequestDetail({
   return (
     <article className="detail">
       <header className="detail-heading">
-        <span className={`detail-method ${methodClassName(row.method)}`}>
+        <span className="detail-method" data-method={methodCategory(row.method)}>
           <Highlight text={row.method ?? ""} />
         </span>
         <span className="detail-path">
@@ -111,7 +111,7 @@ function RequestDetail({
         </span>
       </header>
 
-      <Timeline events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
       {row.exception !== null && (
         <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
       )}
@@ -150,7 +150,7 @@ function RunDetail({ row, filter, railsRoot }: { row: RunRow; filter: DetailFilt
         </span>
       </header>
 
-      <Timeline events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
     </article>
   )
 }
@@ -158,9 +158,18 @@ function RunDetail({ row, filter, railsRoot }: { row: RunRow; filter: DetailFilt
 /** Renders whatever it is handed — filtering is each caller's own job, done exactly once,
  * because this is reused from three call sites and a filter applied here would run again for
  * every one of them. */
-function Timeline({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
+function Timeline({
+  label,
+  events,
+  railsRoot,
+}: {
+  /** Absent in the trailing section, whose own heading already names what it lists. */
+  label?: string
+  events: readonly TimelineEvent[]
+  railsRoot: string | null
+}) {
   return (
-    <ol className="timeline">
+    <ol className="timeline" aria-label={label}>
       {/* `(run_id, seq)` is the event identity everywhere else in the Reader, and a key is
           one more place it saves inventing one. */}
       {events.map((event) =>
@@ -222,7 +231,7 @@ function Statement({ sql }: { sql: string }) {
         const start = from
         from += token.text.length
         return (
-          <span key={at} className={`sql-${token.kind}`}>
+          <span key={at} data-token={token.kind}>
             <Marked text={token.text} from={start} matches={matches} />
           </span>
         )
@@ -293,7 +302,7 @@ const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent
   return (
     // Rails' own lines are kept and labelled apart rather than dropped: `Started GET` is all
     // a request that died before reaching a controller ever says about itself.
-    <li className={`entry entry-log log-${severity} log-from-${source}`}>
+    <li className="entry entry-log" data-level={severity} data-source={source}>
       <span className="log-severity">{severity}</span>
       {tags.map((tag) => (
         <span key={tag} className="log-tag">
@@ -351,10 +360,10 @@ function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; rai
   const held = useContext(OpenModifierHeld)
 
   return (
-    <ol className="backtrace">
+    <ol className="backtrace" aria-label="Backtrace">
       {segments.map((segment) =>
         segment.type === "frame" ? (
-          <li key={segment.index} className={segment.host ? "backtrace-host" : undefined}>
+          <li key={segment.index} data-frame={segment.host ? "host" : undefined}>
             <Frame frame={segment.frame} railsRoot={railsRoot} held={held} />
           </li>
         ) : (
@@ -466,7 +475,8 @@ function Openable({
   return (
     <>
       <span
-        className={hovered && held ? "source-location source-location-armed" : "source-location"}
+        className="source-location"
+        data-armed={hovered && held ? "" : undefined}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         // Ctrl-mousedown would otherwise add a selection range in Firefox before the click.

@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { act, screen, within } from "@testing-library/react"
+import type { UserEvent } from "@testing-library/user-event"
 
-declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = true
+import { openTheReader as renderTheReader } from "./reader.harness"
 
 const INDEX_HTML = await Bun.file(new URL("../src/ui/index.html", import.meta.url)).text()
 
@@ -39,7 +38,6 @@ afterEach(() => {
   window.matchMedia = matchMedia
   localStorage.clear()
   delete document.documentElement.dataset.theme
-  document.body.innerHTML = ""
 })
 
 /**
@@ -126,120 +124,95 @@ describe("the theme, before React mounts", () => {
   test("is a classic script, so it runs before the page paints rather than after it parses", () => {
     const inline = theInlineScript()
 
-    expect(inline.getAttribute("type")).toBeNull()
-    expect(inline.hasAttribute("defer")).toBe(false)
-    expect(inline.hasAttribute("async")).toBe(false)
-  })
-})
-
-const { act } = await import("react")
-const { createRoot } = await import("react-dom/client")
-const { Reader } = await import("../src/ui/Reader")
-
-const mounted: { unmount: () => void }[] = []
-
-afterEach(() => {
-  act(() => {
-    for (const root of mounted.splice(0)) root.unmount()
+    expect(inline).not.toHaveAttribute("type")
+    expect(inline).not.toHaveAttribute("defer")
+    expect(inline).not.toHaveAttribute("async")
   })
 })
 
 /** The Reader opened the way a page load opens it: the inline script first, then React. */
-async function openTheReader() {
+function openTheReader() {
   runTheInlineScript()
-
-  const container = document.createElement("div")
-  document.body.append(container)
-  await act(async () => {
-    const root = createRoot(container)
-    mounted.push(root)
-    root.render(<Reader />)
-  })
-  return container
+  return renderTheReader()
 }
 
-function themeButton(container: HTMLElement, named: string) {
-  const found = [...container.querySelectorAll("[role='group'][aria-label='Theme'] button")].find(
-    (button) => button.textContent === named,
-  )
-  if (found === undefined) throw new Error(`no ${named} theme button`)
-  return found
+/** The theme switch lives in the Settings dialog, so choosing one starts by opening it. */
+async function themes(user: UserEvent) {
+  if (screen.queryByRole("dialog") === null) await user.click(screen.getByRole("button", { name: "Settings" }))
+  return within(screen.getByRole("group", { name: "Theme" }))
 }
 
-function chosen(container: HTMLElement) {
-  return [...container.querySelectorAll("[role='group'][aria-label='Theme'] button[aria-pressed='true']")].map(
-    (button) => button.textContent,
-  )
+async function choose(user: UserEvent, named: string) {
+  await user.click((await themes(user)).getByRole("button", { name: named }))
 }
 
-async function click(element: Element) {
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-  })
+async function chosen(user: UserEvent) {
+  return (await themes(user))
+    .getAllByRole("button", { pressed: true })
+    .map((button) => button.textContent)
 }
 
 describe("choosing a theme", () => {
   test("offers light, dark and following the OS — and follows the OS until told otherwise", async () => {
-    const container = await openTheReader()
+    const { user } = openTheReader()
 
-    expect(chosen(container)).toEqual(["System"])
-    expect(themeButton(container, "Light")).toBeDefined()
-    expect(themeButton(container, "Dark")).toBeDefined()
+    expect(await chosen(user)).toEqual(["System"])
+    expect((await themes(user)).getByRole("button", { name: "Light" })).toBeInTheDocument()
+    expect((await themes(user)).getByRole("button", { name: "Dark" })).toBeInTheDocument()
   })
 
   test("paints the theme chosen, over whatever the OS prefers", async () => {
     setOsTheme(false)
-    const container = await openTheReader()
+    const { user } = openTheReader()
 
-    await click(themeButton(container, "Dark"))
+    await choose(user, "Dark")
 
     expect(paintedTheme()).toBe("dark")
-    expect(chosen(container)).toEqual(["Dark"])
+    expect(await chosen(user)).toEqual(["Dark"])
   })
 
   test("remembers the choice, so the next page load paints it before React is there to", async () => {
     setOsTheme(false)
-    const container = await openTheReader()
+    const { user, unmount } = openTheReader()
 
-    await click(themeButton(container, "Dark"))
-    act(() => {
-      for (const root of mounted.splice(0)) root.unmount()
-    })
+    await choose(user, "Dark")
+    unmount()
     delete document.documentElement.dataset.theme
 
-    const reopened = await openTheReader()
+    const reopened = openTheReader()
 
     expect(paintedTheme()).toBe("dark")
-    expect(chosen(reopened)).toEqual(["Dark"])
+    expect(await chosen(reopened.user)).toEqual(["Dark"])
   })
 
-  test("follows the OS as it changes, while following it is the choice", async () => {
+  test("follows the OS as it changes, while following it is the choice", () => {
     setOsTheme(false)
-    await openTheReader()
+    openTheReader()
 
-    await act(async () => setOsTheme(true))
+    // The OS changing is no DOM event, and nothing on screen changes to wait for.
+    act(() => setOsTheme(true))
 
     expect(paintedTheme()).toBe("dark")
   })
 
   test("stays on a chosen theme when the OS changes under it", async () => {
     setOsTheme(false)
-    const container = await openTheReader()
-    await click(themeButton(container, "Light"))
+    const { user } = openTheReader()
+    await choose(user, "Light")
 
-    await act(async () => setOsTheme(true))
+    act(() => setOsTheme(true))
 
     expect(paintedTheme()).toBe("light")
   })
 
   test("goes back to following the OS, from wherever it was", async () => {
     setOsTheme(true)
-    const container = await openTheReader()
-    await click(themeButton(container, "Light"))
+    const { user } = openTheReader()
+    await choose(user, "Light")
 
-    await click(themeButton(container, "System"))
+    await choose(user, "System")
 
     expect(paintedTheme()).toBe("dark")
-    expect(chosen(container)).toEqual(["System"])
+    expect(await chosen(user)).toEqual(["System"])
   })
 })

@@ -1,4 +1,5 @@
 import type { ConsoleLine } from "../../../../shared/console"
+import { groupingMarks } from "../../../grouping"
 import { Highlight } from "../../../hooks/search"
 
 /**
@@ -80,12 +81,14 @@ type LineProps = {
  */
 function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
   const { severity, message, source, tags } = line.event.payload
-  const marks = `${pinned ? " console-line-pinned" : ""}${lit ? " console-line-lit" : ""}`
 
   return (
     <li
-      className={`console-line log-${severity} log-from-${source}${marks}`}
+      className="console-line"
       data-line={line.id}
+      data-level={severity}
+      data-source={source}
+      data-grouping={groupingMarks(pinned, lit)}
       // `mouseenter`/`mouseleave` and not `over`/`out`: moving between the spans inside one
       // line would otherwise read as leaving it.
       onMouseEnter={() => onHover(line)}

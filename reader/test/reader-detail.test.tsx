@@ -1,33 +1,26 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { screen, within } from "@testing-library/react"
+import type { UserEvent } from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { Envelope } from "../src/shared/wire"
-import type { RunIdentity } from "../src/shared/run-identity"
-
-const { act } = await import("react")
-const { createRoot } = await import("react-dom/client")
-const { Reader } = await import("../src/ui/Reader")
-const { activityTable } = await import("../src/shared/activity")
-const { latchRunIdentity } = await import("../src/shared/run-identity")
-
-declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = true
-
-/**
- * Unmounted rather than just emptied: an in-flight row's elapsed pill holds an interval for
- * as long as it is mounted, and a root left behind goes on ticking into the next test.
- */
-const mounted: { unmount: () => void }[] = []
+import {
+  cellUnder,
+  chip,
+  column,
+  folded,
+  isQuery,
+  itemsOf,
+  openTheReaderOver,
+  rowShowing,
+  select,
+  timeline,
+  wholeText,
+} from "./reader.harness"
 
 afterEach(() => {
-  act(() => {
-    for (const root of mounted.splice(0)) root.unmount()
-  })
-  document.body.innerHTML = ""
   // The schema chip persists by design, which between tests is one test writing another's
   // filter.
   localStorage.clear()
@@ -39,12 +32,11 @@ afterEach(() => {
  * because "which row is showing" is the only thing the column is about.
  *
  * `railsRoot` is computed the same way `main.tsx` computes it — `latchRunIdentity` over the
- * same envelopes, read off the raw stream rather than off any row — so this helper stays
- * the same seam the browser actually reaches `Reader` through.
+ * same envelopes, read off the raw stream rather than off any row — so this stays the same
+ * seam the browser actually reaches `Reader` through.
  */
-async function theReader(...envelopes: Parameters<ReturnType<typeof activityTable>["fold"]>[0]) {
-  const { container } = await theReaderReceiving(envelopes)
-  return container
+function theReader(...envelopes: Envelope[]) {
+  return theReaderReceiving(envelopes)
 }
 
 /**
@@ -53,123 +45,106 @@ async function theReader(...envelopes: Parameters<ReturnType<typeof activityTabl
  * wherever a test cares about the *order* batches arrive in — the *Memory bound* only evicts
  * at the end of a batch, so evicting a row and then having its Run reopen one needs two.
  */
-async function theReaderReceiving(...batches: (readonly Envelope[])[]) {
-  const activity = activityTable()
-  let identity: RunIdentity = null
-  for (const batch of batches) {
-    activity.fold(batch)
-    identity = latchRunIdentity(identity, batch)
-  }
-
-  const container = document.createElement("div")
-  document.body.append(container)
-  await act(async () => {
-    const root = createRoot(container)
-    mounted.push(root)
-    root.render(<Reader rows={activity.rows} railsRoot={identity?.railsRoot ?? null} />)
-  })
-  return { container, rows: activity.rows, identity }
+function theReaderReceiving(...batches: (readonly Envelope[])[]) {
+  return openTheReaderOver(folded(...batches))
 }
 
-function detail(container: HTMLElement) {
-  const body = container.querySelector('[aria-label="Detail column"] .column-body')
-  if (body === null) throw new Error("the Reader has no Detail column")
-  return body
-}
-
-async function select(container: HTMLElement, path: string) {
-  const row = [...container.querySelectorAll("tbody tr")].find(
-    (candidate) => candidate.querySelector(".cell-path")?.textContent === path,
-  )
-  if (row === undefined) throw new Error(`no row for ${path}`)
-
-  await act(async () => {
-    row.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-  })
-  return row
+function detail() {
+  return column("Detail column")
 }
 
 /**
- * Every entry of the request's own timeline as one string: the query it ran, or the line it
- * printed. Scoped to the timeline hanging directly off the detail — the trailing section
- * renders a timeline of its own, and the whole point of it is that it is not this one.
+ * Every entry of the request's own timeline, each read whole: the query it ran, or the line it
+ * printed. Its own list, never the trailing section's — the whole point of that one is that
+ * it is not this one.
  */
-function timeline(container: HTMLElement) {
-  return [...detail(container).querySelectorAll(".detail > .timeline > .entry")].map((entry) =>
-    entry.querySelector(".sql")?.textContent ?? entry.querySelector(".log-message")?.textContent,
+function timelineSays() {
+  return itemsOf(timeline()).map((entry) => within(entry).queryByRole("code")?.textContent ?? entry.textContent)
+}
+
+/** A log line's text is its entry's; the entry holds its severity and tags beside it. */
+function says(...said: string[]) {
+  return said.map((each) => expect.stringContaining(each))
+}
+
+function queries() {
+  return itemsOf(timeline()).filter(isQuery)
+}
+
+function logLines() {
+  return itemsOf(timeline()).filter((entry) => !isQuery(entry))
+}
+
+/** A Callsite line reads `↳ ` and the raw value, however it is split to be opened. */
+function callsiteLines(scope: HTMLElement = detail()) {
+  const isCallsite = (element: Element) => element.textContent?.startsWith("↳ ") === true
+  return within(scope).queryAllByText(
+    (_, element) => element !== null && isCallsite(element) && [...element.children].every((child) => !isCallsite(child)),
   )
 }
 
-function entries(container: HTMLElement, selector: string) {
-  return [...detail(container).querySelectorAll(selector)]
-}
-
 describe("selecting a row", () => {
-  test("holds the column open on a placeholder until something is selected", async () => {
+  test("holds the column open on a placeholder until something is selected", () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"))
+    theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"))
 
-    expect(detail(container).textContent).toContain("Nothing selected")
+    expect(detail()).toHaveTextContent("Nothing selected")
   })
 
   test("fills the column that was already there, rather than opening one", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"))
-    const before = detail(container)
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"))
+    const before = detail()
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
     // The same element, still the third column: selecting changed what it holds and nothing
     // about the layout around it.
-    expect(detail(container)).toBe(before)
-    expect(detail(container).textContent).not.toContain("Nothing selected")
+    expect(detail()).toBe(before)
+    expect(screen.getAllByRole("region")[2]).toBe(before)
+    expect(detail()).not.toHaveTextContent("Nothing selected")
   })
 
   test("marks the row that is showing, and moves the mark on the next click", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/first"), run.start("req-2", "GET", "/second"))
+    const { user } = theReader(run.start("req-1", "GET", "/first"), run.start("req-2", "GET", "/second"))
 
-    const first = await select(container, "/first")
-    expect(first.getAttribute("aria-selected")).toBe("true")
+    const first = await select(user, "/first")
+    expect(first).toHaveAttribute("aria-current", "true")
 
-    const second = await select(container, "/second")
-    expect(second.getAttribute("aria-selected")).toBe("true")
-    expect(first.getAttribute("aria-selected")).toBe("false")
+    const second = await select(user, "/second")
+    expect(second).toHaveAttribute("aria-current", "true")
+    expect(first).not.toHaveAttribute("aria-current")
   })
 
   test("names the request it is showing, so the column can be read on its own", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
-      run.start("req-1", "GET", "/posts/12"),
-      run.route("req-1", "PostsController", "show"),
-    )
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.route("req-1", "PostsController", "show"))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(detail(container).querySelector(".detail-heading")?.textContent).toContain("/posts/12")
-    expect(detail(container).querySelector(".detail-heading")?.textContent).toContain("Posts#show")
+    const article = within(detail()).getByRole("article")
+    expect(within(article).getByText("/posts/12")).toBeInTheDocument()
+    expect(within(article).getByText("Posts#show")).toBeInTheDocument()
   })
 
   // #50: one lookup, so the Detail heading's method can never drift from the Activity
-  // table's — a DELETE reads the same colour class wherever it renders.
-  test("colours its method the same class the Activity table's method cell carries", async () => {
+  // table's — a DELETE reads the same colour category wherever it renders.
+  test("colours its method the same category the Activity table's method cell carries", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
-      run.start("req-1", "DELETE", "/posts/12"),
-      run.route("req-1", "PostsController", "destroy"),
-    )
+    const { user } = theReader(run.start("req-1", "DELETE", "/posts/12"), run.route("req-1", "PostsController", "destroy"))
 
-    const row = await select(container, "/posts/12")
+    const row = await select(user, "/posts/12")
 
-    expect(row.querySelector(".cell-method")?.className).toBe("cell-method method-delete")
-    expect(detail(container).querySelector(".detail-method")?.className).toBe("detail-method method-delete")
+    expect(cellUnder(row, "Method")).toHaveAttribute("data-method", "delete")
+    expect(within(detail()).getByText("DELETE")).toHaveAttribute("data-method", "delete")
   })
 })
 
 describe("the timeline", () => {
   test("interleaves SQL and App log events in the order they were emitted", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/feed"),
       run.sql("req-1", "SELECT 1"),
       run.log("req-1", "Feed cache MISS"),
@@ -178,16 +153,17 @@ describe("the timeline", () => {
       run.finish("req-1"),
     )
 
-    await select(container, "/feed")
+    await select(user, "/feed")
 
-    expect(timeline(container)).toEqual(["SELECT 1", "Feed cache MISS", "SELECT 2", "Feed cache WRITE"])
+    expect(timelineSays()).toEqual(says("SELECT 1", "Feed cache MISS", "SELECT 2", "Feed cache WRITE"))
+    expect(queries().map((entry) => within(entry).getByRole("code").textContent)).toEqual(["SELECT 1", "SELECT 2"])
   })
 
   test("shows a query once, not beside the lines Rails logged it as, with its callsite under it", async () => {
     const statement = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = 12 LIMIT 1 /*action='show'*/`
     const callsite = "app/controllers/posts_controller.rb:9:in 'PostsController#show'"
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", statement, { name: "Post Load", callsite }),
       run.log("req-1", `  Post Load (0.2ms)  ${statement}`, { severity: "debug", source: "rails" }),
@@ -195,63 +171,62 @@ describe("the timeline", () => {
       run.finish("req-1"),
     )
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
     // The highlighted, bind-carrying event with its callsite — and not Rails' rounded,
     // unhighlighted rendering of the query, nor its loose line naming the same callsite.
-    expect(timeline(container)).toEqual([statement])
-    expect(entries(container, ".entry-sql .sql-callsite").map((line) => line.textContent)).toEqual([
-      `\u21b3 ${callsite}`,
-    ])
+    expect(timelineSays()).toEqual([statement])
+    expect(callsiteLines(queries()[0]).map((line) => line.textContent)).toEqual([`\u21b3 ${callsite}`])
   })
 
   test("shows an App log event's severity and keeps a Rails line labelled apart", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/feed"),
       run.log("req-1", "N+1 suspected", { severity: "warn" }),
       run.log("req-1", "Rendering feed/index.html.erb", { source: "rails" }),
     )
 
-    await select(container, "/feed")
+    await select(user, "/feed")
+    const [warning, rails] = logLines()
 
-    expect(entries(container, ".entry-log")[0]?.querySelector(".log-severity")?.textContent).toBe("warn")
-    expect(entries(container, ".entry-log")[1]?.className).toContain("log-from-rails")
+    expect(within(warning!).getByText("warn")).toBeInTheDocument()
+    expect(warning).toHaveAttribute("data-level", "warn")
+    expect(rails).toHaveAttribute("data-source", "rails")
   })
 
   test("shows an app-sourced log event's callsite under its line, as emitted, and a rails-sourced one's not at all", async () => {
     const own = "app/controllers/feed_controller.rb:7:in 'FeedController#index'"
     const gem = "/home/dev/.gem/ruby/3.4.0/gems/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.header(),
       run.start("req-1", "GET", "/feed"),
       run.log("req-1", "Feed cache MISS", { callsite: own }),
       run.log("req-1", "Rendered feed/index.html.erb", { source: "rails", callsite: gem }),
     )
 
-    await select(container, "/feed")
+    await select(user, "/feed")
 
     // Raw: never shortened against rails_root.
-    expect(entries(container, ".entry-log .log-callsite").map((line) => line.textContent)).toEqual([
-      `\u21b3 ${own}`,
-    ])
-    expect(timeline(container)).toEqual(["Feed cache MISS", "Rendered feed/index.html.erb"])
+    expect(callsiteLines().map((line) => line.textContent)).toEqual([`\u21b3 ${own}`])
+    expect(callsiteLines(logLines()[0])).toHaveLength(1)
+    expect(timelineSays()).toEqual(says("Feed cache MISS", "Rendered feed/index.html.erb"))
   })
 
   test("shows no callsite line for a log event that carries none", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/feed"), run.log("req-1", "Feed cache MISS"))
+    const { user } = theReader(run.start("req-1", "GET", "/feed"), run.log("req-1", "Feed cache MISS"))
 
-    await select(container, "/feed")
+    await select(user, "/feed")
 
-    expect(entries(container, ".log-callsite")).toHaveLength(0)
+    expect(callsiteLines()).toHaveLength(0)
   })
 
   test("drops an Echo's callsite along with the Echo", async () => {
     const statement = "SELECT 1"
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/feed"),
       run.sql("req-1", statement),
       run.log("req-1", `  Post Load (0.2ms)  ${statement}`, {
@@ -261,119 +236,120 @@ describe("the timeline", () => {
       }),
     )
 
-    await select(container, "/feed")
+    await select(user, "/feed")
 
-    expect(entries(container, ".log-callsite")).toHaveLength(0)
+    expect(callsiteLines()).toHaveLength(0)
   })
 
   test("shows a log event's tags, for the team that invested most in logging", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/feed"),
       run.log("req-1", "Performing DeliverWebhookJob", { tags: ["ActiveJob", "9f2c1a"] }),
     )
 
-    await select(container, "/feed")
+    await select(user, "/feed")
 
-    expect(entries(container, ".log-tag").map((tag) => tag.textContent)).toEqual(["ActiveJob", "9f2c1a"])
+    const tags = within(logLines()[0]!).getAllByText(/^(ActiveJob|9f2c1a)$/)
+    expect(tags.map((tag) => tag.textContent)).toEqual(["ActiveJob", "9f2c1a"])
   })
 })
 
 describe("a query", () => {
   const QUERY_LOGS = `SELECT "posts".* FROM "posts" WHERE "posts"."id" = ? /*action='show',controller='posts'*/`
 
-  async function theQuery(container: HTMLElement) {
-    const entry = entries(container, ".entry-sql")[0]
+  function theQuery() {
+    const entry = queries()[0]
     if (entry === undefined) throw new Error("the detail column rendered no query")
     return entry
   }
 
+  function statement() {
+    return within(theQuery()).getByRole("code")
+  }
+
   test("renders exactly as emitted, QueryLogs comment intact and nothing reformatted", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
     // What is read is what pastes into a console: the highlighting added spans, not text.
-    expect((await theQuery(container)).querySelector(".sql")?.textContent).toBe(QUERY_LOGS)
+    expect(statement().textContent).toBe(QUERY_LOGS)
   })
 
   test("shows its callsite as emitted, whether or not Rails printed a line for it", async () => {
     const callsite = "app/views/posts/index.html.erb:11:in 'block in _app_views_posts_index_html_erb'"
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts"), run.sql("req-1", QUERY_LOGS, { callsite }))
+    const { user } = theReader(run.start("req-1", "GET", "/posts"), run.sql("req-1", QUERY_LOGS, { callsite }))
 
-    await select(container, "/posts")
+    await select(user, "/posts")
 
-    expect((await theQuery(container)).querySelector(".sql-callsite")?.textContent).toBe(`\u21b3 ${callsite}`)
+    expect(within(theQuery()).getByText(wholeText(`\u21b3 ${callsite}`))).toBeInTheDocument()
   })
 
   test("shows no callsite line for a query that carries none", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect((await theQuery(container)).querySelector(".sql-callsite")).toBeNull()
+    expect(callsiteLines(theQuery())).toHaveLength(0)
   })
 
   test("is highlighted by the tokenizer, keyword and comment apart", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", QUERY_LOGS))
 
-    await select(container, "/posts/12")
-    const sql = (await theQuery(container)).querySelector(".sql")
+    await select(user, "/posts/12")
+    const tokens = within(statement())
 
-    expect([...(sql?.querySelectorAll(".sql-keyword") ?? [])].map((span) => span.textContent)).toEqual([
-      "SELECT",
-      "FROM",
-      "WHERE",
-    ])
-    expect(sql?.querySelector(".sql-comment")?.textContent).toBe("/*action='show',controller='posts'*/")
+    for (const keyword of ["SELECT", "FROM", "WHERE"]) {
+      expect(tokens.getByText(keyword)).toHaveAttribute("data-token", "keyword")
+    }
+    for (const identifier of tokens.getAllByText('"posts"')) {
+      expect(identifier).not.toHaveAttribute("data-token", "keyword")
+    }
+    expect(tokens.getByText("/*action='show',controller='posts'*/")).toHaveAttribute("data-token", "comment")
   })
 
   test("shows its name and how long it took", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT 1", { name: "Post Load", duration_ms: 4.1 }),
     )
 
-    await select(container, "/posts/12")
-    const query = await theQuery(container)
+    await select(user, "/posts/12")
 
-    expect(query.querySelector(".sql-name")?.textContent).toBe("Post Load")
-    expect(query.querySelector(".sql-duration")?.textContent).toBe("4.1ms")
+    expect(within(theQuery()).getByText("Post Load")).toBeInTheDocument()
+    expect(within(theQuery()).getByText("4.1ms")).toBeInTheDocument()
   })
 
   test("marks a query the query cache answered, the way development.log does", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
-      run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", "SELECT 1", { cached: true }),
-    )
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", "SELECT 1", { cached: true }))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect((await theQuery(container)).textContent).toContain("CACHE")
+    expect(theQuery()).toHaveTextContent("CACHE")
   })
 
   test("renders its binds as chips labelled as this query's parameter values", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT 1", { binds: [4021, "rails logs", null, true] }),
     )
 
-    await select(container, "/posts/12")
-    const binds = (await theQuery(container)).querySelector(".binds")
-
+    await select(user, "/posts/12")
     // Never "sent to the database": trilogy never parameterizes a query at the wire level,
     // so that phrasing would be false there specifically — and the caption is on screen,
     // because the reading it corrects is the one a developer arrives with.
-    expect(binds?.getAttribute("aria-label")).toBe("This query's parameter values")
-    expect(binds?.querySelector(".binds-label")?.textContent).toBe("parameter values")
-    expect([...(binds?.querySelectorAll(".bind") ?? [])].map((chip) => chip.textContent)).toEqual([
+    const binds = within(theQuery()).getByRole("group", { name: "This query's parameter values" })
+
+    expect(within(binds).getByText("parameter values")).toBeInTheDocument()
+    expect(within(binds).getAllByRole("listitem").map((chip) => chip.textContent)).toEqual([
       "4021",
       "rails logs",
       "NULL",
@@ -383,30 +359,27 @@ describe("a query", () => {
 
   test("renders an empty bind list as simply no chips, not as an empty container", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
-      run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", "SELECT 1", { binds: [] }),
-    )
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1", "SELECT 1", { binds: [] }))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect((await theQuery(container)).querySelector(".binds")).toBeNull()
+    expect(within(theQuery()).queryByRole("group")).not.toBeInTheDocument()
   })
 
   /** `connection.execute` skips Rails' query-building layer: `name` is a genuine `nil`. */
   test("renders a raw execute — no model, no binds, a nil name — as a plain ordinary row", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "PRAGMA foreign_keys", { name: null, binds: [], row_count: undefined }),
     )
 
-    await select(container, "/posts/12")
-    const query = await theQuery(container)
+    await select(user, "/posts/12")
 
-    expect(query.querySelector(".sql")?.textContent).toBe("PRAGMA foreign_keys")
-    expect(query.querySelector(".sql-name")).toBeNull()
-    expect(query.querySelector(".sql-duration")?.textContent).toBe("0.4ms")
+    expect(statement().textContent).toBe("PRAGMA foreign_keys")
+    // Its duration and its statement, and no name beside them.
+    expect(theQuery()).toHaveTextContent(/^0\.4ms\s*PRAGMA foreign_keys$/)
+    expect(within(theQuery()).getByText("0.4ms")).toBeInTheDocument()
   })
 })
 
@@ -416,85 +389,81 @@ describe("a query", () => {
  * way on open, with one chip to bring them back for the reload-diagnosis case they exist for.
  */
 describe("the schema chip", () => {
-  async function click(element: Element) {
-    await act(async () => element.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  function schemaChip() {
+    return chip("schema", "Filter by query kind")
   }
 
-  function chip(container: HTMLElement) {
-    const found = [...container.querySelectorAll("[aria-label='Filter by query kind'] button")].find(
-      (candidate) => candidate.textContent === "schema",
-    )
-    if (found === undefined) throw new Error("no schema chip")
-    return found
+  function trailing() {
+    return within(detail()).queryByRole("region", { name: "After the request finished" })
   }
 
   test("hides SCHEMA and EXPLAIN queries on open, among a request's ordinary ones", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
       run.sql("req-1", "EXPLAIN SELECT 1", { name: "EXPLAIN" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
     )
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(timeline(container)).toEqual(["SELECT 1"])
-    expect(chip(container).getAttribute("aria-pressed")).toBe("false")
+    expect(timelineSays()).toEqual(["SELECT 1"])
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
   })
 
   test("hides a hidden query's callsite along with it", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", callsite: "app/models/post.rb:3:in '<class:Post>'" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
     )
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(entries(container, ".sql-callsite")).toHaveLength(0)
+    expect(callsiteLines()).toHaveLength(0)
   })
 
   test("brings them back, interleaved where they were emitted, once the chip is on", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
     )
 
-    await select(container, "/posts/12")
-    await click(chip(container))
+    await select(user, "/posts/12")
+    await user.click(schemaChip())
 
-    expect(timeline(container)).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1"])
-    expect(chip(container).getAttribute("aria-pressed")).toBe("true")
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1"])
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
   })
 
   test("leaves a query named anything else alone", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
       run.sql("req-1", "PRAGMA foreign_keys", { name: null }),
     )
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(timeline(container)).toEqual(["SELECT 1", "PRAGMA foreign_keys"])
+    expect(timelineSays()).toEqual(["SELECT 1", "PRAGMA foreign_keys"])
   })
 
   test("hides an all-SCHEMA trailing section rather than leaving it empty", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.finish("req-1"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
     )
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(detail(container).querySelector('[aria-label="After the request finished"]')).toBeNull()
+    expect(trailing()).not.toBeInTheDocument()
   })
 
   test("persists the choice, like the Console's chips", async () => {
@@ -502,22 +471,19 @@ describe("the schema chip", () => {
     const envelopes = [
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
-    ] as const
+    ]
 
-    const first = await theReader(...envelopes)
-    await select(first, "/posts/12")
-    await click(chip(first))
+    const first = theReader(...envelopes)
+    await select(first.user, "/posts/12")
+    await first.user.click(schemaChip())
 
-    act(() => {
-      for (const root of mounted.splice(0)) root.unmount()
-    })
-    document.body.innerHTML = ""
+    first.unmount()
 
-    const second = await theReader(...envelopes)
-    await select(second, "/posts/12")
+    const second = theReader(...envelopes)
+    await select(second.user, "/posts/12")
 
-    expect(timeline(second)).toEqual(["SELECT sql FROM sqlite_master"])
-    expect(chip(second).getAttribute("aria-pressed")).toBe("true")
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master"])
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
   })
 })
 
@@ -527,15 +493,17 @@ describe("the schema chip", () => {
  * what was emitted, and a statement quietly missing its tail breaks it silently.
  */
 describe("a field the Sidecar had to cut", () => {
+  const CUT = /was cut by the Sidecar/
+
   test("says so under the query, with what was emitted", async () => {
     const run = aRun("srv-1")
     const start = run.start("req-1", "GET", "/posts/12")
     const query = run.sql("req-1", "SELECT * FROM posts WHERE id IN (1, 2, 3")
-    const container = await theReader(start, { ...query, truncated: { sql: 812_400 } })
+    const { user } = theReader(start, { ...query, truncated: { sql: 812_400 } })
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(detail(container).querySelector(".cut")?.textContent).toBe("sql was cut by the Sidecar — 793 KB was emitted")
+    expect(within(detail()).getByText(CUT)).toHaveTextContent(/^sql was cut by the Sidecar — 793 KB was emitted$/)
   })
 
   test("says so under a backtrace, because uncleaned is a promise only the file can break", async () => {
@@ -544,56 +512,69 @@ describe("a field the Sidecar had to cut", () => {
       status: 500,
       exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44"] },
     })
-    const container = await theReader(run.start("req-1", "POST", "/orders"), {
-      ...finish,
-      truncated: { backtrace: 300_000 },
-    })
+    const { user } = theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
 
-    await select(container, "/orders")
+    await select(user, "/orders")
 
-    expect(detail(container).querySelector(".exception .cut")?.textContent).toContain("backtrace was cut")
+    expect(within(exception()).getByText(CUT)).toHaveTextContent("backtrace was cut")
   })
 
   test("says nothing at all about a query that arrived whole", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"))
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(detail(container).querySelector(".cut")).toBeNull()
+    expect(within(detail()).queryByText(CUT)).not.toBeInTheDocument()
   })
 })
 
 describe("what arrived after the request finished", () => {
   async function aTrailingEvent() {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT 1"),
       run.finish("req-1"),
       run.log("req-1", "Executor#to_complete ran after the body closed"),
     )
-    await select(container, "/posts/12")
-    return container
+    await select(user, "/posts/12")
   }
 
   test("is shown in a section of its own, never silently inside the timeline", async () => {
-    const container = await aTrailingEvent()
+    await aTrailingEvent()
 
-    expect(timeline(container)).toEqual(["SELECT 1"])
-    const trailing = detail(container).querySelector('[aria-label="After the request finished"]')
-    expect(trailing?.textContent).toContain("Executor#to_complete ran after the body closed")
+    expect(timelineSays()).toEqual(["SELECT 1"])
+    const trailing = within(detail()).getByRole("region", { name: "After the request finished" })
+    expect(trailing).toHaveTextContent("Executor#to_complete ran after the body closed")
   })
 
   test("leaves an ordinary request no such section at all", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"), run.finish("req-1"))
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.sql("req-1"), run.finish("req-1"))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(detail(container).querySelector('[aria-label="After the request finished"]')).toBeNull()
+    expect(within(detail()).queryByRole("region", { name: "After the request finished" })).not.toBeInTheDocument()
   })
 })
+
+function exception() {
+  return within(detail()).getByRole("region", { name: "Exception" })
+}
+
+/** The backtrace's own items: a frame each, or a marker standing in for the frames it hides. */
+function backtraceItems() {
+  return itemsOf(within(exception()).getByRole("list", { name: "Backtrace" }))
+}
+
+function revealButtons() {
+  return within(detail()).queryAllByRole("button", { name: /frames? hidden$/ })
+}
+
+async function revealGaps(user: UserEvent) {
+  for (const button of revealButtons()) await user.click(button)
+}
 
 describe("a request that raised", () => {
   const BACKTRACE = [
@@ -604,7 +585,7 @@ describe("a request that raised", () => {
 
   test("shows its exception message and the raised frame, gem frames collapsed", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
         status: 500,
@@ -612,13 +593,12 @@ describe("a request that raised", () => {
       }),
     )
 
-    await select(container, "/orders")
-    const exception = detail(container).querySelector(".exception")
+    await select(user, "/orders")
 
-    expect(exception?.textContent).toContain("NoMethodError")
-    expect(exception?.textContent).toContain("undefined method `price_cents' for nil")
+    expect(exception()).toHaveTextContent("NoMethodError")
+    expect(exception()).toHaveTextContent("undefined method `price_cents' for nil")
     // The raise site always renders; the two gem frames behind it collapse into one marker.
-    expect([...(exception?.querySelectorAll(".backtrace li") ?? [])].map((frame) => frame.textContent)).toEqual([
+    expect(backtraceItems().map((frame) => frame.textContent)).toEqual([
       "app/models/order.rb:44:in `block in recalculate_total!'",
       "2 frames hidden",
     ])
@@ -626,11 +606,11 @@ describe("a request that raised", () => {
 
   test("leaves a request that did not raise without an exception block", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(run.start("req-1", "GET", "/posts/12"), run.finish("req-1"))
+    const { user } = theReader(run.start("req-1", "GET", "/posts/12"), run.finish("req-1"))
 
-    await select(container, "/posts/12")
+    await select(user, "/posts/12")
 
-    expect(detail(container).querySelector(".exception")).toBeNull()
+    expect(within(detail()).queryByRole("region", { name: "Exception" })).not.toBeInTheDocument()
   })
 })
 
@@ -639,19 +619,9 @@ describe("highlighting a Host-app backtrace frame", () => {
   const HOST_FRAME = `${RAILS_ROOT}/app/models/order.rb:44:in \`block in recalculate_total!'`
   const GEM_FRAME = "puma (6.6.0) lib/puma/server.rb:443:in `process_client'"
 
-  function frameElements(container: HTMLElement) {
-    return [...(detail(container).querySelectorAll(".backtrace li") ?? [])]
-  }
-
-  async function revealGaps(container: HTMLElement) {
-    for (const button of [...detail(container).querySelectorAll(".backtrace-reveal")]) {
-      await act(async () => button.dispatchEvent(new MouseEvent("click", { bubbles: true })))
-    }
-  }
-
   test("gives only the frame under rails_root the full-contrast colour, style only", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.header(),
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
@@ -660,19 +630,19 @@ describe("highlighting a Host-app backtrace frame", () => {
       }),
     )
 
-    await select(container, "/orders")
-    await revealGaps(container)
-    const frames = frameElements(container)
+    await select(user, "/orders")
+    await revealGaps(user)
+    const frames = backtraceItems()
 
     expect(frames.map((frame) => frame.textContent)).toEqual([HOST_FRAME, GEM_FRAME])
-    expect(frames[0]?.classList.contains("backtrace-host")).toBe(true)
-    expect(frames[1]?.classList.contains("backtrace-host")).toBe(false)
+    expect(frames[0]).toHaveAttribute("data-frame", "host")
+    expect(frames[1]).not.toHaveAttribute("data-frame")
     expect(frames).toHaveLength(2)
   })
 
   test("leaves every frame unhighlighted when the Run's run_header was never seen", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
         status: 500,
@@ -680,10 +650,10 @@ describe("highlighting a Host-app backtrace frame", () => {
       }),
     )
 
-    await select(container, "/orders")
-    await revealGaps(container)
+    await select(user, "/orders")
+    await revealGaps(user)
 
-    expect(frameElements(container).some((frame) => frame.classList.contains("backtrace-host"))).toBe(false)
+    for (const frame of backtraceItems()) expect(frame).not.toHaveAttribute("data-frame")
   })
 
   test("keeps highlighting frames after the Run row that first proved rails_root is evicted and reopens", async () => {
@@ -708,7 +678,10 @@ describe("highlighting a Host-app backtrace frame", () => {
       }),
     ]
 
-    const { container, rows, identity } = await theReaderReceiving(proves, filler, reopens, raises)
+    const {
+      user,
+      fold: { rows, identity },
+    } = theReaderReceiving(proves, filler, reopens, raises)
 
     // The eviction and the reopen both happened: nothing here still says `rails_root`.
     const reopened = rows.find((row) => row.kind === "run" && row.runId === "srv-1")
@@ -720,9 +693,8 @@ describe("highlighting a Host-app backtrace frame", () => {
 
     // `RunIdentity` never lost it, and highlighting reads off that rather than off either row.
     expect(identity?.railsRoot).toBe(RAILS_ROOT)
-    await select(container, "/orders")
-    const frames = frameElements(container)
-    expect(frames[0]?.classList.contains("backtrace-host")).toBe(true)
+    await select(user, "/orders")
+    expect(backtraceItems()[0]).toHaveAttribute("data-frame", "host")
   })
 })
 
@@ -737,17 +709,13 @@ describe("collapsing gem frames in a backtrace", () => {
   const GEM_BEFORE = "actionpack (8.0.2) lib/action_controller/metal/rescue.rb:23:in `process_action'"
   const GEM_AFTER = "rack (3.1.8) lib/rack/urlmap.rb:74:in `call'"
 
-  function backtraceItems(container: HTMLElement) {
-    return [...detail(container).querySelectorAll(".backtrace > li")].map((item) => item.textContent)
-  }
-
-  async function reveal(marker: Element) {
-    await act(async () => marker.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  function backtrace() {
+    return backtraceItems().map((item) => item.textContent)
   }
 
   test("renders the raised frame even when it is itself outside rails_root", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.header(),
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
@@ -756,16 +724,16 @@ describe("collapsing gem frames in a backtrace", () => {
       }),
     )
 
-    await select(container, "/orders")
+    await select(user, "/orders")
 
     // The raise site is not folded into the marker's count, even though it fails
     // `isHostFrame` the same as any other gem frame would.
-    expect(backtraceItems(container)).toEqual([RAISED, HOST_FRAME])
+    expect(backtrace()).toEqual([RAISED, HOST_FRAME])
   })
 
   test("keeps a Host-app frame visible in its real stack position, gaps either side of it", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.header(),
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
@@ -774,15 +742,15 @@ describe("collapsing gem frames in a backtrace", () => {
       }),
     )
 
-    await select(container, "/orders")
+    await select(user, "/orders")
 
-    expect(backtraceItems(container)).toEqual([RAISED, "1 frame hidden", HOST_FRAME, "1 frame hidden"])
+    expect(backtrace()).toEqual([RAISED, "1 frame hidden", HOST_FRAME, "1 frame hidden"])
   })
 
   test("collapses a trace with no Host-app frame to one marker spanning everything but the raised frame", async () => {
     const run = aRun("srv-1")
     // No run.header(): railsRoot stays null, so nothing can ever be a Host-app frame.
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
         status: 500,
@@ -790,17 +758,16 @@ describe("collapsing gem frames in a backtrace", () => {
       }),
     )
 
-    await select(container, "/orders")
-    const exception = detail(container).querySelector(".exception")
+    await select(user, "/orders")
 
     // The class and message stay visible above the single marker either way.
-    expect(exception?.querySelector(".exception-class")?.textContent).toBe("NoMethodError")
-    expect(backtraceItems(container)).toEqual([RAISED, "2 frames hidden"])
+    expect(within(exception()).getByText("NoMethodError")).toBeInTheDocument()
+    expect(backtrace()).toEqual([RAISED, "2 frames hidden"])
   })
 
   test("reveals a marker's frames for good, with no control to re-collapse it", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
         status: 500,
@@ -808,18 +775,16 @@ describe("collapsing gem frames in a backtrace", () => {
       }),
     )
 
-    await select(container, "/orders")
-    const marker = detail(container).querySelector(".backtrace-reveal")
-    if (marker === null) throw new Error("no marker to reveal")
-    await reveal(marker)
+    await select(user, "/orders")
+    await user.click(revealButtons()[0]!)
 
-    expect(backtraceItems(container)).toEqual([RAISED, GEM_BEFORE, GEM_AFTER])
-    expect(detail(container).querySelector(".backtrace-reveal")).toBeNull()
+    expect(backtrace()).toEqual([RAISED, GEM_BEFORE, GEM_AFTER])
+    expect(revealButtons()).toHaveLength(0)
   })
 
   test("starts fully collapsed again on the next fresh render, once Selection moves away and back", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
         status: 500,
@@ -828,16 +793,14 @@ describe("collapsing gem frames in a backtrace", () => {
       run.start("req-2", "GET", "/posts/12"),
     )
 
-    await select(container, "/orders")
-    const marker = detail(container).querySelector(".backtrace-reveal")
-    if (marker === null) throw new Error("no marker to reveal")
-    await reveal(marker)
-    expect(backtraceItems(container)).toEqual([RAISED, GEM_BEFORE, GEM_AFTER])
+    await select(user, "/orders")
+    await user.click(revealButtons()[0]!)
+    expect(backtrace()).toEqual([RAISED, GEM_BEFORE, GEM_AFTER])
 
-    await select(container, "/posts/12")
-    await select(container, "/orders")
+    await select(user, "/posts/12")
+    await select(user, "/orders")
 
-    expect(backtraceItems(container)).toEqual([RAISED, "2 frames hidden"])
+    expect(backtrace()).toEqual([RAISED, "2 frames hidden"])
   })
 
   test("leaves the wire's own Cut note alone — collapsing and truncation never reference each other", async () => {
@@ -846,28 +809,26 @@ describe("collapsing gem frames in a backtrace", () => {
       status: 500,
       exception: { class: "NoMethodError", message: "boom", backtrace: [RAISED, GEM_BEFORE, GEM_AFTER] },
     })
-    const container = await theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
+    const { user } = theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
 
-    await select(container, "/orders")
+    await select(user, "/orders")
 
-    expect(backtraceItems(container)).toEqual([RAISED, "2 frames hidden"])
-    expect(detail(container).querySelector(".exception .cut")?.textContent).toContain("backtrace was cut")
+    expect(backtrace()).toEqual([RAISED, "2 frames hidden"])
+    expect(within(exception()).getByText(/was cut by the Sidecar/)).toHaveTextContent("backtrace was cut")
   })
 
   test("copies every frame regardless of what is still collapsed on screen", async () => {
     const run = aRun("srv-1")
     const backtrace = [RAISED, GEM_BEFORE, GEM_AFTER]
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", { status: 500, exception: { class: "NoMethodError", message: "boom", backtrace } }),
     )
 
-    await select(container, "/orders")
+    await select(user, "/orders")
     // Nothing revealed — the marker is still on screen — yet the copy is the whole trace.
-    expect(detail(container).querySelector(".backtrace-reveal")).not.toBeNull()
-    const button = detail(container).querySelector(".exception .copy-button")
-    if (button === null) throw new Error("no copy control")
-    await act(async () => button.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    expect(revealButtons()).toHaveLength(1)
+    await user.click(within(exception()).getByRole("button", { name: "Copy exception" }))
 
     expect(await navigator.clipboard.readText()).toBe(["NoMethodError: boom", ...backtrace].join("\n"))
   })
@@ -879,19 +840,13 @@ describe("collapsing gem frames in a backtrace", () => {
  * having happened.
  */
 describe("copying an exception", () => {
-  async function click(element: Element) {
-    await act(async () => element.dispatchEvent(new MouseEvent("click", { bubbles: true })))
-  }
-
-  function copyButton(container: HTMLElement, scope = ".exception") {
-    const found = detail(container).querySelector(`${scope} .copy-button`)
-    if (found === null) throw new Error("no copy control")
-    return found
+  function copyButton() {
+    return within(exception()).getByRole("button", { name: "Copy exception" })
   }
 
   test("appears in the Exception block and nowhere else", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.sql("req-1", "SELECT 1"),
       run.log("req-1", "about to raise"),
@@ -901,18 +856,18 @@ describe("copying an exception", () => {
       }),
     )
 
-    await select(container, "/orders")
+    await select(user, "/orders")
 
-    expect(detail(container).querySelectorAll(".exception .copy-button")).toHaveLength(1)
+    expect(within(detail()).getAllByRole("button", { name: /copy/i })).toEqual([copyButton()])
     // SQL queries and App log lines are easy enough to select-and-copy by hand.
-    expect(detail(container).querySelector(".entry-sql .copy-button")).toBeNull()
-    expect(detail(container).querySelector(".entry-log .copy-button")).toBeNull()
+    expect(within(queries()[0]!).queryByRole("button", { name: /copy/i })).not.toBeInTheDocument()
+    expect(within(logLines()[0]!).queryByRole("button", { name: /copy/i })).not.toBeInTheDocument()
   })
 
   test("copies the class and message, then one backtrace frame per line, no UI chrome", async () => {
     const run = aRun("srv-1")
     const backtrace = ["app/models/order.rb:44:in `block in recalculate_total!'", "puma (6.6.0) lib/puma/server.rb:443"]
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", {
         status: 500,
@@ -920,8 +875,8 @@ describe("copying an exception", () => {
       }),
     )
 
-    await select(container, "/orders")
-    await click(copyButton(container))
+    await select(user, "/orders")
+    await user.click(copyButton())
 
     expect(await navigator.clipboard.readText()).toBe(
       ["NoMethodError: undefined method `price_cents' for nil", ...backtrace].join("\n"),
@@ -934,32 +889,29 @@ describe("copying an exception", () => {
       status: 500,
       exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44"] },
     })
-    const container = await theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
+    const { user } = theReader(run.start("req-1", "POST", "/orders"), { ...finish, truncated: { backtrace: 300_000 } })
 
-    await select(container, "/orders")
-    const note = detail(container).querySelector(".exception .cut")?.textContent
-    await click(copyButton(container))
+    await select(user, "/orders")
+    const note = within(exception()).getByText(/was cut by the Sidecar/).textContent
+    await user.click(copyButton())
 
-    expect(note).not.toBeUndefined()
-    expect(await navigator.clipboard.readText()).toBe(
-      `NoMethodError: boom\napp/models/order.rb:44\n# ${note}`,
-    )
+    expect(note).not.toBeNull()
+    expect(await navigator.clipboard.readText()).toBe(`NoMethodError: boom\napp/models/order.rb:44\n# ${note}`)
   })
 
   test("gives a visible confirmation after a successful copy, rather than copying silently", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.start("req-1", "POST", "/orders"),
       run.finish("req-1", { status: 500, exception: { class: "RuntimeError", message: "boom", backtrace: [] } }),
     )
 
-    await select(container, "/orders")
-    const button = copyButton(container)
-    expect(button.textContent).not.toContain("Copied")
+    await select(user, "/orders")
+    expect(copyButton()).not.toHaveTextContent("Copied")
 
-    await click(button)
+    await user.click(copyButton())
 
-    expect(copyButton(container).textContent).toContain("Copied")
+    expect(copyButton()).toHaveTextContent("Copied")
   })
 })
 
@@ -969,27 +921,24 @@ describe("copying an exception", () => {
  */
 describe("the N+1-shaped request in a busy dev app's Sidecar", () => {
   test("reads as a run of near-identical queries, differing only in their bind", async () => {
-    const container = await theReader(...DENSE_TRAFFIC)
+    const { user } = theReader(...DENSE_TRAFFIC)
 
-    await select(container, "/api/v1/feed?page=1")
-    const queries = entries(container, ".entry-sql")
-    const authorLoads = queries.filter((entry) => entry.querySelector(".sql-name")?.textContent === "Author Load")
+    await select(user, "/api/v1/feed?page=1")
+    const authorLoads = queries().filter((entry) => within(entry).queryByText("Author Load") !== null)
 
-    expect(queries).toHaveLength(24)
+    expect(queries()).toHaveLength(24)
     expect(authorLoads).toHaveLength(20)
     // Twenty rows the eye can see are the same, and one chip per row that is not — which is
     // what makes the shape obvious without the Reader claiming to have detected anything.
-    expect(new Set(authorLoads.map((entry) => entry.querySelector(".sql")?.textContent)).size).toBe(1)
-    expect(new Set(authorLoads.map((entry) => entry.querySelector(".bind")?.textContent)).size).toBe(20)
+    expect(new Set(authorLoads.map((entry) => within(entry).getByRole("code").textContent)).size).toBe(1)
+    expect(new Set(authorLoads.map((entry) => within(entry).getAllByRole("listitem")[0]?.textContent)).size).toBe(20)
   })
 
   test("keeps the four logger calls in among them, where they were emitted", async () => {
-    const container = await theReader(...DENSE_TRAFFIC)
+    const { user } = theReader(...DENSE_TRAFFIC)
 
-    await select(container, "/api/v1/feed?page=1")
-    const kinds = [...detail(container).querySelectorAll(".detail > .timeline > .entry")].map((entry) =>
-      entry.className.includes("entry-sql") ? "sql" : "log",
-    )
+    await select(user, "/api/v1/feed?page=1")
+    const kinds = itemsOf(timeline()).map((entry) => (isQuery(entry) ? "sql" : "log"))
 
     expect(kinds).toHaveLength(28)
     // Not a slab of queries with the logger calls above or below them.
@@ -1005,36 +954,24 @@ describe("the N+1-shaped request in a busy dev app's Sidecar", () => {
  * *what*.
  */
 describe("selecting a Run row", () => {
-  async function selectTheRunRow(container: HTMLElement) {
-    const row = container.querySelector("tbody tr.activity-row-run")
-    if (row === null) throw new Error("the Activity table has no Run row")
-
-    await act(async () => {
-      row.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-    })
-  }
-
   test("opens what its Run emitted with no owning request", async () => {
     const run = aRun("rake-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.header("rake", 91_887),
       run.log(null, "reports:rebuild — 41,209 orders to process"),
       run.sql(null, 'SELECT COUNT(*) FROM "orders"'),
     )
 
-    await selectTheRunRow(container)
+    await select(user, "rake")
 
-    expect(detail(container).textContent).toContain("rake")
-    expect(detail(container).textContent).toContain("pid 91887")
-    expect(timeline(container)).toEqual([
-      "reports:rebuild — 41,209 orders to process",
-      'SELECT COUNT(*) FROM "orders"',
-    ])
+    expect(detail()).toHaveTextContent("rake")
+    expect(detail()).toHaveTextContent("pid 91887")
+    expect(timelineSays()).toEqual(says("reports:rebuild — 41,209 orders to process", 'SELECT COUNT(*) FROM "orders"'))
   })
 
   test("keeps the requests of the same Run out of it", async () => {
     const run = aRun("srv-1")
-    const container = await theReader(
+    const { user } = theReader(
       run.header(),
       run.log(null, "=> Booting Puma"),
       run.start("req-1", "GET", "/posts/12"),
@@ -1042,8 +979,8 @@ describe("selecting a Run row", () => {
       run.finish("req-1"),
     )
 
-    await selectTheRunRow(container)
+    await select(user, "server")
 
-    expect(timeline(container)).toEqual(["=> Booting Puma"])
+    expect(timelineSays()).toEqual(says("=> Booting Puma"))
   })
 })

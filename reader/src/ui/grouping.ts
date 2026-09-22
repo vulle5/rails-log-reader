@@ -98,3 +98,14 @@ function middle(box: Box) {
 function round(value: number) {
   return Math.round(value)
 }
+
+/**
+ * *Hover grouping*'s two marks, as the `data-grouping` a Console line and its Activity table
+ * row both wear — one list the stylesheet reads each mark out of with `~=`, and `undefined`
+ * where there is no mark rather than an empty attribute. Neither is a *Selection*, which is
+ * `aria-current` and says so.
+ */
+export function groupingMarks(pinned: boolean, lit: boolean) {
+  const marks = [pinned ? "pinned" : "", lit ? "lit" : ""].filter((mark) => mark !== "")
+  return marks.length === 0 ? undefined : marks.join(" ")
+}

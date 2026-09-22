@@ -63,39 +63,39 @@ export function runDescription(row: Pick<RunRow, "runKind" | "pid">) {
 }
 
 /**
- * The one lookup the Activity table's method cell and the Detail heading's method share, so
- * a verb renders the same colour in both places, or a colour drifting between them would be
- * a bug this function alone could have caught. GET keeps the accent
- * already used for it; POST, PUT/PATCH — read as one bucket, both "modify" — and DELETE each
- * get one of their own. Everything else — HEAD, OPTIONS, a verb this Reader has never heard
- * of, or no method at all — is `"other"`, which is plain neutral text and never GET's colour
- * by accident.
+ * The one lookup the Activity table's method cell and the Detail heading's method share, as
+ * the `data-method` both carry, so a verb renders the same colour in both places, or a colour
+ * drifting between them would be a bug this function alone could have caught. GET keeps the
+ * accent already used for it; POST, PUT/PATCH — read as one bucket, both "modify" — and DELETE
+ * each get one of their own. Everything else — HEAD, OPTIONS, a verb this Reader has never
+ * heard of, or no method at all — is `"other"`, which is plain neutral text and never GET's
+ * colour by accident.
  */
-export function methodClassName(method: string | null) {
+export function methodCategory(method: string | null) {
   switch (method) {
     case "GET":
-      return "method-get"
+      return "get"
     case "POST":
-      return "method-post"
+      return "post"
     case "PUT":
     case "PATCH":
-      return "method-put-patch"
+      return "put-patch"
     case "DELETE":
-      return "method-delete"
+      return "delete"
     default:
-      return "method-other"
+      return "other"
   }
 }
 
 /**
- * Grouped by class and not by exact code: a 404 and a 422 read the same colour, and so do a
- * 500 and a 503 — `.status-5xx` shares `--error` with `.no-status` in the stylesheet rather
- * than getting a token of its own, since a 5xx is the same failure. Only 4xx and 5xx are ever
- * coloured — 1xx, 2xx and 3xx render unchanged, so this returns `""` for them rather than a
- * class the stylesheet would have to define as a no-op.
+ * A status's `data-status`, grouped by class and not by exact code: a 404 and a 422 read the
+ * same colour, and so do a 500 and a 503 — `5xx` shares `--error` with `.no-status` in the
+ * stylesheet rather than getting a token of its own, since a 5xx is the same failure. Only 4xx
+ * and 5xx are ever coloured — 1xx, 2xx and 3xx render unchanged, so this returns `null` for
+ * them rather than a category the stylesheet would have to define as a no-op.
  */
-export function statusClassName(status: number) {
-  if (status >= 400 && status < 500) return "status-4xx"
-  if (status >= 500 && status < 600) return "status-5xx"
-  return ""
+export function statusCategory(status: number) {
+  if (status >= 400 && status < 500) return "4xx"
+  if (status >= 500 && status < 600) return "5xx"
+  return null
 }
