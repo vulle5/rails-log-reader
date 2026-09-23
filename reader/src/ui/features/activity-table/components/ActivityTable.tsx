@@ -43,7 +43,6 @@ import { useClimbingElapsed } from "../lib/elapsed"
 type Request = Extract<ActivityRow, { kind: "request" }>
 type Run = Extract<ActivityRow, { kind: "run" }>
 
-/** Keyed, not slugged from the heading: `Controller#action` makes no usable key. */
 const COLUMNS = [
   ["started", "Started"],
   ["status", "Status"],
@@ -271,6 +270,7 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
             reopened
           </span>
         )}
+        {/* The separator is drawn rather than written, so it stays out of the row's text. */}
         <span>
           {[runDescription(row).kind, ...runDescription(row).facts].map((said) => (
             <span key={said} className="not-first:before:text-faint not-first:before:content-['_·_']">
@@ -324,14 +324,16 @@ function rowMarks(selected: boolean, pinned: boolean, lit: boolean) {
  * A status when the finish carried one, and otherwise whichever of the three reasons it has
  * none. A finished request with no status is one that raised before it had a response —
  * its exception is in the *Detail column* — and a blank there would read the same as a cell
- * with nothing to say, on the row that most needs to read as an error.
+ * with nothing to say, on the row that most needs to read as an error. It is in the error
+ * colour, unlike the state dot, because this one did fail.
  */
 function Status({ row }: { row: Request }) {
   if (row.status !== null) {
     const category = statusCategory(row.status)
     const status = <Highlight text={String(row.status)} />
-    // 1xx, 2xx and 3xx get no category and so no span: plain text, uncoloured. 4xx and 5xx get
-    // colours of their own via `statusCategory`.
+    // 1xx, 2xx and 3xx get no category and so no span: plain text, uncoloured. A 4xx has a
+    // colour of its own, never `warn` or `error`, so it is not mistaken for a logged `.warn` or
+    // `.error` call; a 5xx is `error`, the failure a finish with no status already reads as.
     return category === null ? (
       status
     ) : (

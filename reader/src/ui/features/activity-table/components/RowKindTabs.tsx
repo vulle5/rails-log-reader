@@ -69,7 +69,7 @@ export function RowKindTabs({ rows, showing, onShow }: RowKindTabsProps) {
           type="button"
           role="tab"
           aria-selected={kind === showing}
-          className="inline-flex cursor-pointer items-baseline gap-1.25 rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-sunken aria-selected:border-border aria-selected:bg-selected aria-selected:text-foreground aria-selected:hover:bg-sunken"
+          className="inline-flex cursor-pointer items-baseline gap-1.25 rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted not-aria-selected:hover:bg-sunken aria-selected:border-border aria-selected:bg-selected aria-selected:text-foreground aria-selected:hover:bg-sunken"
           onClick={() => onShow(kind)}
         >
           {name}

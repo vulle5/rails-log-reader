@@ -89,10 +89,10 @@ export function methodCategory(method: string | null) {
 
 /**
  * A status's `data-status`, grouped by class and not by exact code: a 404 and a 422 read the
- * same colour, and so do a 500 and a 503 — `5xx` shares `--error` with `.no-status` in the
- * stylesheet rather than getting a token of its own, since a 5xx is the same failure. Only 4xx
- * and 5xx are ever coloured — 1xx, 2xx and 3xx render unchanged, so this returns `null` for
- * them rather than a category the stylesheet would have to define as a no-op.
+ * same colour, and so do a 500 and a 503 — `5xx` shares `error` with a finish that had no
+ * status rather than getting a token of its own, since a 5xx is the same failure. Only 4xx and
+ * 5xx are ever coloured — 1xx, 2xx and 3xx render unchanged, so this returns `null` for them
+ * rather than a category that would have to be styled as a no-op.
  */
 export function statusCategory(status: number) {
   if (status >= 400 && status < 500) return "4xx"
