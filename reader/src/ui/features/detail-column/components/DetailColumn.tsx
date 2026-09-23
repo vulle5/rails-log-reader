@@ -3,7 +3,7 @@ import { memo, useContext, useMemo, useState } from "react"
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
-import { controllerAction, methodCategory, ms, runDescription } from "../../../lib/format"
+import { controllerAction, METHOD_TEXT, methodCategory, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
 import { CopyButton } from "./CopyButton"
 import { bytes } from "../lib/format"
@@ -61,7 +61,7 @@ export function DetailColumn({
 
   if (row === null) {
     return (
-      <p className="placeholder">
+      <p className="p-5 text-center text-faint">
         Nothing selected — pick a row in the Activity table, or a line in the Console.
       </p>
     )
@@ -77,6 +77,19 @@ export function DetailColumn({
     </OpenModifierHeld>
   )
 }
+
+/** The whole of one row's detail: its heading, then its entries, one hairline apart. */
+const DETAIL = "flex flex-col gap-px pb-6"
+
+/** Which request is being read, so the column says so without the table beside it. */
+const HEADING =
+  "sticky top-0 z-1 flex items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm"
+
+/** A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */
+const HEADING_KIND = "font-bold text-accent"
+
+/** The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */
+const HEADING_FACTS = "ml-auto whitespace-nowrap text-muted"
 
 function RequestDetail({
   row,
@@ -98,15 +111,15 @@ function RequestDetail({
   const trailing = eventsShown(row.trailing, filter)
 
   return (
-    <article className="detail">
-      <header className="detail-heading">
-        <span className="detail-method" data-method={methodCategory(row.method)}>
+    <article className={DETAIL}>
+      <header className={HEADING}>
+        <span className={`${HEADING_KIND} ${METHOD_TEXT}`} data-method={methodCategory(row.method)}>
           <Highlight text={row.method ?? ""} />
         </span>
-        <span className="detail-path">
+        <span className="truncate">
           <Highlight text={row.path ?? ""} />
         </span>
-        <span className="detail-action">
+        <span className={HEADING_FACTS}>
           <Highlight text={controllerAction(row)} />
         </span>
       </header>
@@ -137,15 +150,15 @@ function RunDetail({ row, filter, railsRoot }: { row: RunRow; filter: DetailFilt
   const { kind, facts } = runDescription(row)
 
   return (
-    <article className="detail">
-      <header className="detail-heading">
-        <span className="detail-method">
+    <article className={DETAIL}>
+      <header className={HEADING}>
+        <span className={HEADING_KIND}>
           <Highlight text={kind} />
         </span>
-        <span className="detail-path">
+        <span className="truncate">
           <Highlight text={row.appName ?? ""} />
         </span>
-        <span className="detail-action">
+        <span className={HEADING_FACTS}>
           <Highlight text={facts.join(" · ")} />
         </span>
       </header>
@@ -169,7 +182,7 @@ function Timeline({
   railsRoot: string | null
 }) {
   return (
-    <ol className="timeline" aria-label={label}>
+    <ol aria-label={label}>
       {/* `(run_id, seq)` is the event identity everywhere else in the Reader, and a key is
           one more place it saves inventing one. */}
       {events.map((event) =>
@@ -183,23 +196,36 @@ function Timeline({
   )
 }
 
+/**
+ * Every entry starts at the same left edge and is laid out identically. That is the whole
+ * mechanism behind an N+1 being obvious: fifty near-identical children become fifty blocks the
+ * eye can see are the same, one chip apart.
+ *
+ * Off-screen entries skip layout and paint entirely, which is what keeps a scroll-driven reflow
+ * over a thousand-entry timeline cheap. `auto` in `contain-intrinsic-size` keeps an entry's last
+ * rendered height once the browser has measured it, so each kind's estimate — a query's is taller
+ * than a log line's — only matters before that: for the first paint, and for an entry that never
+ * becomes visible at all.
+ */
+const ENTRY = "border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]"
+
 const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
 
   return (
-    <li className="entry entry-sql">
-      <div className="entry-head">
+    <li className={`${ENTRY} [contain-intrinsic-size:auto_110px]`}>
+      <div className="flex items-baseline gap-1.5 text-xs text-muted">
         {/* What `development.log` prefixes these with, and the reason a query took no time. */}
-        {cached && <span className="sql-marker">CACHE</span>}
-        {async && <span className="sql-marker">ASYNC</span>}
+        {cached && <span className={SQL_MARKER}>CACHE</span>}
+        {async && <span className={SQL_MARKER}>ASYNC</span>}
         {/* `nil` on a raw `connection.execute`, which is then a query with no name rather
             than a query with a blank one. */}
         {name !== null && (
-          <span className="sql-name">
+          <span className="font-semibold text-foreground">
             <Highlight text={name} />
           </span>
         )}
-        <span className="sql-duration">{ms(duration_ms)}</span>
+        <span className="ml-auto font-mono tabular-nums">{ms(duration_ms)}</span>
       </div>
       <Statement sql={sql} />
       <Cut field="sql" original={event.truncated?.sql} />
@@ -207,16 +233,25 @@ const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; rails
       <Cut field="binds" original={event.truncated?.binds} />
       {/* Where `verbose_query_logs`' own `↳` line would sit, and shown whatever that setting
           is: the Initializer captures a query's *Callsite* regardless of it. */}
-      <Callsite className="sql-callsite" callsite={callsite} railsRoot={railsRoot} />
+      <Callsite className={`mt-1 ${CALLSITE}`} callsite={callsite} railsRoot={railsRoot} />
     </li>
   )
 })
+
+const SQL_MARKER = "font-mono text-2xs font-bold tracking-wider text-faint"
+
+/** The colour of each kind of token the SQL tokenizer names, read off its `data-token`. */
+const TOKEN_TEXT =
+  "data-[token=keyword]:font-semibold data-[token=keyword]:text-sql-keyword data-[token=identifier]:text-sql-identifier data-[token=string]:text-sql-string data-[token=number]:text-sql-number data-[token=placeholder]:font-semibold data-[token=placeholder]:text-sql-placeholder data-[token=comment]:text-sql-comment data-[token=comment]:italic"
 
 /**
  * One statement, coloured and searched. The search is matched on the statement whole and
  * never token by token, because the tokens are the highlighter's idea and not the reader's:
  * `posts"."id` is three of them in three colours, and one thing typed. Each token then marks
  * its own share of the matches, so a match keeps the colours it crosses.
+ *
+ * `pre-wrap` wraps a long query without touching a character of it: what is read is what
+ * pastes into a console.
  */
 function Statement({ sql }: { sql: string }) {
   const matches = useMatches(sql)
@@ -224,14 +259,14 @@ function Statement({ sql }: { sql: string }) {
   let from = 0
 
   return (
-    <code className="sql">
+    <code className="mt-0.5 block font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
       {/* The tokens partition one string in order, so a token's position is its identity —
           and the running length of the ones before it is where it starts in the statement. */}
       {tokens.map((token, at) => {
         const start = from
         from += token.text.length
         return (
-          <span key={at} data-token={token.kind}>
+          <span key={at} className={TOKEN_TEXT} data-token={token.kind}>
             <Marked text={token.text} from={start} matches={matches} />
           </span>
         )
@@ -250,7 +285,9 @@ function Statement({ sql }: { sql: string }) {
 function Cut({ field, original }: { field: string; original: number | undefined }) {
   if (original === undefined) return null
 
-  return <p className="cut">{`${field} was cut by the Sidecar — ${bytes(original)} was emitted`}</p>
+  // Not styled as an error — nothing failed. It is the file saying what it could not carry,
+  // and it has to be legible without pretending the query is broken.
+  return <p className="mt-1 text-xs text-faint italic">{`${field} was cut by the Sidecar — ${bytes(original)} was emitted`}</p>
 }
 
 /**
@@ -269,14 +306,17 @@ function Binds({ values }: { values: readonly BindValue[] }) {
   if (values.length === 0) return null
 
   return (
-    <div className="binds" role="group" aria-label={BINDS_LABEL}>
-      <span className="binds-label" title={BINDS_LABEL}>
+    <div className="mt-1 flex flex-wrap items-baseline gap-1" role="group" aria-label={BINDS_LABEL}>
+      <span className="text-2xs tracking-wider text-faint uppercase" title={BINDS_LABEL}>
         parameter values
       </span>
-      <ul className="bind-chips">
+      <ul className="flex flex-wrap gap-1">
         {/* Binds are positional — `$1` is the first — so a bind's position is its identity. */}
         {values.map((value, at) => (
-          <li key={at} className={`bind bind-${bindKind(value)}`}>
+          <li
+            key={at}
+            className={`rounded-chip border border-border bg-sunken px-1.25 font-mono text-xs leading-4.25 ${BIND_TEXT[bindKind(value)]}`}
+          >
             <Highlight text={value === null ? "NULL" : String(value)} />
           </li>
         ))}
@@ -285,16 +325,29 @@ function Binds({ values }: { values: readonly BindValue[] }) {
   )
 }
 
+type BindKind = "null" | "string" | "number" | "boolean"
+
+/** Each kind in the colour its SQL token has, so a bind reads as the literal it stands for. */
+const BIND_TEXT: Record<BindKind, string> = {
+  string: "text-sql-string",
+  number: "text-sql-number",
+  boolean: "text-sql-keyword",
+  null: "text-faint italic",
+}
+
 /**
- * Named for the stylesheet rather than taken from `typeof`, so the set of classes the CSS
- * has to answer for is written down here and cannot grow by accident.
+ * Named for `BIND_TEXT` rather than taken from `typeof`, so the set of kinds it has to answer
+ * for is written down here and cannot grow by accident.
  */
-function bindKind(value: BindValue): "null" | "string" | "number" | "boolean" {
+function bindKind(value: BindValue): BindKind {
   if (value === null) return "null"
   if (typeof value === "string") return "string"
   if (typeof value === "number") return "number"
   return "boolean"
 }
+
+/** A log line's level, as the colour of its severity and its message. */
+const LEVEL_TEXT = "group-data-[level=warn]:text-warn group-data-[level=error]:text-error group-data-[level=fatal]:text-error"
 
 const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent; railsRoot: string | null }) {
   const { severity, message, source, tags, callsite } = event.payload
@@ -302,20 +355,37 @@ const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent
   return (
     // Rails' own lines are kept and labelled apart rather than dropped: `Started GET` is all
     // a request that died before reaching a controller ever says about itself.
-    <li className="entry entry-log" data-level={severity} data-source={source}>
-      <span className="log-severity">{severity}</span>
+    // Laid out across rather than down, so a run of queries is not broken up by something that
+    // looks like another query. It wraps only so that a callsite can start a line of its own.
+    <li
+      className={`${ENTRY} group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm [contain-intrinsic-size:auto_28px]`}
+      data-level={severity}
+      data-source={source}
+    >
+      {/* Five characters, the longest of the usual severities, so every message starts at one edge. */}
+      <span className={`w-[5ch] flex-none font-mono text-2xs tracking-wider text-faint uppercase ${LEVEL_TEXT}`}>
+        {severity}
+      </span>
       {tags.map((tag) => (
-        <span key={tag} className="log-tag">
+        <span
+          key={tag}
+          className="flex-none rounded-chip border border-border bg-raised px-1 font-mono text-2xs text-muted"
+        >
           <Highlight text={tag} />
         </span>
       ))}
-      <span className="log-message">
+      {/* Grows into the row rather than wrapping under the severity. Rails' own lines are set
+          back, whatever their level: the developer's own calls are the ones the eye should land
+          on first. Important, because the level's colour would otherwise outrank it. */}
+      <span
+        className={`min-w-0 flex-1 whitespace-pre-wrap wrap-anywhere ${LEVEL_TEXT} group-data-[source=rails]:text-muted!`}
+      >
         <Highlight text={message} />
       </span>
       <Cut field="message" original={event.truncated?.message} />
       {/* The message itself is never searched for a path to open, a `↳` line kept in the
           timeline included: only the structured field is known to be a Callsite. */}
-      {source === "app" && <Callsite className="log-callsite" callsite={callsite} railsRoot={railsRoot} />}
+      {source === "app" && <Callsite className={`basis-full ${CALLSITE}`} callsite={callsite} railsRoot={railsRoot} />}
     </li>
   )
 })
@@ -330,13 +400,18 @@ function Exception({
   railsRoot: string | null
 }) {
   return (
-    <section className="exception" aria-label="Exception">
+    // The right padding keeps the message clear of the copy button, which is anchored here and
+    // not to the column.
+    <section
+      className="relative border-y border-border border-t-error py-2 pr-15 pl-3"
+      aria-label="Exception"
+    >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
           somewhere else, so it alone gets a control for it — a query or a log line is easy
           enough to select by hand. */}
       <CopyButton text={exceptionText(exception, cutFrom)} label="Copy exception" />
-      <p className="exception-message">
-        <span className="exception-class">
+      <p className="font-mono text-sm text-error">
+        <span className="font-bold">
           <Highlight text={exception.class} />
         </span>{" "}
         <Highlight text={exception.message} />
@@ -360,10 +435,19 @@ function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; rai
   const held = useContext(OpenModifierHeld)
 
   return (
-    <ol className="backtrace" aria-label="Backtrace">
+    // Full and uncleaned, so it is long: it scrolls with the column rather than being capped.
+    <ol
+      className="mt-1.5 font-mono text-xs leading-normal whitespace-pre-wrap text-muted wrap-anywhere"
+      aria-label="Backtrace"
+    >
       {segments.map((segment) =>
         segment.type === "frame" ? (
-          <li key={segment.index} data-frame={segment.host ? "host" : undefined}>
+          // The Host app's own frames, at full contrast against the muted rest.
+          <li
+            key={segment.index}
+            className="data-[frame=host]:text-strong"
+            data-frame={segment.host ? "host" : undefined}
+          >
             <Frame frame={segment.frame} railsRoot={railsRoot} held={held} />
           </li>
         ) : (
@@ -408,7 +492,11 @@ function GapSegment({
 
   return (
     <li>
-      <button type="button" className="backtrace-reveal" onClick={onReveal}>
+      <button
+        type="button"
+        className="cursor-pointer font-mono text-xs text-faint italic underline decoration-dotted hover:text-muted focus-visible:text-muted"
+        onClick={onReveal}
+      >
         {segment.frames.length === 1 ? "1 frame hidden" : `${segment.frames.length} frames hidden`}
       </button>
     </li>
@@ -418,6 +506,8 @@ function GapSegment({
 function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | null; held: boolean }) {
   return <Openable frame={frame} matches={useMatches(frame)} railsRoot={railsRoot} held={held} />
 }
+
+const CALLSITE = "font-mono text-xs text-muted wrap-anywhere"
 
 /**
  * An SQL or App log event's *Callsite*, as `verbose_query_logs` prints one: `↳ ` and the raw
@@ -475,7 +565,7 @@ function Openable({
   return (
     <>
       <span
-        className="source-location"
+        className="data-armed:cursor-pointer data-armed:underline"
         data-armed={hovered && held ? "" : undefined}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -501,12 +591,15 @@ function Openable({
  * The *trailing section*: events whose `seq` places them after the `request_finish`. Visibly
  * separate and captioned, never silently at the end of the timeline — a log line arriving
  * after its request finished is genuinely surprising, and folding it in would read as a
- * Reader bug rather than as the truth about the file.
+ * Reader bug rather than as the truth about the file. Set apart by a rule as well as the
+ * caption, so it cannot be mistaken for the timeline it sits below.
  */
 function Trailing({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
-    <section className="trailing" aria-label="After the request finished">
-      <h3>After the request finished</h3>
+    <section className="mt-3 border-t border-dashed border-border" aria-label="After the request finished">
+      <h3 className="px-3 py-1.5 text-2xs font-semibold tracking-wider text-faint uppercase">
+        After the request finished
+      </h3>
       <Timeline events={events} railsRoot={railsRoot} />
     </section>
   )

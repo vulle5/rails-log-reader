@@ -84,7 +84,9 @@ export function Marked({ text, from = 0, matches }: { text: string; from?: numbe
 
     const unlit = Math.min(stop, end)
     pieces.push(
-      <mark key={lit} className="search-match">
+      // Lit, never hidden: a background under the characters that matched, and nothing done to
+      // anything that did not. Inheriting the colour is what keeps a matched keyword a keyword.
+      <mark key={lit} className="rounded-xs bg-match text-inherit">
         {text.slice(lit - from, unlit - from)}
       </mark>,
     )

@@ -88,6 +88,13 @@ export function methodCategory(method: string | null) {
 }
 
 /**
+ * The colour of each of `methodCategory`'s categories, read off the `data-method` it is
+ * written to. A *Run row*'s kind carries no `data-method` — it is not a method to begin with.
+ */
+export const METHOD_TEXT =
+  "data-[method=get]:text-accent data-[method=post]:text-method-post data-[method=put-patch]:text-method-put-patch data-[method=delete]:text-method-delete data-[method=other]:text-foreground"
+
+/**
  * A status's `data-status`, grouped by class and not by exact code: a 404 and a 422 read the
  * same colour, and so do a 500 and a 503 — `5xx` shares `error` with a finish that had no
  * status rather than getting a token of its own, since a 5xx is the same failure. Only 4xx and

@@ -7,7 +7,7 @@ import { bytes } from "./format"
  * first line, one backtrace frame per line, real newlines — no severity labels, no markup —
  * so it pastes cleanly into a bug tracker, a colleague's chat, or an AI assistant.
  *
- * `cutFrom` repeats the on-screen `.cut` note's own wording, `#`-prefixed so a paste can
+ * `cutFrom` repeats the on-screen `Cut` note's own wording, `#`-prefixed so a paste can
  * never be mistaken for one more real frame: the whole promise of this text is that it is
  * either the whole trace or it says so, never a trace quietly missing its tail.
  */

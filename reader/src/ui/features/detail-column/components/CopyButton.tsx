@@ -29,7 +29,17 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   }
 
   return (
-    <button type="button" className="copy-button" title={label} aria-label={label} onClick={onClick}>
+    // Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
+    // beside it. The opacity dims the border and background along with the label, and goes no
+    // lower than this, or "reduced" starts reading as "gone" rather than as "not yet what you're
+    // looking at".
+    <button
+      type="button"
+      className="absolute top-1.5 right-2 min-w-13 cursor-pointer rounded border border-border bg-raised px-2 py-0.5 font-ui text-xs text-foreground opacity-70 hover:opacity-100 focus-visible:opacity-100"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+    >
       {copied ? "Copied" : "Copy"}
     </button>
   )

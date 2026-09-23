@@ -91,6 +91,9 @@
   --text-sm: 12px;
   --text-base: 13px;
   --text-lg: 16px;
+
+  /* A query's: tighter than `leading-normal`, so a long statement stays one block to the eye. */
+  --leading-sql: 1.45;
 }
 
 @layer base {

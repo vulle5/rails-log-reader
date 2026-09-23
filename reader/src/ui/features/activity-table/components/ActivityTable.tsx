@@ -1,7 +1,17 @@
 import type { ActivityRow } from "../../../../shared/activity"
 import { groupingMarks } from "../../../grouping"
 import { Highlight } from "../../../hooks/search"
-import { clock, controllerAction, count, elapsed, methodCategory, ms, runDescription, statusCategory } from "../../../lib/format"
+import {
+  clock,
+  controllerAction,
+  count,
+  elapsed,
+  METHOD_TEXT,
+  methodCategory,
+  ms,
+  runDescription,
+  statusCategory,
+} from "../../../lib/format"
 import { useClimbingElapsed } from "../lib/elapsed"
 
 /**
@@ -64,13 +74,6 @@ const NUMBER = `${CELL} text-right text-muted`
 
 /** The total, set above the durations it sums. */
 const TOTAL = `${CELL} text-right font-semibold text-foreground`
-
-/**
- * The same lookup as the *Detail column*'s method, so a verb reads one colour in both places.
- * A *Run row*'s kind carries no `data-method` — it is not a method to begin with.
- */
-const METHOD_TEXT =
-  "data-[method=get]:text-accent data-[method=post]:text-method-post data-[method=put-patch]:text-method-put-patch data-[method=delete]:text-method-delete data-[method=other]:text-foreground"
 
 /**
  * The quiet badge for a fact that is never an alarm: a *Partial request*, a reopened Run row,
