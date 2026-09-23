@@ -259,14 +259,14 @@ describe("colouring methods and statuses", () => {
       run.finish("req-5"),
     )
 
-    const methods = activityRows().map((row) => cellUnder(row, "Method"))
+    expect(activityRows()).toHaveLength(5)
+    const [get, post, put, patch, del] = activityRows()
 
-    expect(methods[0]).toHaveAttribute("data-method", "get")
-    expect(methods[1]).toHaveAttribute("data-method", "post")
-    expect(methods[2]).toHaveAttribute("data-method", "put-patch")
-    expect(methods[3]).toHaveAttribute("data-method", "put-patch")
-    expect(methods[4]).toHaveAttribute("data-method", "delete")
-    expect(methods).toHaveLength(5)
+    expect(within(cellUnder(get!, "Method")).getByText("GET")).toHaveAttribute("data-method", "get")
+    expect(within(cellUnder(post!, "Method")).getByText("POST")).toHaveAttribute("data-method", "post")
+    expect(within(cellUnder(put!, "Method")).getByText("PUT")).toHaveAttribute("data-method", "put-patch")
+    expect(within(cellUnder(patch!, "Method")).getByText("PATCH")).toHaveAttribute("data-method", "put-patch")
+    expect(within(cellUnder(del!, "Method")).getByText("DELETE")).toHaveAttribute("data-method", "delete")
   })
 
   test("renders HEAD, OPTIONS and a verb it does not recognise as plain neutral text, never GET's colour", () => {
@@ -280,9 +280,12 @@ describe("colouring methods and statuses", () => {
       run.finish("req-3"),
     )
 
-    for (const row of activityRows()) {
-      expect(cellUnder(row, "Method")).toHaveAttribute("data-method", "other")
-    }
+    expect(activityRows()).toHaveLength(3)
+    const [head, options, trace] = activityRows()
+
+    expect(within(cellUnder(head!, "Method")).getByText("HEAD")).toHaveAttribute("data-method", "other")
+    expect(within(cellUnder(options!, "Method")).getByText("OPTIONS")).toHaveAttribute("data-method", "other")
+    expect(within(cellUnder(trace!, "Method")).getByText("TRACE")).toHaveAttribute("data-method", "other")
   })
 
   test("colours 4xx and 5xx statuses by class, and leaves 1xx, 2xx and 3xx exactly as they render today", () => {

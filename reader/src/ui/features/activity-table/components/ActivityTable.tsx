@@ -1,13 +1,15 @@
+import type { ComponentProps, ReactNode } from "react"
+
 import type { ActivityRow } from "../../../../shared/activity"
+import { MethodText } from "../../../components/MethodText"
 import { groupingMarks } from "../../../grouping"
 import { Highlight } from "../../../hooks/search"
+import { cn } from "../../../lib/cn"
 import {
   clock,
   controllerAction,
   count,
   elapsed,
-  METHOD_TEXT,
-  methodCategory,
   ms,
   runDescription,
   statusCategory,
@@ -66,38 +68,6 @@ const COLUMNS = [
   ["total", "Total"],
 ] as const
 
-/**
- * Every cell, cut rather than wrapped, so no row grows past the rest.
- *
- * The far end of *Hover grouping*, hovered and pinned, is tinted on the cells rather than the
- * row, so it lies over whatever else the row is saying about itself — in flight, Interrupted,
- * selected — and the pinned group's edge replaces an Interrupted row's.
- */
-const CELL = [
-  "h-6 truncate px-2 font-mono text-sm",
-  "group-data-[grouping~=lit]:group-not-data-[grouping~=pinned]:bg-lit group-data-[grouping~=pinned]:bg-pinned group-data-[grouping~=pinned]:first:shadow-pinned-row!",
-].join(" ")
-
-/** The counts and durations, which read down a column as numbers do. */
-const NUMBER = `${CELL} text-right text-muted`
-
-/** The total, set above the durations it sums. */
-const TOTAL = `${CELL} text-right font-semibold text-foreground`
-
-/**
- * The quiet badge for a fact that is never an alarm: a *Partial request*, a reopened Run row,
- * the *last row standing*. Unlike the *Run marker*'s bold accent line, which is a boundary
- * rather than an absence or an overage.
- */
-const BADGE = "rounded-chip border border-border px-1 font-ui text-2xs tracking-wider text-faint uppercase"
-
-/**
- * Both row kinds. The selected row and the detail column are one thing seen twice, so the
- * mark is a background, readable at a glance from across the table, and wins over the hover
- * and over a Run row's or an Interrupted row's own.
- */
-const ROW = "group h-6 cursor-default border-b border-border aria-selected:bg-selected not-aria-selected:hover:bg-sunken"
-
 /** How the Console finds a row to draw to and to scroll to. Written here, because this is what writes it. */
 export function rowSelector(id: string) {
   return `[data-row=${CSS.escape(id)}]`
@@ -129,7 +99,10 @@ export function ActivityTable({ rows, selected, pinned, lit, onSelect }: Activit
             // characters wide.
             <th
               key={key}
-              className={`sticky top-0 z-1 border-b border-border bg-background px-2 py-1 text-left text-2xs font-semibold tracking-wider whitespace-nowrap text-faint uppercase ${key === "path" ? "w-full" : ""}`}
+              className={cn(
+                "sticky top-0 z-1 border-b border-border bg-background px-2 py-1 text-left text-2xs font-semibold tracking-wider whitespace-nowrap text-faint uppercase",
+                key === "path" && "w-full",
+              )}
             >
               {heading}
             </th>
@@ -172,8 +145,8 @@ type RowProps<T> = { row: T; selected: boolean; pinned: boolean; lit: boolean; o
  */
 function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>) {
   return (
-    <tr
-      className={`${ROW} not-aria-selected:data-[state=interrupted]:bg-sunken`}
+    <Row
+      className="not-aria-selected:data-[state=interrupted]:bg-sunken"
       // What the Console finds a row by, and what it scrolls to: the fold's own `id`, which
       // is the same string a Console line names its owner with.
       data-row={row.id}
@@ -184,48 +157,43 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
     >
       {/* A *Partial request* has no start to show, which is exactly where it says so: the
           column that would have said when this began says instead that nobody saw it begin. */}
-      <td className={`${CELL} text-faint group-data-[state=interrupted]:shadow-interrupted`}>
+      <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
         {row.partial ? (
-          <span className={BADGE} title="Its start was never seen — the Reader attached mid-flight">
-            partial
-          </span>
+          <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge>
         ) : (
           clock(row.startedAtWall)
         )}
         {/* A different fact from `partial`, and never in tension with it: the *last row
             standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
         <OverBoundMark row={row} />
-      </td>
-      <td className={CELL}>
+      </Cell>
+      <Cell>
         <Status row={row} />
-      </td>
-      {/* Important, because the method's own colour would otherwise outrank the fade. */}
-      <td
-        className={`${CELL} font-bold ${METHOD_TEXT} group-data-[state=interrupted]:text-faint!`}
-        data-method={methodCategory(row.method)}
-      >
-        <Highlight text={row.method ?? ""} />
-      </td>
+      </Cell>
+      <Cell className="font-bold">
+        {/* Important, because the method's own colour would otherwise outrank the fade. */}
+        <MethodText method={row.method} className="group-data-[state=interrupted]:text-faint!">
+          <Highlight text={row.method ?? ""} />
+        </MethodText>
+      </Cell>
       {/* The path and the action are capped in characters, the unit they are read in. */}
-      <td className={`${CELL} max-w-[40ch] group-data-[state=interrupted]:text-faint`} title={row.path ?? undefined}>
+      <Cell className="max-w-[40ch] group-data-[state=interrupted]:text-faint" title={row.path ?? undefined}>
         <Highlight text={row.path ?? ""} />
-      </td>
-      <td className={`${CELL} max-w-[28ch] text-muted group-data-[state=interrupted]:text-faint`}>
+      </Cell>
+      <Cell className="max-w-[28ch] text-muted group-data-[state=interrupted]:text-faint">
         <Highlight text={controllerAction(row)} />
-      </td>
-      <td className={NUMBER}>{count(row.sqlCount)}</td>
-      <td className={NUMBER}>{count(row.logCount)}</td>
-      <td className={NUMBER}>{ms(row.dbRuntimeMs)}</td>
-      <td className={NUMBER}>{ms(row.viewRuntimeMs)}</td>
+      </Cell>
+      <NumberCell>{count(row.sqlCount)}</NumberCell>
+      <NumberCell>{count(row.logCount)}</NumberCell>
+      <NumberCell>{ms(row.dbRuntimeMs)}</NumberCell>
+      <NumberCell>{ms(row.viewRuntimeMs)}</NumberCell>
       {/* The total: what the request said it took, or — where it said nothing — what the
           Reader can prove it took. A finish that carried no `duration_ms` at all, the
           Initializer having never seen that request start, reads exactly as an in-flight row
           does, as the distance between the request's own first and last events, frozen. Never
           a `0ms` standing in for a number nobody has. */}
-      <td className={TOTAL}>
-        {row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}
-      </td>
-    </tr>
+      <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>
+    </Row>
   )
 }
 
@@ -256,31 +224,31 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
  */
 function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
   return (
-    <tr
-      className={`${ROW} not-aria-selected:bg-sunken data-marker:border-t-2 data-marker:border-t-accent`}
+    <Row
+      className="not-aria-selected:bg-sunken data-marker:border-t-2 data-marker:border-t-accent"
       data-row={row.id}
       data-kind="run"
       data-marker={row.marker ? "" : undefined}
       {...rowMarks(selected, pinned, lit)}
       onClick={onSelect}
     >
-      <td className={`${CELL} text-faint`}>
+      <Cell className="text-faint">
         {clock(row.startedAtWall)}
         <OverBoundMark row={row} />
-      </td>
-      <td className={`${CELL} text-muted`} colSpan={4}>
+      </Cell>
+      <Cell className="text-muted" colSpan={4}>
         {row.marker && (
           <span className="mr-2 font-ui text-2xs font-bold tracking-wider text-accent uppercase">Run started</span>
         )}
         {/* Distinct from the Run marker above, and never drawn beside it: a reopened row has
             no header of its own for a marker to be drawn from. */}
         {row.reopened && (
-          <span
-            className={`${BADGE} mr-2`}
+          <Badge
+            className="mr-2"
             title="Its earlier row was evicted under the Memory bound — this Run has said something unattributed again"
           >
             reopened
-          </span>
+          </Badge>
         )}
         {/* The separator is drawn rather than written, so it stays out of the row's text. */}
         <span>
@@ -290,15 +258,15 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
             </span>
           ))}
         </span>
-      </td>
-      <td className={NUMBER}>{count(row.sqlCount)}</td>
-      <td className={NUMBER}>{count(row.logCount)}</td>
+      </Cell>
+      <NumberCell>{count(row.sqlCount)}</NumberCell>
+      <NumberCell>{count(row.logCount)}</NumberCell>
       {/* A Run has no db, view or total to show: three empty cells, so the columns beside a
           request's stay the columns they are. */}
-      <td className={NUMBER} />
-      <td className={NUMBER} />
-      <td className={TOTAL} />
-    </tr>
+      <NumberCell />
+      <NumberCell />
+      <NumberCell total />
+    </Row>
   )
 }
 
@@ -314,12 +282,68 @@ function OverBoundMark({ row }: { row: Request | Run }) {
   if (!row.overBound) return null
 
   return (
-    <span
-      className={`${BADGE} ml-1.5`}
+    <Badge
+      className="ml-1.5"
       title="Holding more events than the Memory bound's usual ceiling — evicting it would empty the table, so nothing here has been trimmed"
     >
       over bound
-    </span>
+    </Badge>
+  )
+}
+
+/**
+ * Both row kinds. The selected row and the detail column are one thing seen twice, so the
+ * mark is a background, readable at a glance from across the table, and wins over the hover
+ * and over a Run row's or an Interrupted row's own.
+ */
+function Row({ className, ...props }: ComponentProps<"tr">) {
+  return (
+    <tr
+      className={cn(
+        "group h-6 cursor-default border-b border-border aria-selected:bg-selected not-aria-selected:hover:bg-sunken",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/**
+ * Every cell, cut rather than wrapped, so no row grows past the rest.
+ *
+ * The far end of *Hover grouping*, hovered and pinned, is tinted on the cells rather than the
+ * row, so it lies over whatever else the row is saying about itself — in flight, Interrupted,
+ * selected — and the pinned group's edge replaces an Interrupted row's.
+ */
+function Cell({ className, ...props }: ComponentProps<"td">) {
+  return (
+    <td
+      className={cn(
+        "h-6 truncate px-2 font-mono text-sm",
+        "group-data-[grouping~=lit]:group-not-data-[grouping~=pinned]:bg-lit group-data-[grouping~=pinned]:bg-pinned group-data-[grouping~=pinned]:first:shadow-pinned-row!",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A count or a duration, which read down a column as numbers do — and the total, set above the durations it sums. */
+function NumberCell({ total = false, children }: { total?: boolean; children?: ReactNode }) {
+  return <Cell className={cn("text-right text-muted", total && "font-semibold text-foreground")}>{children}</Cell>
+}
+
+/**
+ * The quiet badge for a fact that is never an alarm: a *Partial request*, a reopened Run row,
+ * the *last row standing*. Unlike the *Run marker*'s bold accent line, which is a boundary
+ * rather than an absence or an overage.
+ */
+function Badge({ className, ...props }: ComponentProps<"span">) {
+  return (
+    <span
+      className={cn("rounded-chip border border-border px-1 font-ui text-2xs tracking-wider text-faint uppercase", className)}
+      {...props}
+    />
   )
 }
 

@@ -1,9 +1,13 @@
-import { memo, useContext, useMemo, useState } from "react"
+import { memo, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
-import { controllerAction, METHOD_TEXT, methodCategory, ms, runDescription } from "../../../lib/format"
+import { LevelText } from "../../../components/LevelText"
+import { MethodText } from "../../../components/MethodText"
+import { Tag } from "../../../components/Tag"
+import { cn } from "../../../lib/cn"
+import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
 import { CopyButton } from "./CopyButton"
 import { bytes } from "../lib/format"
@@ -78,19 +82,6 @@ export function DetailColumn({
   )
 }
 
-/** The whole of one row's detail: its heading, then its entries, one hairline apart. */
-const DETAIL = "flex flex-col gap-px pb-6"
-
-/** Which request is being read, so the column says so without the table beside it. */
-const HEADING =
-  "sticky top-0 z-1 flex items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm"
-
-/** A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */
-const HEADING_KIND = "font-bold text-accent"
-
-/** The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */
-const HEADING_FACTS = "ml-auto whitespace-nowrap text-muted"
-
 function RequestDetail({
   row,
   filter,
@@ -111,19 +102,15 @@ function RequestDetail({
   const trailing = eventsShown(row.trailing, filter)
 
   return (
-    <article className={DETAIL}>
-      <header className={HEADING}>
-        <span className={`${HEADING_KIND} ${METHOD_TEXT}`} data-method={methodCategory(row.method)}>
+    <Detail
+      kind={
+        <MethodText method={row.method}>
           <Highlight text={row.method ?? ""} />
-        </span>
-        <span className="truncate">
-          <Highlight text={row.path ?? ""} />
-        </span>
-        <span className={HEADING_FACTS}>
-          <Highlight text={controllerAction(row)} />
-        </span>
-      </header>
-
+        </MethodText>
+      }
+      name={row.path ?? ""}
+      facts={controllerAction(row)}
+    >
       <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
       {row.exception !== null && (
         <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
@@ -133,7 +120,7 @@ function RequestDetail({
           finished" section behind — the section is about there being something to show
           under it. */}
       {trailing.length > 0 && <Trailing events={trailing} railsRoot={railsRoot} />}
-    </article>
+    </Detail>
   )
 }
 
@@ -150,20 +137,31 @@ function RunDetail({ row, filter, railsRoot }: { row: RunRow; filter: DetailFilt
   const { kind, facts } = runDescription(row)
 
   return (
-    <article className={DETAIL}>
-      <header className={HEADING}>
-        <span className={HEADING_KIND}>
-          <Highlight text={kind} />
-        </span>
+    <Detail kind={<Highlight text={kind} />} name={row.appName ?? ""} facts={facts.join(" · ")}>
+      <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+    </Detail>
+  )
+}
+
+/**
+ * The whole of one row's detail: a heading saying which row is being read, so the column says
+ * so without the table beside it, then its entries, one hairline apart.
+ */
+function Detail({ kind, name, facts, children }: { kind: ReactNode; name: string; facts: string; children: ReactNode }) {
+  return (
+    <article className="flex flex-col gap-px pb-6">
+      <header className="sticky top-0 z-1 flex items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm">
+        {/* A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */}
+        <span className="font-bold text-accent">{kind}</span>
         <span className="truncate">
-          <Highlight text={row.appName ?? ""} />
+          <Highlight text={name} />
         </span>
-        <span className={HEADING_FACTS}>
-          <Highlight text={facts.join(" · ")} />
+        {/* The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */}
+        <span className="ml-auto whitespace-nowrap text-muted">
+          <Highlight text={facts} />
         </span>
       </header>
-
-      <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      {children}
     </article>
   )
 }
@@ -207,17 +205,19 @@ function Timeline({
  * than a log line's — only matters before that: for the first paint, and for an entry that never
  * becomes visible at all.
  */
-const ENTRY = "border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]"
+function Entry({ className, ...props }: ComponentProps<"li">) {
+  return <li className={cn("border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]", className)} {...props} />
+}
 
 const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
 
   return (
-    <li className={`${ENTRY} [contain-intrinsic-size:auto_110px]`}>
+    <Entry className="[contain-intrinsic-size:auto_110px]">
       <div className="flex items-baseline gap-1.5 text-xs text-muted">
         {/* What `development.log` prefixes these with, and the reason a query took no time. */}
-        {cached && <span className={SQL_MARKER}>CACHE</span>}
-        {async && <span className={SQL_MARKER}>ASYNC</span>}
+        {cached && <SqlMarker>CACHE</SqlMarker>}
+        {async && <SqlMarker>ASYNC</SqlMarker>}
         {/* `nil` on a raw `connection.execute`, which is then a query with no name rather
             than a query with a blank one. */}
         {name !== null && (
@@ -233,16 +233,14 @@ const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; rails
       <Cut field="binds" original={event.truncated?.binds} />
       {/* Where `verbose_query_logs`' own `↳` line would sit, and shown whatever that setting
           is: the Initializer captures a query's *Callsite* regardless of it. */}
-      <Callsite className={`mt-1 ${CALLSITE}`} callsite={callsite} railsRoot={railsRoot} />
-    </li>
+      <Callsite className="mt-1" callsite={callsite} railsRoot={railsRoot} />
+    </Entry>
   )
 })
 
-const SQL_MARKER = "font-mono text-2xs font-bold tracking-wider text-faint"
-
-/** The colour of each kind of token the SQL tokenizer names, read off its `data-token`. */
-const TOKEN_TEXT =
-  "data-[token=keyword]:font-semibold data-[token=keyword]:text-sql-keyword data-[token=identifier]:text-sql-identifier data-[token=string]:text-sql-string data-[token=number]:text-sql-number data-[token=placeholder]:font-semibold data-[token=placeholder]:text-sql-placeholder data-[token=comment]:text-sql-comment data-[token=comment]:italic"
+function SqlMarker({ children }: { children: ReactNode }) {
+  return <span className="font-mono text-2xs font-bold tracking-wider text-faint">{children}</span>
+}
 
 /**
  * One statement, coloured and searched. The search is matched on the statement whole and
@@ -266,7 +264,19 @@ function Statement({ sql }: { sql: string }) {
         const start = from
         from += token.text.length
         return (
-          <span key={at} className={TOKEN_TEXT} data-token={token.kind}>
+          // The colour of each kind of token the SQL tokenizer names, read off its `data-token`.
+          <span
+            key={at}
+            className={cn(
+              "data-[token=keyword]:font-semibold data-[token=keyword]:text-sql-keyword",
+              "data-[token=identifier]:text-sql-identifier",
+              "data-[token=string]:text-sql-string",
+              "data-[token=number]:text-sql-number",
+              "data-[token=placeholder]:font-semibold data-[token=placeholder]:text-sql-placeholder",
+              "data-[token=comment]:text-sql-comment data-[token=comment]:italic",
+            )}
+            data-token={token.kind}
+          >
             <Marked text={token.text} from={start} matches={matches} />
           </span>
         )
@@ -312,14 +322,24 @@ function Binds({ values }: { values: readonly BindValue[] }) {
       </span>
       <ul className="flex flex-wrap gap-1">
         {/* Binds are positional — `$1` is the first — so a bind's position is its identity. */}
-        {values.map((value, at) => (
-          <li
-            key={at}
-            className={`rounded-chip border border-border bg-sunken px-1.25 font-mono text-xs leading-4.25 ${BIND_TEXT[bindKind(value)]}`}
-          >
-            <Highlight text={value === null ? "NULL" : String(value)} />
-          </li>
-        ))}
+        {values.map((value, at) => {
+          const kind = bindKind(value)
+          return (
+            // Each kind in the colour its SQL token has, so a bind reads as the literal it stands for.
+            <li
+              key={at}
+              className={cn(
+                "rounded-chip border border-border bg-sunken px-1.25 font-mono text-xs leading-4.25",
+                kind === "string" && "text-sql-string",
+                kind === "number" && "text-sql-number",
+                kind === "boolean" && "text-sql-keyword",
+                kind === "null" && "text-faint italic",
+              )}
+            >
+              <Highlight text={value === null ? "NULL" : String(value)} />
+            </li>
+          )
+        })}
       </ul>
     </div>
   )
@@ -327,17 +347,9 @@ function Binds({ values }: { values: readonly BindValue[] }) {
 
 type BindKind = "null" | "string" | "number" | "boolean"
 
-/** Each kind in the colour its SQL token has, so a bind reads as the literal it stands for. */
-const BIND_TEXT: Record<BindKind, string> = {
-  string: "text-sql-string",
-  number: "text-sql-number",
-  boolean: "text-sql-keyword",
-  null: "text-faint italic",
-}
-
 /**
- * Named for `BIND_TEXT` rather than taken from `typeof`, so the set of kinds it has to answer
- * for is written down here and cannot grow by accident.
+ * Which of the four colours a bind is set in: `null`, a string, a number, or — everything else
+ * a bind can be — a boolean.
  */
 function bindKind(value: BindValue): BindKind {
   if (value === null) return "null"
@@ -345,9 +357,6 @@ function bindKind(value: BindValue): BindKind {
   if (typeof value === "number") return "number"
   return "boolean"
 }
-
-/** A log line's level, as the colour of its severity and its message. */
-const LEVEL_TEXT = "group-data-[level=warn]:text-warn group-data-[level=error]:text-error group-data-[level=fatal]:text-error"
 
 const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent; railsRoot: string | null }) {
   const { severity, message, source, tags, callsite } = event.payload
@@ -357,36 +366,29 @@ const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent
     // a request that died before reaching a controller ever says about itself.
     // Laid out across rather than down, so a run of queries is not broken up by something that
     // looks like another query. It wraps only so that a callsite can start a line of its own.
-    <li
-      className={`${ENTRY} group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm [contain-intrinsic-size:auto_28px]`}
+    <Entry
+      className="group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm [contain-intrinsic-size:auto_28px]"
       data-level={severity}
       data-source={source}
     >
       {/* Five characters, the longest of the usual severities, so every message starts at one edge. */}
-      <span className={`w-[5ch] flex-none font-mono text-2xs tracking-wider text-faint uppercase ${LEVEL_TEXT}`}>
-        {severity}
-      </span>
+      <LevelText className="w-[5ch] flex-none font-mono text-2xs tracking-wider text-faint uppercase">{severity}</LevelText>
       {tags.map((tag) => (
-        <span
-          key={tag}
-          className="flex-none rounded-chip border border-border bg-raised px-1 font-mono text-2xs text-muted"
-        >
+        <Tag key={tag}>
           <Highlight text={tag} />
-        </span>
+        </Tag>
       ))}
       {/* Grows into the row rather than wrapping under the severity. Rails' own lines are set
           back, whatever their level: the developer's own calls are the ones the eye should land
           on first. Important, because the level's colour would otherwise outrank it. */}
-      <span
-        className={`min-w-0 flex-1 whitespace-pre-wrap wrap-anywhere ${LEVEL_TEXT} group-data-[source=rails]:text-muted!`}
-      >
+      <LevelText className="min-w-0 flex-1 whitespace-pre-wrap wrap-anywhere group-data-[source=rails]:text-muted!">
         <Highlight text={message} />
-      </span>
+      </LevelText>
       <Cut field="message" original={event.truncated?.message} />
       {/* The message itself is never searched for a path to open, a `↳` line kept in the
           timeline included: only the structured field is known to be a Callsite. */}
-      {source === "app" && <Callsite className={`basis-full ${CALLSITE}`} callsite={callsite} railsRoot={railsRoot} />}
-    </li>
+      {source === "app" && <Callsite className="basis-full" callsite={callsite} railsRoot={railsRoot} />}
+    </Entry>
   )
 })
 
@@ -507,8 +509,6 @@ function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | 
   return <Openable frame={frame} matches={useMatches(frame)} railsRoot={railsRoot} held={held} />
 }
 
-const CALLSITE = "font-mono text-xs text-muted wrap-anywhere"
-
 /**
  * An SQL or App log event's *Callsite*, as `verbose_query_logs` prints one: `↳ ` and the raw
  * value, never shortened. Searched as the whole line, so a term can run across the `↳`. Not
@@ -528,7 +528,7 @@ function Callsite({
   if (callsite === undefined || callsite === "") return null
 
   return (
-    <p className={className}>
+    <p className={cn("font-mono text-xs text-muted wrap-anywhere", className)}>
       <Marked text="↳ " matches={matches} />
       <Openable frame={callsite} from={2} matches={matches} railsRoot={railsRoot} held={held} />
     </p>

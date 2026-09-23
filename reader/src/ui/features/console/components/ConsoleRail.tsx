@@ -1,6 +1,9 @@
 import type { ConsoleLine } from "../../../../shared/console"
+import { LevelText } from "../../../components/LevelText"
+import { Tag } from "../../../components/Tag"
 import { groupingMarks } from "../../../grouping"
 import { Highlight } from "../../../hooks/search"
+import { cn } from "../../../lib/cn"
 
 /**
  * The **Console rail**: the leftmost of the Reader's three columns, and a global stream of
@@ -60,15 +63,6 @@ export function ConsoleRail({ lines, pinned, hovered, onHover, onPick }: Console
   )
 }
 
-/** A line's level, as the colour of whatever carries it. */
-const LEVEL_TEXT = "group-data-[level=warn]:text-warn group-data-[level=error]:text-error group-data-[level=fatal]:text-error"
-
-/**
- * The `rails` mark and the app's tags, set into the line beside its message. The app's own
- * lines carry no mark, so they are the ones the eye lands on first.
- */
-const LINE_TAG = "flex-none rounded-chip border border-border bg-raised px-1 font-mono text-2xs text-muted"
-
 type LineProps = {
   line: ConsoleLine
   pinned: boolean
@@ -98,11 +92,11 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
 
   return (
     <li
-      className={[
+      className={cn(
         "group flex cursor-default items-baseline gap-1.5 border-b border-border py-0.5 pl-3 text-sm whitespace-nowrap data-[source=rails]:text-muted",
         // A marked line ignores the hover, and the pinned group wins over the lit one passing across it.
         "not-data-grouping:hover:bg-raised data-[grouping~=lit]:not-data-[grouping~=pinned]:bg-lit data-[grouping~=pinned]:bg-pinned data-[grouping~=pinned]:shadow-pinned",
-      ].join(" ")}
+      )}
       data-line={line.id}
       data-level={severity}
       data-source={source}
@@ -114,24 +108,19 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
       onClick={() => onPick(line)}
     >
       {/* 5ch holds every level but `unknown`, so the lines' messages start in one column. */}
-      <span className={`w-[5ch] flex-none font-mono text-2xs tracking-wider text-faint uppercase ${LEVEL_TEXT}`}>
-        {severity}
-      </span>
-      {source === "rails" && (
-        <span className={LINE_TAG} title="Rails wrote this line, not the app">
-          rails
-        </span>
-      )}
+      <LevelText className="w-[5ch] flex-none font-mono text-2xs tracking-wider text-faint uppercase">{severity}</LevelText>
+      {/* The app's own lines carry no mark, so they are the ones the eye lands on first. */}
+      {source === "rails" && <Tag title="Rails wrote this line, not the app">rails</Tag>}
       {/* The app's own `log_tags`, in the order it tagged with them — so a tag's position is
           its identity, and a request tagged twice with one word is two chips. */}
       {tags.map((tag, at) => (
-        <span key={at} className={LINE_TAG}>
+        <Tag key={at}>
           <Highlight text={tag} />
-        </span>
+        </Tag>
       ))}
-      <span className={`min-w-0 truncate ${LEVEL_TEXT}`} title={message}>
+      <LevelText className="min-w-0 truncate" title={message}>
         <Highlight text={message} />
-      </span>
+      </LevelText>
     </li>
   )
 }
