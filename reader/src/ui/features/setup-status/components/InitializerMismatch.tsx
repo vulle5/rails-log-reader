@@ -1,11 +1,8 @@
+import type { ComponentProps } from "react"
+
 import type { Mismatch } from "../../../../shared/initializer-status"
 import type { RepairState } from "../lib/initializer-repair"
-
-/** In the browser's own button font, which Preflight would replace with the inherited one. */
-const BUTTON =
-  "flex-none cursor-pointer rounded border border-border bg-raised px-2.5 py-0.75 text-sm text-foreground [font-family:revert] disabled:cursor-default disabled:opacity-60"
-
-const BANNER = "flex flex-none items-center gap-3 border-b border-border px-4 py-2 text-sm"
+import { cn } from "../../../lib/cn"
 
 /**
  * A non-blocking banner naming which half of the Initializer is wrong
@@ -37,22 +34,35 @@ export function InitializerBanner({
   // the one thing it exists to report.
   if (repairState.phase === "restarted" && mismatch.kind === "none") {
     return (
-      <div className={`${BANNER} bg-accent/14 text-foreground`} role="status">
+      <Banner className="bg-accent/14 text-foreground" role="status">
         <p>Restarted — the new Initializer is loaded.</p>
-        <button type="button" className={BUTTON} onClick={onDismiss}>
-          Dismiss
-        </button>
-      </div>
+        <BannerButton onClick={onDismiss}>Dismiss</BannerButton>
+      </Banner>
     )
   }
 
   if (mismatch.kind === "none") return null
 
   return (
-    <div className={`${BANNER} bg-warn/14 text-warn`} role="alert">
+    <Banner className="bg-warn/14 text-warn" role="alert">
       <p>{MISMATCH_MESSAGE[mismatch.kind]}</p>
       <RepairControl state={repairState} onRepair={onRepair} place="banner" />
-    </div>
+    </Banner>
+  )
+}
+
+function Banner({ className, ...props }: ComponentProps<"div">) {
+  return <div className={cn("flex flex-none items-center gap-3 border-b border-border px-4 py-2 text-sm", className)} {...props} />
+}
+
+/** In the browser's own button font, which Preflight would replace with the inherited one. */
+function BannerButton(props: Omit<ComponentProps<"button">, "type" | "className">) {
+  return (
+    <button
+      type="button"
+      className="flex-none cursor-pointer rounded border border-border bg-raised px-2.5 py-0.75 text-sm text-foreground [font-family:revert] disabled:cursor-default disabled:opacity-60"
+      {...props}
+    />
   )
 }
 
@@ -99,14 +109,9 @@ export function UnsupportedWireScreen({
 }
 
 /**
- * How what it says is coloured where it sits: in the banner, a failed repair alone turns to the
+ * What it says is coloured by where it sits: in the banner, a failed repair alone turns to the
  * error colour; on the refusal screen, everything stays as muted as the text around it.
  */
-const REPAIR_TEXT_COLOUR: Record<"banner" | "screen", { failed: string; awaiting: string }> = {
-  banner: { failed: "text-error", awaiting: "" },
-  screen: { failed: "text-muted", awaiting: "text-muted" },
-}
-
 function RepairControl({
   state,
   onRepair,
@@ -114,7 +119,7 @@ function RepairControl({
 }: {
   state: RepairState
   onRepair: () => void
-  place: keyof typeof REPAIR_TEXT_COLOUR
+  place: "banner" | "screen"
 }) {
   switch (state.phase) {
     case "idle":
@@ -124,28 +129,22 @@ function RepairControl({
     // this phase to say — so it offers the same `Repair` an `idle` mismatch would.
     case "restarted":
       return (
-        <button type="button" className={BUTTON} onClick={onRepair}>
-          Repair
-        </button>
+        <BannerButton onClick={onRepair}>Repair</BannerButton>
       )
     case "repairing":
       return (
-        <button type="button" className={BUTTON} disabled>
-          Repairing…
-        </button>
+        <BannerButton disabled>Repairing…</BannerButton>
       )
     case "failed":
       return (
         <>
-          <p className={REPAIR_TEXT_COLOUR[place].failed}>Could not repair it: {state.error}</p>
-          <button type="button" className={BUTTON} onClick={onRepair}>
-            Try again
-          </button>
+          <p className={place === "banner" ? "text-error" : "text-muted"}>Could not repair it: {state.error}</p>
+          <BannerButton onClick={onRepair}>Try again</BannerButton>
         </>
       )
     case "awaiting-restart":
       return (
-        <p className={REPAIR_TEXT_COLOUR[place].awaiting}>
+        <p className={place === "screen" ? "text-muted" : undefined}>
           Copied. Restart Rails to load it
         </p>
       )

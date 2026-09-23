@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import type { ColumnAutoScroll } from "../hooks/auto-scroll"
+import { cn } from "../lib/cn"
 
 /**
  * One of the Reader's three columns: a heading, and a body that is the column's scrollport.
@@ -32,19 +33,18 @@ type ColumnProps = {
   children?: ReactNode
 }
 
-const PLACE_LOOK: Record<ColumnPlace, string> = {
-  console: "border-r bg-sunken",
-  activity: "border-r",
-  detail: "bg-raised",
-}
-
 export function Column({ place, name, controls, scroll, children }: ColumnProps) {
   // `min-h-0` for the same reason as `min-w-0`: a grid item's automatic minimum size is its
   // content, so without it a column would overflow the track the grid constrained it to and
   // hand the overflow back to the page.
   return (
     <section
-      className={`relative flex min-h-0 min-w-0 flex-col border-border ${PLACE_LOOK[place]}`}
+      className={cn(
+        "relative flex min-h-0 min-w-0 flex-col border-border",
+        place === "console" && "border-r bg-sunken",
+        place === "activity" && "border-r",
+        place === "detail" && "bg-raised",
+      )}
       role="region"
       aria-label={name}
       data-column={place}

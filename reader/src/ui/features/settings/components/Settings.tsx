@@ -1,4 +1,17 @@
-import { createContext, useContext, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react"
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+} from "react"
+
+import { cn } from "../../../lib/cn"
 
 export type SettingsHandle = {
   /** Opens the dialog, and at `setting` — a `Setting`'s label — focused and outlined, if named. */
@@ -12,10 +25,6 @@ type SettingsProps = {
 
 /** The label of the setting the dialog was opened at, until the dialog closes. */
 const Targeted = createContext<string | null>(null)
-
-/** The trigger's and the Close button's look: one kind of quiet control, in the bar and in the dialog. */
-const QUIET_BUTTON =
-  "cursor-pointer rounded border border-border bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-raised hover:text-foreground"
 
 /**
  * A trigger for the reader bar and the native `<dialog>` it opens modally. A click closes it
@@ -42,18 +51,16 @@ export function Settings({ children, ref }: SettingsProps) {
 
   return (
     <>
-      <button type="button" className={QUIET_BUTTON} onClick={() => open()}>
-        Settings
-      </button>
+      <QuietButton onClick={() => open()}>Settings</QuietButton>
       <dialog
         ref={dialog}
-        className={[
+        className={cn(
           "m-auto w-110 rounded-md bg-transparent text-foreground shadow-dialog",
           "scale-96 opacity-0 open:scale-100 open:opacity-100 starting:open:scale-96 starting:open:opacity-0",
           "backdrop:bg-backdrop backdrop:opacity-0 backdrop:backdrop-blur-[1px] open:backdrop:opacity-100 starting:open:backdrop:opacity-0",
           "transition-[opacity,scale,display,overlay] transition-discrete duration-140 ease-out motion-reduce:transition-none",
           "backdrop:transition-[opacity,display,overlay] backdrop:transition-discrete backdrop:duration-140 backdrop:ease-out motion-reduce:backdrop:transition-none",
-        ].join(" ")}
+        )}
         aria-label="Settings"
         onClose={() => setTargeted(null)}
         onMouseDown={(event) => {
@@ -66,9 +73,7 @@ export function Settings({ children, ref }: SettingsProps) {
         <div className="rounded-md border border-border bg-raised px-4 pt-3 pb-4 text-sm">
           <header className="mb-3 flex items-center justify-between">
             <h2 className="text-base font-semibold">Settings</h2>
-            <button type="button" className={QUIET_BUTTON} onClick={() => dialog.current?.close()}>
-              Close
-            </button>
+            <QuietButton onClick={() => dialog.current?.close()}>Close</QuietButton>
           </header>
           <Targeted value={targeted}>
             <ul className="flex flex-col gap-3.5">{children}</ul>
@@ -76,6 +81,17 @@ export function Settings({ children, ref }: SettingsProps) {
         </div>
       </dialog>
     </>
+  )
+}
+
+/** The trigger's and the Close button's look: one kind of quiet control, in the bar and in the dialog. */
+function QuietButton(props: Omit<ComponentProps<"button">, "type" | "className">) {
+  return (
+    <button
+      type="button"
+      className="cursor-pointer rounded border border-border bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-raised hover:text-foreground"
+      {...props}
+    />
   )
 }
 

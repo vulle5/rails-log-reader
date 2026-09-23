@@ -1,4 +1,5 @@
 import type { Severity } from "../../shared/wire"
+import { cn } from "../lib/cn"
 
 /**
  * One filter chip, on or off — the shape `ConsoleFilters` and `DetailFilters` both draw
@@ -18,13 +19,6 @@ export type ChipProps = {
   onToggle: () => void
 }
 
-/** The chip's colour while on. Off, every kind is the same `faint`. */
-const KIND_TEXT: Partial<Record<ChipKind, string>> = {
-  "level-warn": "text-warn",
-  "level-error": "text-error",
-  "level-fatal": "text-error",
-}
-
 /**
  * Off is an outline with nothing in it, struck through, rather than a chip that has merely
  * gone quiet — the difference between "no warnings" and "warnings hidden" is the one thing
@@ -37,7 +31,13 @@ export function Chip({ named, kind, showing, title, onToggle }: ChipProps) {
     <button
       type="button"
       aria-pressed={showing}
-      className={`cursor-pointer rounded-chip border border-border bg-selected px-1.25 py-px font-mono text-2xs tracking-wide ${KIND_TEXT[kind] ?? "text-foreground"} aria-[pressed=false]:bg-transparent aria-[pressed=false]:text-faint aria-[pressed=false]:line-through`}
+      className={cn(
+        "cursor-pointer rounded-chip border border-border bg-selected px-1.25 py-px font-mono text-2xs tracking-wide text-foreground",
+        // The chip's colour while on. Off, every kind is the same `faint`.
+        kind === "level-warn" && "text-warn",
+        (kind === "level-error" || kind === "level-fatal") && "text-error",
+        "aria-[pressed=false]:bg-transparent aria-[pressed=false]:text-faint aria-[pressed=false]:line-through",
+      )}
       title={title}
       onClick={onToggle}
     >
