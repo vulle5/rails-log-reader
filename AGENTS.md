@@ -22,3 +22,7 @@ Code comments document behavior, not history. See `docs/agents/comments.md`.
 ### Testing
 
 Reader UI tests query by accessibility through React Testing Library. See `docs/agents/testing.md`.
+
+### Styling
+
+Reader Tailwind classes live in `className`, joined by `cn`. See `docs/agents/styling.md`.

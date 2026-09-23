@@ -8,6 +8,14 @@ semantic class names — nothing reads them, so none are left. The only global C
 itself cannot scope: the theme tokens, the `dark` variant's binding, and base
 `html`/`body`/`#root` styles.
 
+**Classes are written in `className` and nowhere else.** Not in a constant, a variable or a
+function that returns them — a class list read somewhere other than the element it styles is
+the old stylesheet's distance again, and editor completion does not reach it. A condition or a
+caller's addition goes through `cn`, which is `clsx` joined with `tailwind-merge`, so a
+component's caller can replace one of its classes and not only add to it; `cn` is taught the
+theme's own names that `tailwind-merge` cannot place by their shape. A look used twice is a
+component.
+
 **The two themes differ in token values and nowhere else.** Every colour is a semantic token in
 `@theme` (`bg-sunken`, `text-muted`, `text-method-post`), overridden under
 `[data-theme=dark]` — the same attribute the inline script in `index.html` sets before the first
@@ -45,6 +53,13 @@ the newer compiler, and moving both together.
 
 - **Tailwind with `@apply`** in per-feature stylesheets — rejected: keeps styles away from the
   markup that uses them, which was the problem, and adds a dependency on top.
+- **Class lists held in constants** (`const CELL = "…"`), shared by the elements that use
+  them — rejected: the element no longer shows its own classes, a constant composed from
+  another by string interpolation hides the result further still, and the editor does not
+  complete inside them. A component carries the same reuse and keeps the classes in `className`.
+- **`clsx` alone**, without `tailwind-merge` — rejected: a component taking a caller's
+  `className` would then only be able to add a class, and one that conflicts with its own
+  would win or lose by stylesheet order rather than by being passed last.
 - **Splitting `reader.css` per feature folder, no Tailwind** — rejected: smaller files, same
   distance between a component and its look, and rules still global.
 - **`dark:` variants per element** (`bg-white dark:bg-…`) — rejected: every component carries
