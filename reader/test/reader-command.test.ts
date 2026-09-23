@@ -10,6 +10,7 @@ import type { Envelope } from "../src/shared/wire"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
 
 const SERVER = Bun.fileURLToPath(new URL("../src/server/index.ts", import.meta.url))
+const LAUNCHER = Bun.fileURLToPath(new URL("../bin/rails-log-reader.ts", import.meta.url))
 
 const started: Bun.Subprocess[] = []
 const temporary: string[] = []
@@ -47,7 +48,16 @@ async function railsRoot() {
  * says so. That the *default* is 5273 is asserted where it lives, next door.
  */
 function run(cwd: string, env: Record<string, string> = {}) {
-  const reader = Bun.spawn([Bun.which("bun") ?? "bun", SERVER], {
+  return spawnReader(SERVER, cwd, env)
+}
+
+/** The way the READMEs start it, which is the only way its stylesheet gets compiled. */
+function launch(cwd: string, env: Record<string, string> = {}) {
+  return spawnReader(LAUNCHER, cwd, env)
+}
+
+function spawnReader(entry: string, cwd: string, env: Record<string, string>) {
+  const reader = Bun.spawn([Bun.which("bun") ?? "bun", entry], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -145,6 +155,24 @@ describe("starting the Reader", () => {
     const theme = page.indexOf("dataset.theme")
     expect(theme).toBeGreaterThan(-1)
     expect(theme).toBeLessThan(page.indexOf('rel="stylesheet"'))
+  })
+
+  test("serves compiled Tailwind when launched from inside a Host app", async () => {
+    // Production, the way `bun start` and the README run it, and from a working directory
+    // that is not the Reader's own: Bun reads `bunfig.toml` from there, so a Reader started
+    // any other way serves its stylesheet raw, with no error.
+    const url = await readerUrl(launch(await railsRoot(), { NODE_ENV: "production" }))
+    const page = await (await Bun.fetch(url)).text()
+
+    const link = page.match(/<link[^>]*rel="stylesheet"[^>]*>/)?.[0] ?? ""
+    const href = link.match(/href="([^"]+)"/)?.[1]
+    expect(href).toBeDefined()
+    const stylesheet = await (await Bun.fetch(new URL(href ?? "", url))).text()
+
+    expect(stylesheet).not.toContain('@import "tailwindcss"')
+    expect(stylesheet).toContain("--color-sunken")
+    // The Settings dialog's centring, which Preflight's reset would otherwise take away.
+    expect(stylesheet).toMatch(/\.m-auto\s*\{\s*margin:\s*auto/)
   })
 
   test("finds the Rails root from a directory inside the app", async () => {

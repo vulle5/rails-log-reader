@@ -8,7 +8,7 @@ matchers once for the whole suite, so a test file holds tests and nothing else.
    with no accessible handle gets the missing ARIA in the Reader's source — only what the UI
    already conveys visually. A visual category with no ARIA meaning (request method, status
    class, log level, host frame, Rails-sourced line, chip off, Hover grouping's lit/pinned)
-   is a `data-*` attribute the stylesheet styles on; assert that attribute. Class names and
+   is a `data-*` attribute the Reader styles on; assert that attribute. Class names and
    `container.querySelector` are markup, and stay out of tests.
 2. **Query through `screen`**, narrowing with `within` to a region, row or dialog.
 3. **`const user = userEvent.setup()` before `render`, and `await` every interaction.**

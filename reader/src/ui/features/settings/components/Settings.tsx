@@ -38,7 +38,7 @@ export function Settings({ children, ref }: SettingsProps) {
       </button>
       <dialog
         ref={dialog}
-        className="settings"
+        className="settings m-auto"
         aria-label="Settings"
         onClose={() => setTargeted(null)}
         onMouseDown={(event) => {

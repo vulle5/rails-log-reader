@@ -1,0 +1,1475 @@
+/* The three tracks are fixed by the grid, so a column that fills scrolls inside its own
+   track and never widens, narrows or displaces its neighbours.
+
+   The single row is `minmax(0, 1fr)` rather than the implicit `auto`, and that is what
+   makes the sentence above true down the page as well as across it. An `auto` row is
+   `minmax(min-content, max-content)`: `align-content: stretch` grows it to fill a container
+   it is smaller than, but never shrinks it to fit one it is larger than — so the tallest
+   column sized the row, the row overflowed this container, and the window scrolled the
+   whole Reader instead of the column scrolling its own contents. Pinning the minimum to `0`
+   is what lets the track be smaller than what is in it; `overflow: hidden` here says the
+   remaining scroll is the columns' and never the page's. */
+/* The banner sits above the grid rather than inside it, so it needs a track of its own — a
+   flex column with the grid as its one growing child, rather than the grid owning the full
+   height itself. Sizing the grid against a fixed height would leave it either short of the
+   shell or, worse, unaware the banner exists at all. */
+.reader-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.reader {
+  position: relative;
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr) minmax(380px, 40%);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Not styled as an error even in its warning colour: nothing is broken, and the Reader stays
+   a read-only tail outside the one click this offers. */
+.initializer-banner {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+}
+
+.initializer-banner p {
+  margin: 0;
+}
+
+.initializer-banner-warn {
+  background: color-mix(in srgb, var(--color-warn) 14%, var(--color-background));
+  color: var(--color-warn);
+}
+
+.initializer-banner-ok {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-background));
+  color: var(--color-foreground);
+}
+
+.initializer-banner-error {
+  color: var(--color-error);
+}
+
+.initializer-banner button,
+.unsupported-wire button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.initializer-banner button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.initializer-banner code,
+.unsupported-wire code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* The refusal screen: rendered in place of the three columns, not beside them, because a `v`
+   this Reader does not understand could break an assumption any one of them makes. */
+.unsupported-wire {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: 60ch;
+  height: 100%;
+  margin: 0 auto;
+  padding: 20% 20px 0;
+}
+
+.unsupported-wire h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.unsupported-wire p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+/* The bar over all three columns: what belongs to none of them — the search, which lights
+   every column at once — sits here rather than in any one column's heading. Present from the
+   first paint like everything else, so it never arrives and pushes the columns down. */
+.reader-bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-sunken);
+}
+
+/* The Host app's own name — or, before a Run has said one, the same fallback the tab title
+   opens on. Plain text, no icon: it is a label, not a brand mark. */
+.app-name {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Never shrunk, so it is `.app-name` alone that gives ground and truncates under an ellipsis
+   when the bar is narrow — the search box and Settings trigger stay their full width. */
+.reader-bar-controls {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.search-box {
+  width: 320px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.search-box:focus {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+/* Styled as the Activity table's row-kind tabs are, because it is the same kind of control:
+   one of a few, exactly one of them in force. */
+.theme-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.theme-choice {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.theme-choice:hover {
+  background: var(--color-raised);
+}
+
+:where(.theme-choice)[aria-pressed="true"] {
+  border-color: var(--color-border);
+  background: var(--color-selected);
+  color: var(--color-foreground);
+}
+
+.settings-trigger,
+.settings-close {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: none;
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-trigger:hover,
+.settings-close:hover {
+  background: var(--color-raised);
+  color: var(--color-foreground);
+}
+
+/* No padding and no border on the dialog's own box: `.settings-panel` fills it exactly, so the
+   dialog itself is a click target only over the backdrop. */
+.settings {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-foreground);
+  box-shadow: 0 4px 16px var(--color-shadow);
+}
+
+/* Grows in and fades on open, and back out on close. `display` and `overlay` transition
+   discretely, so a closing dialog stays in the top layer until its fade has finished. */
+.settings,
+.settings::backdrop {
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out,
+    display 140ms allow-discrete,
+    overlay 140ms allow-discrete;
+}
+
+.settings {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.settings[open] {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Dimmed and only lightly blurred: the columns behind stay legible, so a Theme change is
+   still seen repainting them. */
+.settings::backdrop {
+  background: var(--color-backdrop);
+  backdrop-filter: blur(1px);
+  opacity: 0;
+}
+
+.settings[open]::backdrop {
+  opacity: 1;
+}
+
+@starting-style {
+  .settings[open],
+  .settings[open]::backdrop {
+    opacity: 0;
+  }
+
+  .settings[open] {
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings,
+  .settings::backdrop {
+    transition: none;
+  }
+}
+
+.settings-panel {
+  padding: 12px 16px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-raised);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-heading h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Where the dialog was opened at, until it closes. */
+:where(.setting)[data-targeted] {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 6px;
+  border-radius: 4px;
+}
+
+.setting-label {
+  color: var(--color-muted);
+  font-weight: 600;
+}
+
+.setting-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setting-description,
+.setting-error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.setting-description {
+  color: var(--color-faint);
+  line-height: 1.6;
+}
+
+.setting-description code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-code);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.setting-error {
+  color: var(--color-error);
+}
+
+.editor-scheme {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.editor-scheme:focus {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+  outline-offset: -1px;
+}
+
+.editor-scheme[aria-invalid="true"] {
+  border-color: var(--color-error);
+}
+
+/* Lit, never hidden: a background under the characters that matched, and nothing done to
+   anything that did not. `color: inherit` is what keeps a matched keyword a keyword. */
+mark.search-match {
+  border-radius: 2px;
+  background: var(--color-match);
+  color: inherit;
+}
+
+/* `min-height: 0` for the same reason as `min-width: 0` beside it: a grid item's automatic
+   minimum size is its content, so without this a column would overflow the track the line
+   above just constrained, and hand the overflow back to the page. */
+.column {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.column-console {
+  background: var(--color-sunken);
+}
+
+.column-detail {
+  background: var(--color-raised);
+  border-right: none;
+}
+
+.column-heading {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.column-heading h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+/* Each column scrolls on its own, which is also what keeps its height off the grid — and
+   what the sticky headings inside one are sticky against: `.detail-heading` and the Activity
+   table's `th` need a scrollport of their own, and would otherwise stick to the window's.
+
+   `scrollbar-gutter: stable` reserves the scrollbar's width whether or not the content is
+   tall enough to need it. Without it, the Detail column paints with no scrollbar until a
+   selection gives it enough to scroll — at which point the scrollbar appears and narrows
+   everything already on screen by its width. Reserving the gutter up front is what keeps
+   picking a row from being the thing that moves the row's own content. */
+.column-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+/* A paused column's "N new" pill: floating over the column rather than sitting in it, and
+   positioned against the column and not its scrollport, so it stays put while the rows it is
+   counting move underneath. It has to be reachable without scrolling — scrolling to the
+   bottom is the very thing it is offering to do — and it may not push the rows around when
+   it appears, since it appears while they are being read.
+
+   Centred at the foot of the column, which is where the new rows are and which way the arrow
+   points. It is a `button` because it is one: unlike a row or a Console line, this is a
+   single control with one action, so it costs nothing to be keyboard-reachable and it would
+   be strange not to be. */
+.new-pill {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 2;
+  padding: 3px 10px;
+  transform: translateX(-50%);
+  border: none;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: 0 2px 8px var(--color-shadow);
+  color: var(--color-background);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.new-pill:hover {
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-foreground));
+}
+
+.placeholder {
+  margin: 0;
+  padding: 20px;
+  color: var(--color-faint);
+  text-align: center;
+}
+
+/* Why the Activity table is empty. Under the headings, where the first row will land, and
+   quiet — none of the three causes is an error, each is a step not taken yet. The command is
+   the thing on it worth reading, so it is the one thing set apart, and selectable whole. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 64ch;
+  margin: 0 auto;
+  padding: 32px 20px;
+}
+
+.empty-state h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.empty-state p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+.empty-command {
+  display: block;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-sunken);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The *load-earlier* control, above the oldest row the Reader holds, which is where what it
+   goes and gets will appear. Inside the scrollport rather than in the heading beside the
+   tabs: reaching further back is a thing you go looking for, and it is exactly where you
+   arrive when you scroll to the top of what you already have. */
+.load-earlier {
+  display: flex;
+  justify-content: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.load-earlier-button {
+  padding: 3px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.load-earlier-button:hover:not(:disabled) {
+  background: var(--color-selected);
+  color: var(--color-foreground);
+}
+
+.load-earlier-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The Activity table is dense and its rows are a fixed height, so a row that gains a
+   status or a duration changes what it says without changing what it displaces — and the
+   eye can hold a position in a table that is being appended to underneath it. */
+.activity {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 8px;
+  background: var(--color-background);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.activity-row {
+  height: 24px;
+  border-bottom: 1px solid var(--color-border);
+  cursor: default;
+}
+
+.activity-row:hover {
+  background: var(--color-sunken);
+}
+
+/* The selected row and the detail column are one thing seen twice, so the mark has to be
+   readable at a glance from across the table — a background, not a hairline. */
+:where(.activity-row)[aria-current="true"],
+:where(.activity-row)[aria-current="true"]:hover {
+  background: var(--color-selected);
+}
+
+.activity td {
+  height: 24px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-started,
+.cell-status,
+.cell-method,
+.cell-path,
+.cell-action,
+.cell-count,
+.cell-ms {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cell-started {
+  color: var(--color-faint);
+}
+
+.cell-method {
+  font-weight: 700;
+}
+
+/* The path is the column given the slack, and — with Controller#action — the one that may
+   be cut when there is none: everything else is a fixed handful of characters wide. */
+.column-path {
+  width: 100%;
+}
+
+.cell-path {
+  max-width: 40ch;
+}
+
+.cell-action {
+  max-width: 28ch;
+  color: var(--color-muted);
+}
+
+.column-sql,
+.column-log,
+.column-db,
+.column-view,
+.column-total,
+.cell-count,
+.cell-ms {
+  text-align: right;
+  color: var(--color-muted);
+}
+
+.cell-total {
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+/* The tabs sit in the heading rather than in the body, because the body is the scrollport:
+   a filter that scrolled away with the rows it filters would be gone exactly when it is
+   wanted. They filter by row kind and by nothing else. */
+.row-kind-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.row-kind-tab {
+  display: inline-flex;
+  gap: 5px;
+  align-items: baseline;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--color-muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.row-kind-tab:hover {
+  background: var(--color-sunken);
+}
+
+:where(.row-kind-tab)[aria-selected="true"] {
+  border-color: var(--color-border);
+  background: var(--color-selected);
+  color: var(--color-foreground);
+}
+
+/* The count is of everything of that kind the Reader holds, not of what is on screen, so it
+   is read as "what is here" and never moves when a tab is switched. */
+.tab-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-faint);
+}
+
+/* A request that is still running, and the whole of what the Reader claims about it: a dot
+   that is moving. No threshold turns it another colour, and nothing expires — there is no
+   timeout, ever, so "it hangs" is a conclusion the human draws from a number that climbs. */
+.state-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  vertical-align: middle;
+}
+
+.state-dot-in-flight {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* Stopped, because its Run ended under it. Faint rather than red: nothing failed. */
+.state-dot-interrupted {
+  background: var(--color-faint);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* The dot still says which state it is in without moving — its colour, its `aria-label` and
+   the pill beside it all do — so this takes the motion away and nothing else. */
+@media (prefers-reduced-motion: reduce) {
+  .state-dot-in-flight {
+    animation: none;
+  }
+}
+
+/* A finished request that never had a status: it raised before there was a response to read
+   one off. In the error colour, unlike the dot above, because this one did fail — the same
+   reason `[data-status="5xx"]` below shares it rather than getting a colour of its own. */
+.no-status,
+[data-status="5xx"] {
+  color: var(--color-error);
+}
+
+/* 4xx grouped by class, not by exact code — a 404 and a 422 are one colour — and a
+   dedicated token rather than `warn`/`error` tokens, so a 4xx is never visually identical to a
+   logged `.warn` or `.error` call. 5xx has no token of its own: it is `error`, above, one
+   fewer colour for the same failure `.no-status` already means. 1xx, 2xx and 3xx carry no
+   class at all and stay exactly as they render today. */
+[data-status="4xx"] {
+  color: var(--color-status-4xx);
+}
+
+/* The method colours (`[data-method]`) live beside `.detail-method` below, rather than here:
+   they override that rule's own default and have to come after it in the cascade to do so. */
+
+/* The climbing elapsed, in the column a finished request shows its total in: the same
+   question, asked of a request that has not answered it yet. */
+.elapsed {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-background));
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Frozen where its Run ended: the number stopped being about a request that is still
+   running, so it stops looking like one. */
+[data-elapsed="frozen"] {
+  background: var(--color-sunken);
+  color: var(--color-faint);
+}
+
+/* Marked for its whole life, in the column that would have said when it started — because
+   nobody saw it start. Never cleared: the events emitted before the Reader attached are
+   lost, and how many there were is unknowable.
+
+   Shares its look with `.run-reopened-label` and `.over-bound-mark` below: all three are a
+   quiet badge for a fact that is never an alarm — unlike the *Run marker*'s bold accent
+   line, which is a boundary rather than an absence or an overage. */
+.partial-mark,
+.run-reopened-label,
+.over-bound-mark {
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* Set apart and set back, and deliberately not in the error colour: a request whose Run was
+   reaped did not fail, it stopped being answerable. */
+[data-state="interrupted"] {
+  background: var(--color-sunken);
+}
+
+[data-state="interrupted"] .cell-path,
+[data-state="interrupted"] .cell-action,
+[data-state="interrupted"] .cell-method {
+  color: var(--color-faint);
+}
+
+[data-state="interrupted"] td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-faint);
+}
+
+/* A *Run row*: what one Run emitted with no owning request. It spans the columns a request
+   fills with its method, path and outcome, because a Run has none of those. */
+[data-kind="run"] {
+  background: var(--color-sunken);
+}
+
+.cell-run {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.run-said + .run-said::before {
+  content: " · ";
+  color: var(--color-faint);
+}
+
+/* The *Run marker*: a rule across the row where a `run_header` landed, meaning literally
+   *this Run started here* — never *everything below belongs to it*, which is why it is a
+   line at one position and not a band over the rows under it. */
+[data-marker] td {
+  border-top: 2px solid var(--color-accent);
+}
+
+.run-marker-label {
+  margin-right: 8px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+/* A Run row reopened after its earlier one was evicted under the Memory bound. Its shared
+   declarations are above, beside `.partial-mark`; this is only what sets it apart on a Run
+   row's line. */
+.run-reopened-label {
+  margin-right: 8px;
+}
+
+/* The *last row standing*, over the Memory bound's usual ceiling. Sits beside the started
+   time on both row kinds — the clock or the `.partial-mark` on a request row, the clock on a
+   Run row — so it needs a margin on whichever side follows what came before it, and never
+   the other, since it is always the last thing in that cell. */
+.over-bound-mark {
+  margin-left: 6px;
+}
+
+/* ---- the Console rail ------------------------------------------------------ */
+
+/* Every App log event in append order and no SQL at all, which is the whole reason a
+   `Rails.logger` call you wrote is findable by scanning one place.
+
+   The right padding is the **gutter**: the strip *Hover grouping*'s rule travels down, kept
+   clear of text so the rule never crosses a word on its way to the row. */
+.console-lines {
+  margin: 0;
+  padding: 0 18px 24px 0;
+  list-style: none;
+}
+
+/* One line each, cut rather than wrapped: the rail is swept rather than read, a uniform
+   rhythm is what makes that possible in a busy one, and it gives the gutter rule one
+   unambiguous height to point at. The whole message is a `title` away and a click away. */
+.console-line {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 0 2px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.console-line:hover {
+  background: var(--color-raised);
+}
+
+/* The lit group: the line under the pointer, its siblings, and — across the gutter — their
+   row. Additive and nothing more. */
+:where(.console-line)[data-grouping~="lit"],
+:where(.console-line)[data-grouping~="lit"]:hover {
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-background));
+}
+
+/* The pinned group, marked harder and declared last so it survives a hover passing over it —
+   which is the whole reason a pin exists. Sweeping the rail after clicking is what happens
+   next, and the group you just fixed in place has to still be there when you stop. */
+:where(.console-line)[data-grouping~="pinned"],
+:where(.console-line)[data-grouping~="pinned"]:hover {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-background));
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.console-severity {
+  flex: 0 0 auto;
+  width: 5ch;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* Rails' own lines are kept and said to be Rails'. On the line and not only in its colour:
+   `source` is a fact read off `caller_locations`, and it is worth as much to a screen reader
+   as to the eye. The app's own lines carry nothing, because they are the ones the eye should
+   land on first. */
+.console-source,
+.console-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-raised);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted);
+}
+
+.console-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-source="rails"] .console-message {
+  color: var(--color-muted);
+}
+
+[data-level="warn"] .console-severity,
+[data-level="warn"] .console-message {
+  color: var(--color-warn);
+}
+
+[data-level="error"] .console-severity,
+[data-level="error"] .console-message,
+[data-level="fatal"] .console-severity,
+[data-level="fatal"] .console-message {
+  color: var(--color-error);
+}
+
+/* The Console's two thinnings, in two groups: a level and a source are different questions
+   about a line, and one row of seven chips would invite `warn` and `rails` to be compared.
+   The separator between them is what says they are two. */
+.console-filters {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: center;
+}
+
+/* The Detail column's one thinning: a single chip, so no second group and no separator are
+   needed the way the Console's two axes need one. */
+.detail-filters {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.chips + .chips {
+  padding-left: 8px;
+  border-left: 1px solid var(--color-border);
+}
+
+.chip {
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-selected);
+  color: var(--color-foreground);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+/* Off, and legibly so: an outline with nothing in it, rather than a chip that has merely
+   gone quiet — the difference between "no warnings" and "warnings hidden" is the one thing
+   this control must never blur. It is the same mark whichever axis is off, because "hidden"
+   is the same fact about the rail either way — and `rails` wears it on open, which is how
+   the Console says out loud that it is not showing everything it holds. */
+:where(.chip)[aria-pressed="false"] {
+  background: none;
+  color: var(--color-faint);
+  text-decoration: line-through;
+}
+
+.chip-level-warn {
+  color: var(--color-warn);
+}
+
+.chip-level-error,
+.chip-level-fatal {
+  color: var(--color-error);
+}
+
+.chip-level-warn[aria-pressed="false"],
+.chip-level-error[aria-pressed="false"],
+.chip-level-fatal[aria-pressed="false"] {
+  color: var(--color-faint);
+}
+
+/* ---- Hover grouping -------------------------------------------------------- */
+
+/* Over all three columns, because the rule belongs to none of them — and inert, so the line
+   under the pointer stays under the pointer and the rule cannot come between the hover and
+   the click that follows it. */
+.grouping {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.grouping-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.grouping-rule {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+}
+
+/* A stub is a rule that stopped, so it has to look stopped rather than aimed. Both ways of
+   failing to reach a row are drawn alike — what differs between them is what the caption
+   says, because they are two different facts about where the row is. */
+[data-rule="off-screen"],
+[data-rule="not-shown"] {
+  stroke-dasharray: 3 3;
+}
+
+/* What the stub means, said rather than left to the shape of a line going nowhere. */
+.grouping-caption {
+  position: absolute;
+  margin: 0;
+  padding: 2px 6px;
+  transform: translateY(-50%);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The far end of the group, hovered and pinned. The row keeps whatever else it was saying
+   about itself — in flight, Interrupted, selected — and gains an accent tint on top of it. */
+:where(.activity-row)[data-grouping~="lit"] td {
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-background));
+}
+
+:where(.activity-row)[data-grouping~="pinned"] td {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-background));
+}
+
+:where(.activity-row)[data-grouping~="pinned"] td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+/* ---- the detail column ---------------------------------------------------- */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 24px;
+}
+
+/* Which request is being read, so the column says so without the table beside it. */
+.detail-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 12px;
+  background: var(--color-raised);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.detail-method {
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.detail-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-action {
+  margin-left: auto;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+/* The same lookup as `.cell-method` above, so a verb reads one colour in the Activity
+   table and the same colour here — `format.ts`'s `methodCategory` is what makes it one
+   function rather than two copies of this list. Declared after `.detail-method`, above,
+   because these override its default `accent` and — tied on specificity — only later rules
+   in the file win. `[data-method="get"]` restates that default explicitly rather than leaving
+   GET to fall through to it, so nothing here depends on staying below `.detail-method` by
+   accident. A *Run row*'s kind (`server`, `rake`, …) carries no `data-method` and keeps
+   `.detail-method`'s own colour untouched — it is not a method to begin with. */
+[data-method="get"] {
+  color: var(--color-accent);
+}
+
+[data-method="post"] {
+  color: var(--color-method-post);
+}
+
+[data-method="put-patch"] {
+  color: var(--color-method-put-patch);
+}
+
+[data-method="delete"] {
+  color: var(--color-method-delete);
+}
+
+[data-method="other"] {
+  color: var(--color-foreground);
+}
+
+.timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Every entry starts at the same left edge and is laid out identically. That is the whole
+   mechanism behind an N+1 being obvious: fifty near-identical children become fifty blocks
+   the eye can see are the same, one chip apart. */
+.entry {
+  padding: 4px 12px 5px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Off-screen rows skip layout and paint entirely, which is what keeps a scroll-driven
+   reflow over a thousand-row timeline cheap. `auto` in `contain-intrinsic-size` keeps
+   each row's last rendered height once the browser has measured it, so the estimate
+   after it only matters before that — for the first paint and for a row that never
+   becomes visible at all. */
+.entry-sql {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 110px;
+}
+
+.entry-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.sql-marker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-faint);
+}
+
+.sql-name {
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.sql-duration {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* `pre-wrap` wraps a long query without touching a character of it: what is read is what
+   pastes into a console. */
+.sql {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+[data-token="keyword"] {
+  color: var(--color-sql-keyword);
+  font-weight: 600;
+}
+
+[data-token="identifier"] {
+  color: var(--color-sql-identifier);
+}
+
+[data-token="string"] {
+  color: var(--color-sql-string);
+}
+
+[data-token="number"] {
+  color: var(--color-sql-number);
+}
+
+[data-token="placeholder"] {
+  color: var(--color-sql-placeholder);
+  font-weight: 600;
+}
+
+[data-token="comment"] {
+  color: var(--color-sql-comment);
+  font-style: italic;
+}
+
+/* The caption is on screen, not only in the group's label: a row of chips under a query
+   reads as "what the database got" unless something says otherwise, and on trilogy that
+   reading is false. */
+.binds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.binds-label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+.bind-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bind {
+  padding: 0 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  background: var(--color-sunken);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--color-muted);
+}
+
+.bind-string {
+  color: var(--color-sql-string);
+}
+
+.bind-number {
+  color: var(--color-sql-number);
+}
+
+.bind-boolean {
+  color: var(--color-sql-keyword);
+}
+
+.bind-null {
+  color: var(--color-faint);
+  font-style: italic;
+}
+
+.sql-callsite,
+.log-callsite {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Not styled as an error — nothing failed. It is the file saying what it could not carry,
+   and it has to be legible without pretending the query is broken. */
+.cut {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--color-faint);
+}
+
+/* A log line is one line, laid out across rather than down, so a run of queries is not
+   broken up by something that looks like another query. */
+.entry-log {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  background: var(--color-sunken);
+  font-size: 12px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}
+
+.log-severity {
+  flex: 0 0 auto;
+  width: 5ch;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-faint);
+}
+
+[data-level="warn"] .log-severity,
+[data-level="warn"] .log-message {
+  color: var(--color-warn);
+}
+
+[data-level="error"] .log-severity,
+[data-level="error"] .log-message,
+[data-level="fatal"] .log-severity,
+[data-level="fatal"] .log-message {
+  color: var(--color-error);
+}
+
+/* Rails' own lines are kept and set back, never dropped: the developer's own calls are the
+   ones the eye should land on first. */
+[data-source="rails"] .log-message {
+  color: var(--color-muted);
+}
+
+.log-tag {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-muted);
+}
+
+/* Grows into the row rather than wrapping under the severity: `.entry-log` wraps only so
+   that a callsite can start a line of its own. */
+.log-message {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-callsite {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.exception {
+  position: relative;
+  padding: 8px 60px 8px 12px;
+  border-top: 1px solid var(--color-error);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Anchored to `.exception` and not to the column: this is the one place a copy control
+   earns its keep, since a query or a log line is easy enough to select by hand. Reduced
+   opacity at rest so it never competes with the exception it sits on, solidifying on
+   hover or focus the way it is reached. */
+.copy-button {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  /* Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
+     beside it — the layout stays put the way a click here is not supposed to disturb it. */
+  min-width: 52px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-foreground);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+  /* `opacity` dims the border and background along with the label — pushed no lower than
+     this, or "reduced" starts reading as "gone" rather than as "not yet what you're looking
+     at". */
+  opacity: 0.7;
+}
+
+.copy-button:hover,
+.copy-button:focus-visible {
+  opacity: 1;
+}
+
+.exception-message {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-error);
+}
+
+.exception-class {
+  font-weight: 700;
+}
+
+/* Full and uncleaned, so it is long: it scrolls with the column rather than being capped. */
+.backtrace {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The Host app's own frames, full contrast against `.backtrace`'s muted default. */
+[data-frame="host"] {
+  color: var(--color-strong);
+}
+
+/* Only the hovered frame's, and only while the open modifier is held. */
+:where(.source-location)[data-armed] {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.backtrace-reveal {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: italic;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.backtrace-reveal:hover,
+.backtrace-reveal:focus-visible {
+  color: var(--color-muted);
+}
+
+/* Set apart and captioned, so a *Trailing event* cannot be mistaken for the timeline it
+   sits below. */
+.trailing {
+  margin-top: 12px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.trailing h3 {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}

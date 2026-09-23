@@ -2,9 +2,12 @@
   "name": "rails-log-reader",
   "private": true,
   "type": "module",
+  "bin": {
+    "rails-log-reader": "./bin/rails-log-reader.ts"
+  },
   "scripts": {
-    "dev": "cd ../example-app && bun --hot ../reader/src/server/index.ts",
-    "start": "cd ../example-app && NODE_ENV=production bun ../reader/src/server/index.ts"
+    "dev": "cd ../example-app && bun ../reader/bin/rails-log-reader.ts --hot",
+    "start": "cd ../example-app && NODE_ENV=production bun ../reader/bin/rails-log-reader.ts"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -19,7 +22,9 @@
     "@types/bun": "^1.4.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "bun-plugin-tailwind": "^0.1.2",
     "happy-dom": "^20.14.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
   }
 }

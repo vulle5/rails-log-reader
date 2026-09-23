@@ -1,6 +1,9 @@
 import type { Mismatch } from "../../../../shared/initializer-status"
 import type { RepairState } from "../lib/initializer-repair"
 
+/** The browser's own button font, which Preflight would replace with the inherited one. */
+const BUTTON = "[font-family:revert]"
+
 /**
  * A non-blocking banner naming which half of the Initializer is wrong
  * — the file on disk, or the process already running — and the one click that repairs
@@ -32,7 +35,7 @@ export function InitializerBanner({
     return (
       <div className="initializer-banner initializer-banner-ok" role="status">
         <p>Restarted — the new Initializer is loaded.</p>
-        <button type="button" onClick={onDismiss}>
+        <button type="button" className={BUTTON} onClick={onDismiss}>
           Dismiss
         </button>
       </div>
@@ -76,7 +79,7 @@ export function UnsupportedWireScreen({
 }) {
   return (
     <div className="unsupported-wire" role="alert">
-      <h1>This Reader cannot read the running Initializer</h1>
+      <h1 className="font-bold">This Reader cannot read the running Initializer</h1>
       <p>
         The Rails process is writing wire version {liveWireVersion}; this Reader only understands up
         to version {understoodVersion}.
@@ -99,13 +102,13 @@ function RepairControl({ state, onRepair }: { state: RepairState; onRepair: () =
     // this phase to say — so it offers the same `Repair` an `idle` mismatch would.
     case "restarted":
       return (
-        <button type="button" onClick={onRepair}>
+        <button type="button" className={BUTTON} onClick={onRepair}>
           Repair
         </button>
       )
     case "repairing":
       return (
-        <button type="button" disabled>
+        <button type="button" className={BUTTON} disabled>
           Repairing…
         </button>
       )
@@ -113,7 +116,7 @@ function RepairControl({ state, onRepair }: { state: RepairState; onRepair: () =
       return (
         <>
           <p className="initializer-banner-error">Could not repair it: {state.error}</p>
-          <button type="button" onClick={onRepair}>
+          <button type="button" className={BUTTON} onClick={onRepair}>
             Try again
           </button>
         </>

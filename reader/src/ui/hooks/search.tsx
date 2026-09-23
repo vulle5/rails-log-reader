@@ -101,10 +101,11 @@ type SearchBoxProps = {
 }
 
 export function SearchBox({ term, onChange }: SearchBoxProps) {
+  // The placeholder keeps the browser's own grey, which Preflight would replace.
   return (
     <input
       type="search"
-      className="search-box"
+      className="search-box placeholder:[color:revert]"
       placeholder="Search"
       aria-label="Search — highlights every match, hides nothing"
       title="Highlights every match, hides nothing"
