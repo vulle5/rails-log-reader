@@ -53,340 +53,6 @@ mark.search-match {
   user-select: all;
 }
 
-/* The *load-earlier* control, above the oldest row the Reader holds, which is where what it
-   goes and gets will appear. Inside the scrollport rather than in the heading beside the
-   tabs: reaching further back is a thing you go looking for, and it is exactly where you
-   arrive when you scroll to the top of what you already have. */
-.load-earlier {
-  display: flex;
-  justify-content: center;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.load-earlier-button {
-  padding: 3px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-raised);
-  color: var(--color-muted);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.load-earlier-button:hover:not(:disabled) {
-  background: var(--color-selected);
-  color: var(--color-foreground);
-}
-
-.load-earlier-button:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
-
-/* The Activity table is dense and its rows are a fixed height, so a row that gains a
-   status or a duration changes what it says without changing what it displaces — and the
-   eye can hold a position in a table that is being appended to underneath it. */
-.activity {
-  width: 100%;
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-}
-
-.activity th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 4px 8px;
-  background: var(--color-background);
-  border-bottom: 1px solid var(--color-border);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--color-faint);
-  text-align: left;
-  white-space: nowrap;
-}
-
-.activity-row {
-  height: 24px;
-  border-bottom: 1px solid var(--color-border);
-  cursor: default;
-}
-
-.activity-row:hover {
-  background: var(--color-sunken);
-}
-
-/* The selected row and the detail column are one thing seen twice, so the mark has to be
-   readable at a glance from across the table — a background, not a hairline. */
-:where(.activity-row)[aria-current="true"],
-:where(.activity-row)[aria-current="true"]:hover {
-  background: var(--color-selected);
-}
-
-.activity td {
-  height: 24px;
-  padding: 0 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cell-started,
-.cell-status,
-.cell-method,
-.cell-path,
-.cell-action,
-.cell-count,
-.cell-ms {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.cell-started {
-  color: var(--color-faint);
-}
-
-.cell-method {
-  font-weight: 700;
-}
-
-/* The path is the column given the slack, and — with Controller#action — the one that may
-   be cut when there is none: everything else is a fixed handful of characters wide. */
-.column-path {
-  width: 100%;
-}
-
-.cell-path {
-  max-width: 40ch;
-}
-
-.cell-action {
-  max-width: 28ch;
-  color: var(--color-muted);
-}
-
-.column-sql,
-.column-log,
-.column-db,
-.column-view,
-.column-total,
-.cell-count,
-.cell-ms {
-  text-align: right;
-  color: var(--color-muted);
-}
-
-.cell-total {
-  font-weight: 600;
-  color: var(--color-foreground);
-}
-
-/* The tabs sit in the heading rather than in the body, because the body is the scrollport:
-   a filter that scrolled away with the rows it filters would be gone exactly when it is
-   wanted. They filter by row kind and by nothing else. */
-.row-kind-tabs {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 2px;
-}
-
-.row-kind-tab {
-  display: inline-flex;
-  gap: 5px;
-  align-items: baseline;
-  padding: 2px 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: none;
-  color: var(--color-muted);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.row-kind-tab:hover {
-  background: var(--color-sunken);
-}
-
-:where(.row-kind-tab)[aria-selected="true"] {
-  border-color: var(--color-border);
-  background: var(--color-selected);
-  color: var(--color-foreground);
-}
-
-/* The count is of everything of that kind the Reader holds, not of what is on screen, so it
-   is read as "what is here" and never moves when a tab is switched. */
-.tab-count {
-  font-variant-numeric: tabular-nums;
-  color: var(--color-faint);
-}
-
-/* A request that is still running, and the whole of what the Reader claims about it: a dot
-   that is moving. No threshold turns it another colour, and nothing expires — there is no
-   timeout, ever, so "it hangs" is a conclusion the human draws from a number that climbs. */
-.state-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  vertical-align: middle;
-}
-
-.state-dot-in-flight {
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-/* Stopped, because its Run ended under it. Faint rather than red: nothing failed. */
-.state-dot-interrupted {
-  background: var(--color-faint);
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.25;
-  }
-}
-
-/* The dot still says which state it is in without moving — its colour, its `aria-label` and
-   the pill beside it all do — so this takes the motion away and nothing else. */
-@media (prefers-reduced-motion: reduce) {
-  .state-dot-in-flight {
-    animation: none;
-  }
-}
-
-/* A finished request that never had a status: it raised before there was a response to read
-   one off. In the error colour, unlike the dot above, because this one did fail — the same
-   reason `[data-status="5xx"]` below shares it rather than getting a colour of its own. */
-.no-status,
-[data-status="5xx"] {
-  color: var(--color-error);
-}
-
-/* 4xx grouped by class, not by exact code — a 404 and a 422 are one colour — and a
-   dedicated token rather than `warn`/`error` tokens, so a 4xx is never visually identical to a
-   logged `.warn` or `.error` call. 5xx has no token of its own: it is `error`, above, one
-   fewer colour for the same failure `.no-status` already means. 1xx, 2xx and 3xx carry no
-   class at all and stay exactly as they render today. */
-[data-status="4xx"] {
-  color: var(--color-status-4xx);
-}
-
-/* The method colours (`[data-method]`) live beside `.detail-method` below, rather than here:
-   they override that rule's own default and have to come after it in the cascade to do so. */
-
-/* The climbing elapsed, in the column a finished request shows its total in: the same
-   question, asked of a request that has not answered it yet. */
-.elapsed {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-background));
-  color: var(--color-accent);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Frozen where its Run ended: the number stopped being about a request that is still
-   running, so it stops looking like one. */
-[data-elapsed="frozen"] {
-  background: var(--color-sunken);
-  color: var(--color-faint);
-}
-
-/* Marked for its whole life, in the column that would have said when it started — because
-   nobody saw it start. Never cleared: the events emitted before the Reader attached are
-   lost, and how many there were is unknowable.
-
-   Shares its look with `.run-reopened-label` and `.over-bound-mark` below: all three are a
-   quiet badge for a fact that is never an alarm — unlike the *Run marker*'s bold accent
-   line, which is a boundary rather than an absence or an overage. */
-.partial-mark,
-.run-reopened-label,
-.over-bound-mark {
-  padding: 0 4px;
-  border: 1px solid var(--color-border);
-  border-radius: 3px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-faint);
-}
-
-/* Set apart and set back, and deliberately not in the error colour: a request whose Run was
-   reaped did not fail, it stopped being answerable. */
-[data-state="interrupted"] {
-  background: var(--color-sunken);
-}
-
-[data-state="interrupted"] .cell-path,
-[data-state="interrupted"] .cell-action,
-[data-state="interrupted"] .cell-method {
-  color: var(--color-faint);
-}
-
-[data-state="interrupted"] td:first-child {
-  box-shadow: inset 3px 0 0 var(--color-faint);
-}
-
-/* A *Run row*: what one Run emitted with no owning request. It spans the columns a request
-   fills with its method, path and outcome, because a Run has none of those. */
-[data-kind="run"] {
-  background: var(--color-sunken);
-}
-
-.cell-run {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--color-muted);
-}
-
-.run-said + .run-said::before {
-  content: " · ";
-  color: var(--color-faint);
-}
-
-/* The *Run marker*: a rule across the row where a `run_header` landed, meaning literally
-   *this Run started here* — never *everything below belongs to it*, which is why it is a
-   line at one position and not a band over the rows under it. */
-[data-marker] td {
-  border-top: 2px solid var(--color-accent);
-}
-
-.run-marker-label {
-  margin-right: 8px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-}
-
-/* A Run row reopened after its earlier one was evicted under the Memory bound. Its shared
-   declarations are above, beside `.partial-mark`; this is only what sets it apart on a Run
-   row's line. */
-.run-reopened-label {
-  margin-right: 8px;
-}
-
-/* The *last row standing*, over the Memory bound's usual ceiling. Sits beside the started
-   time on both row kinds — the clock or the `.partial-mark` on a request row, the clock on a
-   Run row — so it needs a margin on whichever side follows what came before it, and never
-   the other, since it is always the last thing in that cell. */
-.over-bound-mark {
-  margin-left: 6px;
-}
-
 /* ---- Hover grouping -------------------------------------------------------- */
 
 /* Over all three columns, because the rule belongs to none of them — and inert, so the line
@@ -434,15 +100,15 @@ mark.search-match {
 
 /* The far end of the group, hovered and pinned. The row keeps whatever else it was saying
    about itself — in flight, Interrupted, selected — and gains an accent tint on top of it. */
-:where(.activity-row)[data-grouping~="lit"] td {
+:where([data-row])[data-grouping~="lit"] td {
   background: color-mix(in srgb, var(--color-accent) 7%, var(--color-background));
 }
 
-:where(.activity-row)[data-grouping~="pinned"] td {
+:where([data-row])[data-grouping~="pinned"] td {
   background: color-mix(in srgb, var(--color-accent) 14%, var(--color-background));
 }
 
-:where(.activity-row)[data-grouping~="pinned"] td:first-child {
+:where([data-row])[data-grouping~="pinned"] td:first-child {
   box-shadow: inset 3px 0 0 var(--color-accent);
 }
 
@@ -487,31 +153,25 @@ mark.search-match {
   white-space: nowrap;
 }
 
-/* The same lookup as `.cell-method` above, so a verb reads one colour in the Activity
-   table and the same colour here — `format.ts`'s `methodCategory` is what makes it one
-   function rather than two copies of this list. Declared after `.detail-method`, above,
-   because these override its default `accent` and — tied on specificity — only later rules
-   in the file win. `[data-method="get"]` restates that default explicitly rather than leaving
-   GET to fall through to it, so nothing here depends on staying below `.detail-method` by
-   accident. A *Run row*'s kind (`server`, `rake`, …) carries no `data-method` and keeps
-   `.detail-method`'s own colour untouched — it is not a method to begin with. */
-[data-method="get"] {
+/* A *Run row*'s kind (`server`, `rake`, …) carries no `data-method` and keeps
+   `.detail-method`'s own colour — it is not a method to begin with. */
+.detail-method[data-method="get"] {
   color: var(--color-accent);
 }
 
-[data-method="post"] {
+.detail-method[data-method="post"] {
   color: var(--color-method-post);
 }
 
-[data-method="put-patch"] {
+.detail-method[data-method="put-patch"] {
   color: var(--color-method-put-patch);
 }
 
-[data-method="delete"] {
+.detail-method[data-method="delete"] {
   color: var(--color-method-delete);
 }
 
-[data-method="other"] {
+.detail-method[data-method="other"] {
   color: var(--color-foreground);
 }
 

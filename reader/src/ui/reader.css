@@ -31,6 +31,8 @@
      and 14% for the pinned one. */
   --color-lit: #f0f5fe;
   --color-pinned: #e2ebfc;
+  /* The climbing elapsed's pill: `accent` mixed 14% into `background`. */
+  --color-elapsed: #e2ebfc;
 
   /* One token per thing the SQL tokenizer can name. */
   --color-sql-keyword: #8250df;
@@ -69,6 +71,8 @@
   --shadow-dialog: 0 4px 16px var(--color-shadow);
   /* The pinned group's edge, drawn inside the line so marking it moves no text. */
   --shadow-pinned: inset 2px 0 0 var(--color-accent);
+  /* An *Interrupted* row's edge, drawn inside its first cell so marking it moves no text. */
+  --shadow-interrupted: inset 3px 0 0 var(--color-faint);
 
   /* The small labels set into a line of text: filter chips, and the tags beside a Console line. */
   --radius-chip: 3px;
@@ -113,6 +117,7 @@
     --color-selected: #1c2432;
     --color-lit: #161c26;
     --color-pinned: #1c2637;
+    --color-elapsed: #1c2637;
 
     --color-sql-keyword: #c792ea;
     --color-sql-identifier: #79c0ff;

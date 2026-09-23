@@ -9,6 +9,10 @@ import type { ActivityRow } from "../../../../shared/activity"
  * so switching tabs never changes a number and the counts read as "what is here" rather than
  * "what is on screen".
  *
+ * They sit in the column's heading rather than in its body, because the body is the
+ * scrollport: a filter that scrolled away with the rows it filters would be gone exactly when
+ * it is wanted.
+ *
  * Nothing here filters by Run: previous Runs stay visible on open, because the file is a
  * record of what happened and the Run before the restart is usually the one you are looking
  * for.
@@ -58,18 +62,18 @@ export function RowKindTabs({ rows, showing, onShow }: RowKindTabsProps) {
   for (const row of rows) counted[row.kind] += 1
 
   return (
-    <div className="row-kind-tabs" role="tablist" aria-label="Filter by row kind">
+    <div className="flex flex-none gap-0.5" role="tablist" aria-label="Filter by row kind">
       {TABS.map(([kind, name]) => (
         <button
           key={kind}
           type="button"
           role="tab"
           aria-selected={kind === showing}
-          className="row-kind-tab"
+          className="inline-flex cursor-pointer items-baseline gap-1.25 rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-sunken aria-selected:border-border aria-selected:bg-selected aria-selected:text-foreground aria-selected:hover:bg-sunken"
           onClick={() => onShow(kind)}
         >
           {name}
-          <span className="tab-count">{counted[kind]}</span>
+          <span className="text-faint tabular-nums">{counted[kind]}</span>
         </button>
       ))}
     </div>
