@@ -1,0 +1,4 @@
+{
+  "tailwindCSS.experimental.configFile": "reader/src/ui/reader.css",
+  "tailwindCSS.classFunctions": ["cn"]
+}

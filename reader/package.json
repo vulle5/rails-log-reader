@@ -10,8 +10,10 @@
     "start": "cd ../example-app && NODE_ENV=production bun ../reader/bin/rails-log-reader.ts"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.0",
