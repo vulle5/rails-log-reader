@@ -32,6 +32,15 @@ serves uncompiled CSS with no error. So `bun dev`, `bun start` and the README al
 one launcher script that passes `--config` pointing at the Reader's own `bunfig.toml`. Running
 the server file directly is not a supported way to start the Reader.
 
+**`tailwindcss` is pinned to the version the plugin bundles.** `bun-plugin-tailwind` ships its own
+Tailwind compiler (4.1.14 in 0.1.2, its latest release) but resolves `@import "tailwindcss"` —
+Preflight and the default theme — from the installed `tailwindcss` package, which the stylesheet
+test also compiles with. Two versions mix into one stylesheet with no error, and utilities newer
+than the bundled compiler compile to nothing in the Reader while passing in the test. So the
+dependency is pinned exactly, and a command test fails when the served stylesheet's compiler and the
+installed package disagree. Upgrading Tailwind means waiting for a plugin release that bundles
+the newer compiler, and moving both together.
+
 ## Considered options
 
 - **Tailwind with `@apply`** in per-feature stylesheets — rejected: keeps styles away from the

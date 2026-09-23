@@ -92,6 +92,20 @@ async function reachReader(reader: Bun.Subprocess) {
   return await Bun.fetch(await readerUrl(reader))
 }
 
+/**
+ * The stylesheet a launched Reader serves in production, as `bun start` and the README run
+ * it, from a working directory that is not the Reader's own.
+ */
+async function servedStylesheet() {
+  const url = await readerUrl(launch(await railsRoot(), { NODE_ENV: "production" }))
+  const page = await (await Bun.fetch(url)).text()
+
+  const link = page.match(/<link[^>]*rel="stylesheet"[^>]*>/)?.[0] ?? ""
+  const href = link.match(/href="([^"]+)"/)?.[1]
+  expect(href).toBeDefined()
+  return await (await Bun.fetch(new URL(href ?? "", url))).text()
+}
+
 type MessageKind = "envelopes" | "history" | "loaded"
 
 /**
@@ -158,20 +172,22 @@ describe("starting the Reader", () => {
   })
 
   test("serves compiled Tailwind when launched from inside a Host app", async () => {
-    // Production, as `bun start` and the README run it, from a working directory that is not
-    // the Reader's own.
-    const url = await readerUrl(launch(await railsRoot(), { NODE_ENV: "production" }))
-    const page = await (await Bun.fetch(url)).text()
-
-    const link = page.match(/<link[^>]*rel="stylesheet"[^>]*>/)?.[0] ?? ""
-    const href = link.match(/href="([^"]+)"/)?.[1]
-    expect(href).toBeDefined()
-    const stylesheet = await (await Bun.fetch(new URL(href ?? "", url))).text()
+    const stylesheet = await servedStylesheet()
 
     expect(stylesheet).not.toContain('@import "tailwindcss"')
     expect(stylesheet).toContain("--color-sunken")
     // The Settings dialog's centring, which Preflight's reset would otherwise take away.
     expect(stylesheet).toMatch(/\.m-auto\s*\{\s*margin:\s*auto/)
+  })
+
+  test("compiles its stylesheet with the same Tailwind it imports", async () => {
+    // The plugin bundles a Tailwind compiler of its own but resolves `@import "tailwindcss"`
+    // — Preflight and the default theme — from the installed package, and the stylesheet
+    // test compiles with that package too. Different versions mix the two with no error.
+    const compiler = (await servedStylesheet()).match(/tailwindcss v(\S+)/)?.[1]
+    const installed = (await Bun.file(Bun.resolveSync("tailwindcss/package.json", import.meta.dir)).json()).version
+
+    expect(compiler).toBe(installed)
   })
 
   test("finds the Rails root from a directory inside the app", async () => {

@@ -24,7 +24,7 @@
     "@types/react-dom": "^19.2.7",
     "bun-plugin-tailwind": "^0.1.2",
     "happy-dom": "^20.14.0",
-    "tailwindcss": "^4.3.3",
+    "tailwindcss": "4.1.14",
     "typescript": "^7.0.2"
   }
 }

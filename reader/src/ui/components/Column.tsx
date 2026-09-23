@@ -57,7 +57,7 @@ export function Column({ place, name, controls, scroll, children }: ColumnProps)
           one of its own they would stick to the window's. The gutter is reserved whether or not
           the content needs a scrollbar yet, so the Detail column does not narrow under the
           reader the moment a Selection first gives it something to scroll. Arbitrary properties,
-          because the Tailwind the Bun plugin bundles has no scrollbar utilities. */}
+          because Tailwind 4.1 has no scrollbar utilities. */}
       <div
         className="min-h-0 flex-auto overflow-auto [scrollbar-gutter:stable] [scrollbar-width:thin]"
         data-scrollport
