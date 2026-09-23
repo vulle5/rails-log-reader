@@ -83,7 +83,7 @@ export function ThemeSwitch({ choice, onChoose }: ThemeSwitchProps) {
         <button
           key={each.choice}
           type="button"
-          className="cursor-pointer rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-raised aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
+          className="cursor-pointer rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-raised aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground aria-pressed:hover:bg-raised"
           aria-pressed={each.choice === choice}
           title={each.title}
           onClick={() => onChoose(each.choice)}

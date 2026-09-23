@@ -82,7 +82,7 @@ export function UnsupportedWireScreen({
   onRepair: () => void
 }) {
   return (
-    // A readable measure, starting a fifth of the way down the window.
+    // A readable measure. The top padding is a fifth of the width, as a percentage padding always is.
     <div className="mx-auto flex h-full max-w-[60ch] flex-col items-start gap-2.5 px-5 pt-[20%]" role="alert">
       <h1 className="text-lg font-bold">This Reader cannot read the running Initializer</h1>
       <p className="text-muted">
@@ -102,7 +102,7 @@ export function UnsupportedWireScreen({
  * How what it says is coloured where it sits: in the banner, a failed repair alone turns to the
  * error colour; on the refusal screen, everything stays as muted as the text around it.
  */
-const SAID: Record<"banner" | "screen", { failed: string; awaiting: string }> = {
+const REPAIR_TEXT_COLOUR: Record<"banner" | "screen", { failed: string; awaiting: string }> = {
   banner: { failed: "text-error", awaiting: "" },
   screen: { failed: "text-muted", awaiting: "text-muted" },
 }
@@ -114,7 +114,7 @@ function RepairControl({
 }: {
   state: RepairState
   onRepair: () => void
-  place: keyof typeof SAID
+  place: keyof typeof REPAIR_TEXT_COLOUR
 }) {
   switch (state.phase) {
     case "idle":
@@ -137,7 +137,7 @@ function RepairControl({
     case "failed":
       return (
         <>
-          <p className={SAID[place].failed}>Could not repair it: {state.error}</p>
+          <p className={REPAIR_TEXT_COLOUR[place].failed}>Could not repair it: {state.error}</p>
           <button type="button" className={BUTTON} onClick={onRepair}>
             Try again
           </button>
@@ -145,7 +145,7 @@ function RepairControl({
       )
     case "awaiting-restart":
       return (
-        <p className={SAID[place].awaiting}>
+        <p className={REPAIR_TEXT_COLOUR[place].awaiting}>
           Copied. Restart Rails to load it
         </p>
       )

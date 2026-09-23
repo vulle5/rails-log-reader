@@ -47,7 +47,6 @@ export function Settings({ children, ref }: SettingsProps) {
       </button>
       <dialog
         ref={dialog}
-        // The blur is 1px so the columns behind stay legible.
         className={[
           "m-auto w-110 rounded-md bg-transparent text-foreground shadow-dialog",
           "scale-96 opacity-0 open:scale-100 open:opacity-100 starting:open:scale-96 starting:open:opacity-0",
