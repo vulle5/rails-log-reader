@@ -19,10 +19,18 @@ export function EmptyReader({ state }: { state: EmptyState }) {
   const { heading, why, command } = said(state)
 
   return (
-    <section className="empty-state" role="status" aria-label="Why the Activity table is empty">
-      <h3>{heading}</h3>
-      <p>{why}</p>
-      <code className="empty-command">{command}</code>
+    // Quiet: none of the three causes is an error, each is a step not taken yet. A readable measure.
+    <section
+      className="mx-auto flex max-w-[64ch] flex-col items-start gap-2 px-5 py-8"
+      role="status"
+      aria-label="Why the Activity table is empty"
+    >
+      <h3 className="text-base font-semibold text-foreground">{heading}</h3>
+      <p className="leading-normal text-muted">{why}</p>
+      {/* The one thing on it worth reading, so the one thing set apart, and selectable whole. */}
+      <code className="block max-w-full rounded border border-border bg-sunken px-2.5 py-1.5 font-mono text-sm text-foreground wrap-anywhere select-all">
+        {command}
+      </code>
     </section>
   )
 }
