@@ -102,13 +102,14 @@ type ConsoleFiltersProps = {
 /**
  * Two groups and not one row of seven chips: a level and a source are different questions
  * about a line, and a control that read as one list would invite `warn` and `rails` to be
- * compared. Each is a toggle rather than a tab, because they are not alternatives — every
- * combination of them is a reading somebody wants.
+ * compared. The rule between them is what says they are two. Each is a toggle rather than a
+ * tab, because they are not alternatives — every combination of them is a reading somebody
+ * wants.
  */
 export function ConsoleFilters({ filter, onToggleLevel, onToggleRails }: ConsoleFiltersProps) {
   return (
-    <div className="console-filters">
-      <div className="chips" role="group" aria-label="Filter by level">
+    <div className="flex flex-none flex-wrap items-center gap-x-2 gap-y-0.5">
+      <div className="flex flex-wrap gap-0.5" role="group" aria-label="Filter by level">
         {SEVERITIES.map((level) => (
           <Chip
             key={level}
@@ -120,7 +121,7 @@ export function ConsoleFilters({ filter, onToggleLevel, onToggleRails }: Console
           />
         ))}
       </div>
-      <div className="chips" role="group" aria-label="Filter by source">
+      <div className="flex flex-wrap gap-0.5 border-l border-border pl-2" role="group" aria-label="Filter by source">
         <Chip
           named="rails"
           kind="source-rails"

@@ -27,6 +27,10 @@
   /* `accent` leaning 12% toward `foreground`: darker in the light theme, lighter in the dark. */
   --color-accent-hover: #2c65d2;
   --color-selected: #e8effc;
+  /* *Hover grouping*'s two marks: `accent` mixed 7% into `background` for the hovered group,
+     and 14% for the pinned one. */
+  --color-lit: #f0f5fe;
+  --color-pinned: #e2ebfc;
 
   /* One token per thing the SQL tokenizer can name. */
   --color-sql-keyword: #8250df;
@@ -63,6 +67,11 @@
 
   --shadow-pill: 0 2px 8px var(--color-shadow);
   --shadow-dialog: 0 4px 16px var(--color-shadow);
+  /* The pinned group's edge, drawn inside the line so marking it moves no text. */
+  --shadow-pinned: inset 2px 0 0 var(--color-accent);
+
+  /* The small labels set into a line of text: filter chips, and the tags beside a Console line. */
+  --radius-chip: 3px;
 
   --font-*: initial;
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -102,6 +111,8 @@
     --color-accent: #6ea0ff;
     --color-accent-hover: #7ca9fd;
     --color-selected: #1c2432;
+    --color-lit: #161c26;
+    --color-pinned: #1c2637;
 
     --color-sql-keyword: #c792ea;
     --color-sql-identifier: #79c0ff;
