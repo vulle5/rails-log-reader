@@ -358,9 +358,10 @@ gives up exactly as it did before this scan existed. See
 **Detail column** — the rightmost of the Reader's three columns, showing one selected
 row's timeline: its SQL and App log events in `seq` order — *Echoes* excluded, each
 *Callsite* shown as `↳` plus the raw value once under its *Callsite run*, an SQL event's
-whether or not `verbose_query_logs` is on and an App log event's whichever source it has —
-the exception it raised if it did — backtrace full and uncleaned, gem frames collapsed by
-default — and its *trailing section*.
+whether or not `verbose_query_logs` is on and an App log event's only when it is
+`app`-sourced, since a `rails`-sourced line's Callsite is by construction a frame inside a
+gem and never the developer's own code — the exception it raised if it did — backtrace full
+and uncleaned, gem frames collapsed by default — and its *trailing section*.
 
 A **Callsite run** is a stretch of consecutive events of one kind, as shown, whose Callsites
 are the same raw string: a loop's twenty `Author Load`s, or a job's `update!`s with their

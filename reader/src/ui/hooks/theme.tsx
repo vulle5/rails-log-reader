@@ -79,7 +79,7 @@ export function ThemeSwitch({ choice, onChoose }: ThemeSwitchProps) {
         <button
           key={each.choice}
           type="button"
-          className={each.choice === choice ? "theme-choice theme-choice-chosen" : "theme-choice"}
+          className="theme-choice"
           aria-pressed={each.choice === choice}
           title={each.title}
           onClick={() => onChoose(each.choice)}

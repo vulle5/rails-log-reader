@@ -1,25 +1,11 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator"
-
-GlobalRegistrator.register()
-
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test"
+import { fireEvent, screen, within } from "@testing-library/react"
+import type { UserEvent } from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
 import type { Envelope } from "../src/shared/wire"
-import type { RunIdentity } from "../src/shared/run-identity"
+import { column, itemsOf, lit, openTheReader, search, select, timeline, wholeText } from "./reader.harness"
 
-const { act } = await import("react")
-const { createRoot } = await import("react-dom/client")
-const { Reader } = await import("../src/ui/Reader")
-const { activityTable } = await import("../src/shared/activity")
-const { latchRunIdentity } = await import("../src/shared/run-identity")
-
-declare global {
-  var IS_REACT_ACT_ENVIRONMENT: boolean
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = true
-
-const mounted: { unmount: () => void }[] = []
 let opened: Mock<(url: string | URL) => void>
 
 beforeEach(() => {
@@ -27,103 +13,66 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  act(() => {
-    for (const root of mounted.splice(0)) root.unmount()
-  })
-  document.body.innerHTML = ""
   localStorage.clear()
   opened.mockRestore()
-})
-
-afterAll(async () => {
-  await GlobalRegistrator.unregister()
 })
 
 const SCHEME_KEY = "rails-log-reader.editor-scheme"
 const RAILS_ROOT = "/home/dev/example-app"
 const RELATIVE_FRAME = "app/models/order.rb:44:in `block in recalculate_total!'"
+const RELATIVE_LOCATION = "app/models/order.rb:44"
 const GEM_FRAME = "/home/dev/.gem/rack-3.1.8/lib/rack/urlmap.rb:74:in 'Rack::URLMap#call'"
+const GEM_LOCATION = "/home/dev/.gem/rack-3.1.8/lib/rack/urlmap.rb:74"
 const PSEUDO_FRAME = "<internal:kernel>:187:in `loop'"
 
 /** The Reader over a Run that raised with `backtrace`, the request already selected. */
 async function aRaise(backtrace: string[], { header = true } = {}) {
   const run = aRun("srv-1")
-  const container = await theReaderShowing("/orders", [
+  const user = await theReaderShowing("/orders", [
     ...(header ? [run.header()] : []),
     run.start("req-1", "POST", "/orders"),
     run.finish("req-1", { status: 500, exception: { class: "NoMethodError", message: "boom", backtrace } }),
   ])
-  for (const reveal of [...container.querySelectorAll(".backtrace-reveal")]) {
-    await act(async () => reveal.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+  for (const reveal of within(column("Detail column")).queryAllByRole("button", { name: /frames? hidden$/ })) {
+    await user.click(reveal)
   }
-  return container
+  return user
 }
 
 /** The Reader over `envelopes`, the row for `path` already selected. */
 async function theReaderShowing(path: string, envelopes: Envelope[]) {
-  const activity = activityTable()
-  activity.fold(envelopes)
-  const identity: RunIdentity = latchRunIdentity(null, envelopes)
-
-  const container = document.createElement("div")
-  document.body.append(container)
-  await act(async () => {
-    const root = createRoot(container)
-    mounted.push(root)
-    root.render(<Reader rows={activity.rows} railsRoot={identity?.railsRoot ?? null} />)
-  })
-
-  const row = [...container.querySelectorAll("tbody tr")].find(
-    (candidate) => candidate.querySelector(".cell-path")?.textContent === path,
-  )!
-  await act(async () => {
-    row.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-  })
-  return container
+  const { user } = openTheReader(envelopes)
+  await select(user, path)
+  return user
 }
 
-function frames(container: HTMLElement) {
-  return [...container.querySelectorAll(".backtrace > li")]
+function frames() {
+  return itemsOf(within(column("Detail column")).getByRole("list", { name: "Backtrace" }))
 }
 
-function locationIn(frame: Element | undefined) {
-  const location = frame?.querySelector(".source-location")
-  if (location == null) throw new Error("the frame has no openable path:line")
-  return location
+/** The openable `path:line` inside `scope`, which is its own element only where it is openable. */
+function locationIn(scope: HTMLElement | undefined, location: string) {
+  return within(scope!).getByText(location)
 }
 
-async function click(element: Element, modifiers: MouseEventInit = {}) {
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...modifiers }))
-  })
+/** A click with `modifier` held for it, the way a developer makes one. */
+async function clickWith(user: UserEvent, modifier: "Control" | "Meta", element: HTMLElement) {
+  await user.keyboard(`{${modifier}>}`)
+  await user.click(element)
+  await user.keyboard(`{/${modifier}}`)
 }
 
-async function press(key: "Control" | "Meta") {
-  await act(async () => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: key === "Control", metaKey: key === "Meta" }))
-  })
+async function press(user: UserEvent, key: "Control" | "Meta") {
+  await user.keyboard(`{${key}>}`)
 }
 
-async function release(key: "Control" | "Meta") {
-  await act(async () => {
-    window.dispatchEvent(new KeyboardEvent("keyup", { key }))
-  })
+async function release(user: UserEvent, key: "Control" | "Meta") {
+  await user.keyboard(`{/${key}}`)
 }
 
-async function hover(element: Element) {
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }))
-  })
-}
-
-async function unhover(element: Element) {
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }))
-  })
-}
-
-function armed(container: HTMLElement) {
-  return [...container.querySelectorAll(".source-location-armed")].map((location) => location.textContent)
+/** The window losing focus, which user-event has no gesture for. */
+function blurTheWindow() {
+  fireEvent.blur(window)
 }
 
 async function onPlatform<T>(platform: string, body: () => Promise<T>) {
@@ -141,213 +90,205 @@ describe("opening a backtrace frame in the editor", () => {
   beforeEach(() => localStorage.setItem(SCHEME_KEY, "vscode://file{path}:{line}"))
 
   test("Ctrl-click on a relative frame's path:line opens it resolved against rails_root", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
+    const user = await aRaise([RELATIVE_FRAME])
 
-    await click(locationIn(frames(container)[0]), { ctrlKey: true })
+    await clickWith(user, "Control", locationIn(frames()[0], RELATIVE_LOCATION))
 
     expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/models/order.rb:44`]])
   })
 
   test("opens a gem frame from a revealed gap, its absolute path used as is", async () => {
-    const container = await aRaise([RELATIVE_FRAME, GEM_FRAME])
-    const gem = frames(container)[1]
+    const user = await aRaise([RELATIVE_FRAME, GEM_FRAME])
+    const gem = frames()[1]
 
-    expect(gem?.textContent).toBe(GEM_FRAME)
-    await click(locationIn(gem), { ctrlKey: true })
+    expect(gem).toHaveTextContent(GEM_FRAME)
+    await clickWith(user, "Control", locationIn(gem, GEM_LOCATION))
 
     expect(opened.mock.calls).toEqual([["vscode://file/home/dev/.gem/rack-3.1.8/lib/rack/urlmap.rb:74"]])
   })
 
   test("marks only the path:line portion as openable, never the method", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
-    const frame = frames(container)[0]!
+    const user = await aRaise([RELATIVE_FRAME])
+    const frame = frames()[0]!
 
-    expect(locationIn(frame).textContent).toBe("app/models/order.rb:44")
+    expect(locationIn(frame, RELATIVE_LOCATION)).toHaveTextContent(/^app\/models\/order\.rb:44$/)
     expect(frame.textContent).toBe(RELATIVE_FRAME)
 
-    const method = [...frame.childNodes].find((node) => node.textContent === ":in `block in recalculate_total!'")
-    expect(method).toBeDefined()
-    await click(frame, { ctrlKey: true })
+    // The method is the frame's own text, outside the openable element.
+    expect(within(frame).getByText(":in `block in recalculate_total!'")).toBe(frame)
+    await clickWith(user, "Control", frame)
 
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("a plain click opens nothing", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
+    const user = await aRaise([RELATIVE_FRAME])
 
-    await click(locationIn(frames(container)[0]))
+    await user.click(locationIn(frames()[0], RELATIVE_LOCATION))
 
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("is ⌘-click on macOS, where Ctrl-click opens nothing", async () => {
     await onPlatform("MacIntel", async () => {
-      const container = await aRaise([RELATIVE_FRAME])
-      const location = locationIn(frames(container)[0])
+      const user = await aRaise([RELATIVE_FRAME])
+      const location = locationIn(frames()[0], RELATIVE_LOCATION)
 
-      await click(location, { ctrlKey: true })
+      await clickWith(user, "Control", location)
       expect(opened).not.toHaveBeenCalled()
 
-      await click(location, { metaKey: true })
+      await clickWith(user, "Meta", location)
       expect(opened).toHaveBeenCalledTimes(1)
     })
   })
 
   test("leaves a relative frame inert while rails_root is unknown", async () => {
-    const container = await aRaise([RELATIVE_FRAME], { header: false })
-    const frame = frames(container)[0]!
+    const user = await aRaise([RELATIVE_FRAME], { header: false })
+    const frame = frames()[0]!
 
-    expect(frame.querySelector(".source-location")).toBeNull()
+    expect(within(frame).queryByText(RELATIVE_LOCATION)).not.toBeInTheDocument()
     expect(frame.textContent).toBe(RELATIVE_FRAME)
-    await click(frame, { ctrlKey: true })
+    await clickWith(user, "Control", frame)
 
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("leaves a pseudo-path frame inert, rendered as before", async () => {
-    const container = await aRaise([PSEUDO_FRAME])
-    const frame = frames(container)[0]!
+    await aRaise([PSEUDO_FRAME])
+    const frame = frames()[0]!
 
-    expect(frame.querySelector(".source-location")).toBeNull()
+    expect(within(frame).queryByText("<internal:kernel>:187")).not.toBeInTheDocument()
     expect(frame.innerHTML).toBe(PSEUDO_FRAME.replace("<", "&lt;").replace(">", "&gt;"))
   })
 
   test("keeps search highlighting across the path:line and the method", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
-    await act(async () => {
-      const search = container.querySelector<HTMLInputElement>(".search-box")!
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "rb:44:in")
-      search.dispatchEvent(new Event("input", { bubbles: true }))
-    })
-    const frame = frames(container)[0]!
+    const user = await aRaise([RELATIVE_FRAME])
+    const frame = frames()[0]!
+    const location = locationIn(frame, RELATIVE_LOCATION)
 
-    expect([...frame.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["rb:44", ":in"])
-    expect(locationIn(frame).querySelector("mark")?.textContent).toBe("rb:44")
+    await search(user, "rb:44:in")
+
+    expect(lit(frame)).toEqual(["rb:44", ":in"])
+    expect(lit(location)).toEqual(["rb:44"])
     expect(frame.textContent).toBe(RELATIVE_FRAME)
   })
 })
 
 describe("the underline while the modifier is held", () => {
   test("shows only on the hovered frame, and only while the modifier is down", async () => {
-    const container = await aRaise([RELATIVE_FRAME, GEM_FRAME])
-    const [first, second] = frames(container).map(locationIn)
+    const user = await aRaise([RELATIVE_FRAME, GEM_FRAME])
+    const first = locationIn(frames()[0], RELATIVE_LOCATION)
+    const second = locationIn(frames()[1], GEM_LOCATION)
 
-    await press("Control")
-    expect(armed(container)).toEqual([])
+    await press(user, "Control")
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
 
-    await hover(second!)
-    expect(armed(container)).toEqual([second!.textContent])
+    await user.hover(second)
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).toHaveAttribute("data-armed")
 
-    await unhover(second!)
-    await hover(first!)
-    expect(armed(container)).toEqual([first!.textContent])
+    await user.unhover(second)
+    await user.hover(first)
+    expect(first).toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
 
-    await release("Control")
-    expect(armed(container)).toEqual([])
+    await release(user, "Control")
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
   })
 
   test("needs the hover too: hovering with no modifier shows nothing", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
+    const user = await aRaise([RELATIVE_FRAME])
+    const location = locationIn(frames()[0], RELATIVE_LOCATION)
 
-    await hover(locationIn(frames(container)[0]))
+    await user.hover(location)
 
-    expect(armed(container)).toEqual([])
+    expect(location).not.toHaveAttribute("data-armed")
   })
 
   test("clears when the window loses focus with the modifier still down", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
-    await hover(locationIn(frames(container)[0]))
-    await press("Control")
-    expect(armed(container)).toHaveLength(1)
+    const user = await aRaise([RELATIVE_FRAME])
+    const location = locationIn(frames()[0], RELATIVE_LOCATION)
+    await user.hover(location)
+    await press(user, "Control")
+    expect(location).toHaveAttribute("data-armed")
 
-    await act(async () => {
-      window.dispatchEvent(new Event("blur"))
-    })
+    blurTheWindow()
 
-    expect(armed(container)).toEqual([])
+    expect(location).not.toHaveAttribute("data-armed")
   })
 
   test("is ⌘ on macOS, not Ctrl", async () => {
     await onPlatform("MacIntel", async () => {
-      const container = await aRaise([RELATIVE_FRAME])
-      await hover(locationIn(frames(container)[0]))
+      const user = await aRaise([RELATIVE_FRAME])
+      const location = locationIn(frames()[0], RELATIVE_LOCATION)
+      await user.hover(location)
 
-      await press("Control")
-      expect(armed(container)).toEqual([])
-      await release("Control")
+      await press(user, "Control")
+      expect(location).not.toHaveAttribute("data-armed")
+      await release(user, "Control")
 
-      await press("Meta")
-      expect(armed(container)).toHaveLength(1)
+      await press(user, "Meta")
+      expect(location).toHaveAttribute("data-armed")
     })
   })
 })
 
 describe("opening a frame with no Editor scheme set", () => {
-  function settingsDialog(container: HTMLElement) {
-    return container.querySelector<HTMLDialogElement>("dialog[aria-label='Settings']")!
+  function settingsDialog() {
+    return screen.getByRole("dialog", { hidden: true })
   }
 
-  function schemeSetting(container: HTMLElement) {
-    return [...settingsDialog(container).querySelectorAll(".setting")].find(
-      (setting) => setting.querySelector(".setting-label")?.textContent === "Editor scheme",
-    )!
+  /** Found by position rather than by name: a closed dialog's settings have no name to find. */
+  function settings() {
+    const [theme, scheme] = within(settingsDialog()).getAllByRole("listitem", { hidden: true })
+    return { theme: theme!, scheme: scheme! }
   }
 
-  function schemeField(container: HTMLElement) {
-    return settingsDialog(container).querySelector<HTMLInputElement>("input[aria-label='Editor scheme']")!
-  }
-
-  function outlined(container: HTMLElement) {
-    return [...settingsDialog(container).querySelectorAll(".setting-targeted")]
+  function schemeField() {
+    return within(settingsDialog()).getByRole("textbox", { name: "Editor scheme" })
   }
 
   test("opens Settings at the Editor scheme, focused and outlined, and opens nothing", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
+    const user = await aRaise([RELATIVE_FRAME])
 
-    await click(locationIn(frames(container)[0]), { ctrlKey: true })
+    await clickWith(user, "Control", locationIn(frames()[0], RELATIVE_LOCATION))
 
-    expect(settingsDialog(container).open).toBe(true)
-    expect(document.activeElement).toBe(schemeField(container))
-    expect(outlined(container)).toEqual([schemeSetting(container)])
+    expect(settingsDialog()).toHaveAttribute("open")
+    expect(schemeField()).toHaveFocus()
+    expect(settings().scheme).toHaveAccessibleName("Editor scheme")
+    expect(settings().scheme).toHaveAttribute("data-targeted")
+    expect(settings().theme).not.toHaveAttribute("data-targeted")
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("keeps the outline until the dialog closes, and shows none when opened from the reader bar", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
-    await click(locationIn(frames(container)[0]), { ctrlKey: true })
+    const user = await aRaise([RELATIVE_FRAME])
+    await clickWith(user, "Control", locationIn(frames()[0], RELATIVE_LOCATION))
 
-    await act(async () => {
-      settingsDialog(container).close()
-    })
-    expect(outlined(container)).toEqual([])
+    await user.click(within(settingsDialog()).getByRole("button", { name: "Close" }))
+    expect(settings().scheme).not.toHaveAttribute("data-targeted")
+    expect(settings().theme).not.toHaveAttribute("data-targeted")
 
-    const trigger = [...container.querySelectorAll(".reader-bar-controls button")].find(
-      (button) => button.textContent === "Settings",
-    )!
-    await click(trigger)
+    await user.click(screen.getByRole("button", { name: "Settings" }))
 
-    expect(settingsDialog(container).open).toBe(true)
-    expect(outlined(container)).toEqual([])
+    expect(settingsDialog()).toHaveAttribute("open")
+    expect(settings().scheme).not.toHaveAttribute("data-targeted")
+    expect(settings().theme).not.toHaveAttribute("data-targeted")
   })
 
   test("does not open the clicked frame once a scheme is saved — it takes another click", async () => {
-    const container = await aRaise([RELATIVE_FRAME])
-    await click(locationIn(frames(container)[0]), { ctrlKey: true })
-    const field = schemeField(container)
+    const user = await aRaise([RELATIVE_FRAME])
+    await clickWith(user, "Control", locationIn(frames()[0], RELATIVE_LOCATION))
 
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, "vscode://file{path}")
-      field.dispatchEvent(new Event("input", { bubbles: true }))
-    })
-    await act(async () => {
-      field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-    })
-    await act(async () => {
-      settingsDialog(container).close()
-    })
+    // `{` opens a key descriptor in `user.type`; doubled, it is the character itself.
+    await user.type(schemeField(), "vscode://file{{path}")
+    await user.tab()
+    await user.click(within(settingsDialog()).getByRole("button", { name: "Close" }))
     expect(opened).not.toHaveBeenCalled()
 
-    await click(locationIn(frames(container)[0]), { ctrlKey: true })
+    await clickWith(user, "Control", locationIn(frames()[0], RELATIVE_LOCATION))
 
     expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/models/order.rb`]])
   })
@@ -364,115 +305,121 @@ async function aTimeline(children: (run: ReturnType<typeof aRun>) => Envelope[],
   ])
 }
 
-function callsites(container: HTMLElement) {
-  return [...container.querySelectorAll(".sql-callsite, .log-callsite")]
-}
-
 const SQL_CALLSITE = "app/controllers/feed_controller.rb:9:in 'FeedController#index'"
-const LOG_CALLSITE = "/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251:in 'block in render'"
+const SQL_LOCATION = "app/controllers/feed_controller.rb:9"
+const LOG_CALLSITE = "/home/dev/example-app/app/services/feed_cache.rb:14:in 'FeedCache#fetch'"
+const LOG_LOCATION = "/home/dev/example-app/app/services/feed_cache.rb:14"
+
+/** A Callsite's own line, read whole as `verbose_query_logs` prints one. */
+function callsiteLine(callsite: string) {
+  return within(timeline()).getByText(wholeText(`↳ ${callsite}`))
+}
 
 describe("opening a Callsite in the editor", () => {
   beforeEach(() => localStorage.setItem(SCHEME_KEY, "vscode://file{path}:{line}"))
 
   test("opens an SQL event's relative callsite resolved against rails_root", async () => {
-    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
+    const user = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
 
-    await click(locationIn(callsites(container)[0]), { ctrlKey: true })
+    await clickWith(user, "Control", locationIn(callsiteLine(SQL_CALLSITE), SQL_LOCATION))
 
     expect(opened.mock.calls).toEqual([[`vscode://file${RAILS_ROOT}/app/controllers/feed_controller.rb:9`]])
   })
 
-  test("opens an App log event's absolute callsite as is, a gem's included", async () => {
-    const container = await aTimeline((run) => [
-      run.log("req-1", "Rendered feed/index.html.erb", { source: "rails", callsite: LOG_CALLSITE }),
-    ])
+  test("opens an App log event's absolute callsite as is", async () => {
+    const user = await aTimeline((run) => [run.log("req-1", "Feed cache MISS", { callsite: LOG_CALLSITE })])
 
-    await click(locationIn(callsites(container)[0]), { ctrlKey: true })
+    await clickWith(user, "Control", locationIn(callsiteLine(LOG_CALLSITE), LOG_LOCATION))
 
-    expect(opened.mock.calls).toEqual([["vscode://file/home/dev/.gem/actionview-8.0.2/lib/action_view/template.rb:251"]])
+    expect(opened.mock.calls).toEqual([["vscode://file/home/dev/example-app/app/services/feed_cache.rb:14"]])
   })
 
   test("marks only the path:line as openable, never the ↳ or the method", async () => {
-    const container = await aTimeline((run) => [run.log("req-1", "Feed cache MISS", { callsite: SQL_CALLSITE })])
-    const line = callsites(container)[0]!
+    const user = await aTimeline((run) => [run.log("req-1", "Feed cache MISS", { callsite: SQL_CALLSITE })])
+    const line = callsiteLine(SQL_CALLSITE)
 
     expect(line.textContent).toBe(`↳ ${SQL_CALLSITE}`)
-    expect(locationIn(line).textContent).toBe("app/controllers/feed_controller.rb:9")
-    await click(line, { ctrlKey: true })
+    expect(locationIn(line, SQL_LOCATION)).toHaveTextContent(/^app\/controllers\/feed_controller\.rb:9$/)
+    await clickWith(user, "Control", line)
 
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("a plain click opens nothing", async () => {
-    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
+    const user = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
 
-    await click(locationIn(callsites(container)[0]))
+    await user.click(locationIn(callsiteLine(SQL_CALLSITE), SQL_LOCATION))
 
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("leaves a relative callsite inert while rails_root is unknown", async () => {
-    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })], {
-      header: false,
-    })
-    const line = callsites(container)[0]!
+    await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })], { header: false })
+    const line = callsiteLine(SQL_CALLSITE)
 
-    expect(line.querySelector(".source-location")).toBeNull()
+    expect(within(line).queryByText(SQL_LOCATION)).not.toBeInTheDocument()
     expect(line.textContent).toBe(`↳ ${SQL_CALLSITE}`)
   })
 
   test("leaves a pseudo-path or line-less callsite inert", async () => {
-    const container = await aTimeline((run) => [
+    await aTimeline((run) => [
       run.log("req-1", "one", { callsite: "(eval at app/models/post.rb:3):1:in 'x'" }),
       run.log("req-1", "two", { callsite: "app/models/post.rb" }),
     ])
 
-    expect(callsites(container).map((line) => line.querySelector(".source-location"))).toEqual([null, null])
+    // Inert is one piece of text: no element inside the line for a click to open.
+    expect(callsiteLine("(eval at app/models/post.rb:3):1:in 'x'").childElementCount).toBe(0)
+    expect(callsiteLine("app/models/post.rb").childElementCount).toBe(0)
   })
 
   test("never opens a path written in a log message, not even a ↳ line kept in the timeline", async () => {
-    const container = await aTimeline((run) => [run.log("req-1", `  ↳ ${SQL_CALLSITE}`, { source: "rails" })])
+    const user = await aTimeline((run) => [run.log("req-1", `  ↳ ${SQL_CALLSITE}`, { source: "rails" })])
 
-    expect(container.querySelector(".log-message .source-location")).toBeNull()
-    await click(container.querySelector(".log-message")!, { ctrlKey: true })
+    const message = within(timeline()).getByText(`↳ ${SQL_CALLSITE}`)
+    expect(within(message).queryByText(SQL_LOCATION)).not.toBeInTheDocument()
+    await clickWith(user, "Control", message)
 
     expect(opened).not.toHaveBeenCalled()
   })
 
   test("underlines only the hovered callsite, only while the modifier is down", async () => {
-    const container = await aTimeline((run) => [
+    const user = await aTimeline((run) => [
       run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE }),
-      run.log("req-1", "Rendered", { callsite: LOG_CALLSITE }),
+      run.log("req-1", "Feed cache MISS", { callsite: LOG_CALLSITE }),
     ])
-    const [first, second] = callsites(container).map(locationIn)
+    const first = locationIn(callsiteLine(SQL_CALLSITE), SQL_LOCATION)
+    const second = locationIn(callsiteLine(LOG_CALLSITE), LOG_LOCATION)
 
-    await press("Control")
-    expect(armed(container)).toEqual([])
+    await press(user, "Control")
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
 
-    await hover(second!)
-    expect(armed(container)).toEqual([second!.textContent])
+    await user.hover(second)
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).toHaveAttribute("data-armed")
 
-    await unhover(second!)
-    await hover(first!)
-    expect(armed(container)).toEqual([first!.textContent])
+    await user.unhover(second)
+    await user.hover(first)
+    expect(first).toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
 
-    await release("Control")
-    expect(armed(container)).toEqual([])
+    await release(user, "Control")
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
 
-    await press("Control")
-    await act(async () => {
-      window.dispatchEvent(new Event("blur"))
-    })
-    expect(armed(container)).toEqual([])
+    await press(user, "Control")
+    blurTheWindow()
+    expect(first).not.toHaveAttribute("data-armed")
+    expect(second).not.toHaveAttribute("data-armed")
   })
 
   test("with no Editor scheme set, opens Settings instead and opens nothing", async () => {
     localStorage.clear()
-    const container = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
+    const user = await aTimeline((run) => [run.sql("req-1", "SELECT 1", { callsite: SQL_CALLSITE })])
 
-    await click(locationIn(callsites(container)[0]), { ctrlKey: true })
+    await clickWith(user, "Control", locationIn(callsiteLine(SQL_CALLSITE), SQL_LOCATION))
 
-    expect(container.querySelector<HTMLDialogElement>("dialog[aria-label='Settings']")!.open).toBe(true)
+    expect(screen.getByRole("dialog", { name: "Settings" })).toHaveAttribute("open")
     expect(opened).not.toHaveBeenCalled()
   })
 })
