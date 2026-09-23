@@ -29,7 +29,8 @@ const KIND_TEXT: Partial<Record<ChipKind, string>> = {
  * Off is an outline with nothing in it, struck through, rather than a chip that has merely
  * gone quiet — the difference between "no warnings" and "warnings hidden" is the one thing
  * this control must never blur. It is the same mark whichever axis is off, because "hidden" is
- * the same fact about a column either way.
+ * the same fact about a column either way — and the Console's `rails` chip wears it from the
+ * first paint, which is how the Console says it is not showing everything it holds.
  */
 export function Chip({ named, kind, showing, title, onToggle }: ChipProps) {
   return (

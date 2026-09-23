@@ -63,8 +63,11 @@ export function ConsoleRail({ lines, pinned, hovered, onHover, onPick }: Console
 /** A line's level, as the colour of whatever carries it. */
 const LEVEL_TEXT = "group-data-[level=warn]:text-warn group-data-[level=error]:text-error group-data-[level=fatal]:text-error"
 
-/** The `rails` mark and the app's tags: labels set into the line, beside its message. */
-const LABEL = "flex-none rounded-chip border border-border bg-raised px-1 font-mono text-2xs text-muted"
+/**
+ * The `rails` mark and the app's tags, set into the line beside its message. The app's own
+ * lines carry no mark, so they are the ones the eye lands on first.
+ */
+const LINE_TAG = "flex-none rounded-chip border border-border bg-raised px-1 font-mono text-2xs text-muted"
 
 type LineProps = {
   line: ConsoleLine
@@ -97,8 +100,8 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
     <li
       className={[
         "group flex cursor-default items-baseline gap-1.5 border-b border-border py-0.5 pl-3 text-sm whitespace-nowrap data-[source=rails]:text-muted",
-        // The pinned group wins over both the hover and the lit group passing across it.
-        "hover:bg-raised data-[grouping~=lit]:not-data-[grouping~=pinned]:bg-lit data-[grouping~=pinned]:bg-pinned data-[grouping~=pinned]:shadow-pinned",
+        // A marked line ignores the hover, and the pinned group wins over the lit one passing across it.
+        "not-data-grouping:hover:bg-raised data-[grouping~=lit]:not-data-[grouping~=pinned]:bg-lit data-[grouping~=pinned]:bg-pinned data-[grouping~=pinned]:shadow-pinned",
       ].join(" ")}
       data-line={line.id}
       data-level={severity}
@@ -115,14 +118,14 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
         {severity}
       </span>
       {source === "rails" && (
-        <span className={LABEL} title="Rails wrote this line, not the app">
+        <span className={LINE_TAG} title="Rails wrote this line, not the app">
           rails
         </span>
       )}
       {/* The app's own `log_tags`, in the order it tagged with them — so a tag's position is
           its identity, and a request tagged twice with one word is two chips. */}
       {tags.map((tag, at) => (
-        <span key={at} className={LABEL}>
+        <span key={at} className={LINE_TAG}>
           <Highlight text={tag} />
         </span>
       ))}
