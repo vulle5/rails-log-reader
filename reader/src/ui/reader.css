@@ -9,8 +9,8 @@
 
 /* The Reader's whole palette, type scale and font stacks, and nothing of Tailwind's own: with
    its defaults cleared, an off-palette class like `bg-blue-500` compiles to nothing. Static,
-   so every token is emitted whether or not a utility uses it yet. The 4px spacing scale is
-   Tailwind's, kept. */
+   so every token is emitted whether or not a utility uses it. Spacing is Tailwind's own 4px
+   scale. */
 @theme static {
   --color-*: initial;
 
@@ -125,8 +125,7 @@
     height: 100%;
   }
 
-  /* The browser's own line height and tab width, which Preflight replaces: the Reader is
-     dense, and a tab in a query or a log line is as wide as it is in `development.log`. */
+  /* The browser's own line height and tab width, which Preflight would replace. */
   html {
     line-height: normal;
     tab-size: 8;

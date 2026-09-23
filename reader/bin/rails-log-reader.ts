@@ -1,13 +1,10 @@
 #!/usr/bin/env bun
 
 /**
- * Starts the Reader, from wherever it is run: inside the Host app, which is where the server
- * looks for its Rails root.
- *
- * Bun reads `bunfig.toml` from the working directory, and that is never the Reader's own, so
- * the server is run with `--config` pointing at it. Without that, the Tailwind plugin
- * registered there never loads and the Reader serves its stylesheet uncompiled, with no
- * error.
+ * Starts the Reader with the Reader's own `bunfig.toml`, from any working directory — the
+ * Host app's, which is where the server looks for its Rails root. Bun reads the working
+ * directory's `bunfig.toml` unless `--config` says otherwise, and a server started without it
+ * serves its stylesheet uncompiled, with no error.
  *
  * Every argument is a Bun runtime flag, placed before the server's entry — `bun dev` passes
  * `--hot`.

@@ -158,9 +158,8 @@ describe("starting the Reader", () => {
   })
 
   test("serves compiled Tailwind when launched from inside a Host app", async () => {
-    // Production, the way `bun start` and the README run it, and from a working directory
-    // that is not the Reader's own: Bun reads `bunfig.toml` from there, so a Reader started
-    // any other way serves its stylesheet raw, with no error.
+    // Production, as `bun start` and the README run it, from a working directory that is not
+    // the Reader's own.
     const url = await readerUrl(launch(await railsRoot(), { NODE_ENV: "production" }))
     const page = await (await Bun.fetch(url)).text()
 
