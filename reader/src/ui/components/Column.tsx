@@ -5,9 +5,8 @@ import type { ColumnAutoScroll } from "../hooks/auto-scroll"
 /**
  * One of the Reader's three columns: a heading, and a body that is the column's scrollport.
  *
- * Code that finds a column or its scrollport in the DOM — the auto-scroll jump, *Hover
- * grouping* — finds it by `data-column` and `data-scrollport`. The class names are styling
- * only; nothing looks an element up by one.
+ * `data-column` says which column an element is, and `data-scrollport` marks its body: what
+ * *Hover grouping* and its jump find a column and its scrollport by.
  */
 
 export type ColumnPlace = "console" | "activity" | "detail"

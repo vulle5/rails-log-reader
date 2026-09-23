@@ -96,7 +96,7 @@ export function arrived(state: AutoScroll, howMany: number, evicted = 0): AutoSc
 
 /** What a column needs to follow: the port to attach, and what the pill renders from. */
 export type ColumnAutoScroll = AutoScroll & {
-  /** Goes on the scrollport — the column's own `.column-body`, never the window. */
+  /** Goes on the scrollport — the column's own body, never the window. */
   port: RefObject<HTMLDivElement | null>
   onScroll: () => void
   /** The pill's click: back to the bottom, and back to following. */
