@@ -1,6 +1,7 @@
 import type { ActivityRow } from "../../../../shared/activity"
+import { groupingMarks } from "../../../grouping"
 import { Highlight } from "../../../hooks/search"
-import { clock, controllerAction, count, elapsed, methodClassName, ms, runDescription, statusClassName } from "../../../lib/format"
+import { clock, controllerAction, count, elapsed, methodCategory, ms, runDescription, statusCategory } from "../../../lib/format"
 import { useClimbingElapsed } from "../lib/elapsed"
 
 /**
@@ -22,12 +23,13 @@ import { useClimbingElapsed } from "../lib/elapsed"
  *
  * A row is clickable, and clicking one is the whole of *Selection*: what the detail column
  * shows. The table is a `grid` and the showing row carries `aria-selected`, because a table
- * whose rows are selectable is one — but selecting from the keyboard is deliberately **not**
- * here. A grid's keyboard contract is a roving tab stop plus arrow-key navigation, and
- * arrow keys moving the selection have to scroll the table to follow, which belongs to the
- * auto-scroll hook and not something to invent in passing. A `tabIndex` on every row would
- * have been the cheap half of that pattern and, at the Memory bound's rows, five thousand
- * tab stops.
+ * whose rows are selectable is one, and `aria-current`, which is what the stylesheet marks it
+ * by. *Hover grouping*'s two marks are neither: they are `data-grouping`, never a selection.
+ * Selecting from the keyboard is deliberately **not** here. A grid's keyboard contract is a
+ * roving tab stop plus arrow-key navigation, and arrow keys moving the selection have to
+ * scroll the table to follow, which belongs to the auto-scroll hook and not something to
+ * invent in passing. A `tabIndex` on every row would have been the cheap half of that pattern
+ * and, at the Memory bound's rows, five thousand tab stops.
  */
 
 /**
@@ -115,11 +117,13 @@ type RowProps<T> = { row: T; selected: boolean; pinned: boolean; lit: boolean; o
 function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>) {
   return (
     <tr
-      className={rowClassName(["activity-row", `activity-row-${row.state}`], selected, pinned, lit)}
+      className="activity-row"
       // What the Console finds a row by, and what it scrolls to: the fold's own `id`, which
       // is the same string a Console line names its owner with.
       data-row={row.id}
-      aria-selected={selected}
+      data-kind="request"
+      data-state={row.state}
+      {...rowMarks(selected, pinned, lit)}
       onClick={onSelect}
     >
       {/* A *Partial request* has no start to show, which is exactly where it says so: the
@@ -139,7 +143,7 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
       <td className="cell-status">
         <Status row={row} />
       </td>
-      <td className={`cell-method ${methodClassName(row.method)}`}>
+      <td className="cell-method" data-method={methodCategory(row.method)}>
         <Highlight text={row.method ?? ""} />
       </td>
       <td className="cell-path" title={row.path ?? undefined}>
@@ -189,14 +193,11 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
 function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
   return (
     <tr
-      className={rowClassName(
-        ["activity-row", "activity-row-run", row.marker ? "activity-row-marker" : ""],
-        selected,
-        pinned,
-        lit,
-      )}
+      className="activity-row"
       data-row={row.id}
-      aria-selected={selected}
+      data-kind="run"
+      data-marker={row.marker ? "" : undefined}
+      {...rowMarks(selected, pinned, lit)}
       onClick={onSelect}
     >
       <td className="cell-started">
@@ -252,15 +253,13 @@ function OverBoundMark({ row }: { row: Request | Run }) {
   )
 }
 
-function rowClassName(classes: readonly string[], selected: boolean, pinned: boolean, lit: boolean) {
-  return [
-    ...classes,
-    selected ? "activity-row-selected" : "",
-    pinned ? "activity-row-pinned" : "",
-    lit ? "activity-row-lit" : "",
-  ]
-    .filter((each) => each !== "")
-    .join(" ")
+/** What a row wears of *Selection* and of *Hover grouping*, which are never the same mark. */
+function rowMarks(selected: boolean, pinned: boolean, lit: boolean) {
+  return {
+    "aria-selected": selected,
+    "aria-current": selected || undefined,
+    "data-grouping": groupingMarks(pinned, lit),
+  }
 }
 
 /**
@@ -271,11 +270,11 @@ function rowClassName(classes: readonly string[], selected: boolean, pinned: boo
  */
 function Status({ row }: { row: Request }) {
   if (row.status !== null) {
-    const className = statusClassName(row.status)
+    const category = statusCategory(row.status)
     const status = <Highlight text={String(row.status)} />
-    // 1xx, 2xx and 3xx get no class and so no span: plain text, uncoloured. 4xx and 5xx get
-    // colours of their own via `statusClassName`.
-    return className === "" ? status : <span className={className}>{status}</span>
+    // 1xx, 2xx and 3xx get no category and so no span: plain text, uncoloured. 4xx and 5xx get
+    // colours of their own via `statusCategory`.
+    return category === null ? status : <span data-status={category}>{status}</span>
   }
   if (row.state !== "finished") return <StateDot state={row.state} />
 
@@ -319,5 +318,9 @@ function Elapsed({ row }: { row: Request }) {
   const climbed = useClimbingElapsed(row.provenElapsed, climbing)
 
   if (climbed === null) return null
-  return <span className={climbing ? "elapsed" : "elapsed elapsed-frozen"}>{elapsed(climbed)}</span>
+  return (
+    <span className="elapsed" data-elapsed={climbing ? "climbing" : "frozen"}>
+      {elapsed(climbed)}
+    </span>
+  )
 }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react"
+import { createContext, useContext, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react"
 
 export type SettingsHandle = {
   /** Opens the dialog, and at `setting` — a `Setting`'s label — focused and outlined, if named. */
@@ -71,22 +71,37 @@ type SettingProps = {
   children: ReactNode
 }
 
-/** Focuses its first control when the dialog is opened at it — after `showModal`'s own focusing. */
+/**
+ * Focuses its first control when the dialog is opened at it — after `showModal`'s own focusing.
+ * Named by its label and described by its description, so each setting reads as one unit.
+ */
 export function Setting({ label, description, children }: SettingProps) {
   const targeted = useContext(Targeted) === label
   const control = useRef<HTMLDivElement>(null)
+  const id = useId()
 
   useEffect(() => {
     if (targeted) control.current?.querySelector<HTMLElement>("input, button, select, textarea")?.focus()
   }, [targeted])
 
   return (
-    <li className={targeted ? "setting setting-targeted" : "setting"}>
-      <span className="setting-label">{label}</span>
+    <li
+      className="setting"
+      aria-labelledby={`${id}-label`}
+      aria-describedby={description === undefined ? undefined : `${id}-description`}
+      data-targeted={targeted ? "" : undefined}
+    >
+      <span className="setting-label" id={`${id}-label`}>
+        {label}
+      </span>
       <div className="setting-control" ref={control}>
         {children}
       </div>
-      {description !== undefined && <p className="setting-description">{description}</p>}
+      {description !== undefined && (
+        <p className="setting-description" id={`${id}-description`}>
+          {description}
+        </p>
+      )}
     </li>
   )
 }

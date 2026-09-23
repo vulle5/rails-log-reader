@@ -65,7 +65,7 @@ export function RowKindTabs({ rows, showing, onShow }: RowKindTabsProps) {
           type="button"
           role="tab"
           aria-selected={kind === showing}
-          className={kind === showing ? "row-kind-tab row-kind-tab-showing" : "row-kind-tab"}
+          className="row-kind-tab"
           onClick={() => onShow(kind)}
         >
           {name}

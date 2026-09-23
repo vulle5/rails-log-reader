@@ -1,8 +1,9 @@
 /**
  * One filter chip, on or off — the shape `ConsoleFilters` and `DetailFilters` both draw
  * their thinning controls from, so a second one never grows its own copy of what "off" looks
- * like. `kind` and not `named` keys the stylesheet, because a chip's label is free text
- * (`debug`, `rails`, `schema`) while what colours it is a fixed, small set CSS answers for.
+ * like. The stylesheet reads "off" from `aria-pressed`, the one place it is said. `kind` and
+ * not `named` keys the rest of the stylesheet, because a chip's label is free text (`debug`,
+ * `rails`, `schema`) while what colours it is a fixed, small set CSS answers for.
  */
 
 export type ChipProps = {
@@ -19,7 +20,7 @@ export function Chip({ named, kind, showing, title, onToggle }: ChipProps) {
     <button
       type="button"
       aria-pressed={showing}
-      className={showing ? `chip chip-${kind}` : `chip chip-${kind} chip-off`}
+      className={`chip chip-${kind}`}
       title={title}
       onClick={onToggle}
     >

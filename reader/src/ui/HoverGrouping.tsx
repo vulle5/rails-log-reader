@@ -59,8 +59,16 @@ export function HoverGrouping({ reader, line, row, layoutKey }: HoverGroupingPro
 
   return (
     <div className="grouping">
+      {/* Named, though hidden from assistive technology with the rest of the canvas: only the
+          pointer that drew it ever reaches it. `data-rule` is what the stylesheet colours by. */}
       <svg className="grouping-canvas" aria-hidden="true">
-        <path className={`grouping-rule grouping-rule-${rule.kind}`} d={rulePath(rule)} />
+        <path
+          className="grouping-rule"
+          role="img"
+          aria-label="Hover grouping rule"
+          data-rule={rule.kind}
+          d={rulePath(rule)}
+        />
       </svg>
       {/* Where the stub stops, saying what the stub means. Not left to the shape of a line
           that goes nowhere: "it stopped" and "there is nothing to stop at" look identical. */}
