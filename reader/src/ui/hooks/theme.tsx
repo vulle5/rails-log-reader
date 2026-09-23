@@ -71,15 +71,19 @@ type ThemeSwitchProps = {
   onChoose: (choice: ThemeChoice) => void
 }
 
-/** Three buttons and not a toggle: following the OS is a choice of its own, not an absence of one. */
+/**
+ * Three buttons and not a toggle: following the OS is a choice of its own, not an absence of one.
+ * Styled as the Activity table's row-kind tabs are, because it is the same kind of control: one
+ * of a few, exactly one of them in force.
+ */
 export function ThemeSwitch({ choice, onChoose }: ThemeSwitchProps) {
   return (
-    <div className="theme-switch" role="group" aria-label="Theme">
+    <div className="flex flex-none gap-0.5" role="group" aria-label="Theme">
       {CHOICES.map((each) => (
         <button
           key={each.choice}
           type="button"
-          className="theme-choice"
+          className="cursor-pointer rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted hover:bg-raised aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
           aria-pressed={each.choice === choice}
           title={each.title}
           onClick={() => onChoose(each.choice)}

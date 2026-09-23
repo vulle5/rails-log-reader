@@ -1,15 +1,19 @@
 import type { Mismatch } from "../../../../shared/initializer-status"
 import type { RepairState } from "../lib/initializer-repair"
 
-/** The browser's own button font, which Preflight would replace with the inherited one. */
-const BROWSER_BUTTON_FONT = "[font-family:revert]"
+/** In the browser's own button font, which Preflight would replace with the inherited one. */
+const BUTTON =
+  "flex-none cursor-pointer rounded border border-border bg-raised px-2.5 py-0.75 text-sm text-foreground [font-family:revert] disabled:cursor-default disabled:opacity-60"
+
+const BANNER = "flex flex-none items-center gap-3 border-b border-border px-4 py-2 text-sm"
 
 /**
  * A non-blocking banner naming which half of the Initializer is wrong
  * — the file on disk, or the process already running — and the one click that repairs
  * either. Rendered above the Reader's three columns rather than inside any of them, because
  * a mismatch is a fact about the *connection* to the Host app, not about anything any one
- * column shows.
+ * column shows. Not styled as an error even in its warning colour: nothing is broken, and the
+ * Reader stays a read-only tail outside the one click this offers.
  */
 export function InitializerBanner({
   mismatch,
@@ -33,9 +37,9 @@ export function InitializerBanner({
   // the one thing it exists to report.
   if (repairState.phase === "restarted" && mismatch.kind === "none") {
     return (
-      <div className="initializer-banner initializer-banner-ok" role="status">
+      <div className={`${BANNER} bg-accent/14 text-foreground`} role="status">
         <p>Restarted — the new Initializer is loaded.</p>
-        <button type="button" className={BROWSER_BUTTON_FONT} onClick={onDismiss}>
+        <button type="button" className={BUTTON} onClick={onDismiss}>
           Dismiss
         </button>
       </div>
@@ -45,9 +49,9 @@ export function InitializerBanner({
   if (mismatch.kind === "none") return null
 
   return (
-    <div className="initializer-banner initializer-banner-warn" role="alert">
+    <div className={`${BANNER} bg-warn/14 text-warn`} role="alert">
       <p>{MISMATCH_MESSAGE[mismatch.kind]}</p>
-      <RepairControl state={repairState} onRepair={onRepair} />
+      <RepairControl state={repairState} onRepair={onRepair} place="banner" />
     </div>
   )
 }
@@ -78,22 +82,40 @@ export function UnsupportedWireScreen({
   onRepair: () => void
 }) {
   return (
-    <div className="unsupported-wire" role="alert">
-      <h1 className="font-bold">This Reader cannot read the running Initializer</h1>
-      <p>
+    // A readable measure, starting a fifth of the way down the window.
+    <div className="mx-auto flex h-full max-w-[60ch] flex-col items-start gap-2.5 px-5 pt-[20%]" role="alert">
+      <h1 className="text-lg font-bold">This Reader cannot read the running Initializer</h1>
+      <p className="text-muted">
         The Rails process is writing wire version {liveWireVersion}; this Reader only understands up
         to version {understoodVersion}.
       </p>
-      <p>
+      <p className="text-muted">
         Pull a newer Reader, or repair the Host app's copy back to this Reader's own — either fixes
         the mismatch.
       </p>
-      <RepairControl state={repairState} onRepair={onRepair} />
+      <RepairControl state={repairState} onRepair={onRepair} place="screen" />
     </div>
   )
 }
 
-function RepairControl({ state, onRepair }: { state: RepairState; onRepair: () => void }) {
+/**
+ * How what it says is coloured where it sits: in the banner, a failed repair alone turns to the
+ * error colour; on the refusal screen, everything stays as muted as the text around it.
+ */
+const SAID: Record<"banner" | "screen", { failed: string; awaiting: string }> = {
+  banner: { failed: "text-error", awaiting: "" },
+  screen: { failed: "text-muted", awaiting: "text-muted" },
+}
+
+function RepairControl({
+  state,
+  onRepair,
+  place,
+}: {
+  state: RepairState
+  onRepair: () => void
+  place: keyof typeof SAID
+}) {
   switch (state.phase) {
     case "idle":
     // A fresh mismatch arriving after a confirmed restart is `restarted` with somewhere new
@@ -102,28 +124,28 @@ function RepairControl({ state, onRepair }: { state: RepairState; onRepair: () =
     // this phase to say — so it offers the same `Repair` an `idle` mismatch would.
     case "restarted":
       return (
-        <button type="button" className={BROWSER_BUTTON_FONT} onClick={onRepair}>
+        <button type="button" className={BUTTON} onClick={onRepair}>
           Repair
         </button>
       )
     case "repairing":
       return (
-        <button type="button" className={BROWSER_BUTTON_FONT} disabled>
+        <button type="button" className={BUTTON} disabled>
           Repairing…
         </button>
       )
     case "failed":
       return (
         <>
-          <p className="initializer-banner-error">Could not repair it: {state.error}</p>
-          <button type="button" className={BROWSER_BUTTON_FONT} onClick={onRepair}>
+          <p className={SAID[place].failed}>Could not repair it: {state.error}</p>
+          <button type="button" className={BUTTON} onClick={onRepair}>
             Try again
           </button>
         </>
       )
     case "awaiting-restart":
       return (
-        <p>
+        <p className={SAID[place].awaiting}>
           Copied. Restart Rails to load it
         </p>
       )

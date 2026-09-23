@@ -24,6 +24,8 @@
   /* Full contrast against `background`, unlike `foreground`'s legible grey. */
   --color-strong: #000000;
   --color-accent: #2f6feb;
+  /* `accent` leaning 12% toward `foreground`: darker in the light theme, lighter in the dark. */
+  --color-accent-hover: #2c65d2;
   --color-selected: #e8effc;
 
   /* One token per thing the SQL tokenizer can name. */
@@ -58,6 +60,9 @@
   /* Behind the Settings dialog. Heavier in the dark theme, where a light dim barely shows. */
   --color-backdrop: rgb(20 24 29 / 22%);
   --color-code: #e4e7ec;
+
+  --shadow-pill: 0 2px 8px var(--color-shadow);
+  --shadow-dialog: 0 4px 16px var(--color-shadow);
 
   --font-*: initial;
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -95,6 +100,7 @@
     --color-faint: #6b7682;
     --color-strong: #ffffff;
     --color-accent: #6ea0ff;
+    --color-accent-hover: #7ca9fd;
     --color-selected: #1c2432;
 
     --color-sql-keyword: #c792ea;

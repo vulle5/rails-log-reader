@@ -251,7 +251,10 @@ export function Reader({
   }
 
   return (
-    <div className="reader-shell">
+    // The banner sits above the grid rather than inside it, as a track of its own: the grid is
+    // this flex column's one growing child, so it is never sized against a height that leaves
+    // it short of the shell or unaware the banner exists.
+    <div className="flex h-full flex-col overflow-hidden">
       <InitializerBanner
         mismatch={mismatch}
         repairState={repairState}
@@ -259,10 +262,12 @@ export function Reader({
         onDismiss={onDismissRepair}
       />
       {/* Above the three columns rather than in any one of them, because neither belongs to
-          one: a term lights every column at once, and a theme paints them. */}
-      <header className="reader-bar">
-        <span className="app-name">{appName ?? "Rails log reader"}</span>
-        <div className="reader-bar-controls">
+          one: a term lights every column at once, and a theme paints them. Present from the
+          first paint, so it never arrives and pushes the columns down. */}
+      <header className="flex flex-none items-center justify-between gap-3 border-b border-border bg-sunken px-3 py-1">
+        <span className="truncate text-sm font-semibold text-muted">{appName ?? "Rails log reader"}</span>
+        {/* Never shrunk, so it is the app name alone that gives ground when the bar is narrow. */}
+        <div className="flex shrink-0 items-center gap-3">
           <SearchBox term={term} onChange={setTerm} />
           <Settings ref={settings}>
             <Setting label="Theme">
@@ -272,7 +277,11 @@ export function Reader({
               label={EDITOR_SCHEME}
               description={
                 <>
-                  URI your editor opens files with, like <code>{EDITOR_SCHEME_EXAMPLE}</code>. {openModifier()}-click
+                  URI your editor opens files with, like{" "}
+                  <code className="rounded bg-code px-1.25 py-px font-mono text-xs whitespace-nowrap text-foreground">
+                    {EDITOR_SCHEME_EXAMPLE}
+                  </code>
+                  . {openModifier()}-click
                   a file location in the Detail column to open it.
                 </>
               }
@@ -284,7 +293,17 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          <div className="reader" ref={reader}>
+          {/* The three tracks are fixed, so a column that fills scrolls inside its own track and
+              never widens, narrows or displaces its neighbours: the Console rail and the Detail
+              column's floor are the widths their content is laid out for, and the Activity table
+              takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
+              row grows to the tallest column and never shrinks to fit, which would hand the
+              scroll to the window instead of to each column. Relative, for Hover grouping's
+              overlay. */}
+          <div
+            className="relative grid min-h-0 flex-auto grid-cols-[360px_minmax(0,1fr)_minmax(380px,40%)] grid-rows-1 overflow-hidden"
+            ref={reader}
+          >
             <Column
               place="console"
               name="Console"

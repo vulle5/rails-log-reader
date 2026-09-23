@@ -105,7 +105,7 @@ export function SearchBox({ term, onChange }: SearchBoxProps) {
   return (
     <input
       type="search"
-      className="search-box placeholder:[color:revert]"
+      className="w-80 max-w-full rounded border border-border bg-raised px-2 py-0.75 font-mono text-sm text-foreground placeholder:[color:revert] focus:outline-2 focus:-outline-offset-1 focus:outline-accent/50"
       placeholder="Search"
       aria-label="Search — highlights every match, hides nothing"
       title="Highlights every match, hides nothing"
