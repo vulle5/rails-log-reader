@@ -59,12 +59,16 @@ export function HoverGrouping({ reader, line, row, layoutKey }: HoverGroupingPro
   if (rule === null) return null
 
   return (
-    <div className="grouping">
+    <div className="pointer-events-none absolute inset-0 z-2">
       {/* Named, though hidden from assistive technology with the rest of the canvas: only the
-          pointer that drew it ever reaches it. `data-rule` is what the stylesheet colours by. */}
-      <svg className="grouping-canvas" aria-hidden="true">
+          pointer that drew it ever reaches it. */}
+      <svg className="size-full" aria-hidden="true">
+        {/* Wider than the 1px borders it crosses, so it never reads as one of them. A stub is a
+            rule that stopped, so it is dashed short enough to break even over a few pixels and
+            look stopped rather than aimed. Both ways of failing to reach a row are drawn alike;
+            only the caption tells them apart. */}
         <path
-          className="grouping-rule"
+          className="fill-none stroke-accent stroke-[1.5] not-data-[rule=connected]:[stroke-dasharray:3_3]"
           role="img"
           aria-label="Hover grouping rule"
           data-rule={rule.kind}
@@ -74,7 +78,10 @@ export function HoverGrouping({ reader, line, row, layoutKey }: HoverGroupingPro
       {/* Where the stub stops, saying what the stub means. Not left to the shape of a line
           that goes nowhere: "it stopped" and "there is nothing to stop at" look identical. */}
       {rule.kind !== "connected" && (
-        <p className="grouping-caption" style={{ left: `${rule.to.x}px`, top: `${rule.to.y}px` }}>
+        <p
+          className="absolute -translate-y-1/2 rounded border border-border bg-raised px-1.5 py-0.5 text-xs whitespace-nowrap text-muted"
+          style={{ left: `${rule.to.x}px`, top: `${rule.to.y}px` }}
+        >
           {captionFor(rule.kind)}
         </p>
       )}

@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "./legacy.css";
 
 /* Keyed on `data-theme` and never on `prefers-color-scheme`: whether to follow the OS is the
    developer's choice, so the OS's preference is read in script — by `index.html` before the
@@ -71,6 +70,9 @@
   --shadow-dialog: 0 4px 16px var(--color-shadow);
   /* The pinned group's edge, drawn inside the line so marking it moves no text. */
   --shadow-pinned: inset 2px 0 0 var(--color-accent);
+  /* The same edge on its row at the far end, drawn inside the row's first cell — as wide as an
+     Interrupted row's edge, which it replaces. */
+  --shadow-pinned-row: inset 3px 0 0 var(--color-accent);
   /* An *Interrupted* row's edge, drawn inside its first cell so marking it moves no text. */
   --shadow-interrupted: inset 3px 0 0 var(--color-faint);
 

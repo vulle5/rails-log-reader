@@ -66,8 +66,17 @@ const COLUMNS = [
   ["total", "Total"],
 ] as const
 
-/** Every cell, cut rather than wrapped, so no row grows past the rest. */
-const CELL = "h-6 truncate px-2 font-mono text-sm"
+/**
+ * Every cell, cut rather than wrapped, so no row grows past the rest.
+ *
+ * The far end of *Hover grouping*, hovered and pinned, is tinted on the cells rather than the
+ * row, so it lies over whatever else the row is saying about itself — in flight, Interrupted,
+ * selected — and the pinned group's edge replaces an Interrupted row's.
+ */
+const CELL = [
+  "h-6 truncate px-2 font-mono text-sm",
+  "group-data-[grouping~=lit]:group-not-data-[grouping~=pinned]:bg-lit group-data-[grouping~=pinned]:bg-pinned group-data-[grouping~=pinned]:first:shadow-pinned-row!",
+].join(" ")
 
 /** The counts and durations, which read down a column as numbers do. */
 const NUMBER = `${CELL} text-right text-muted`
