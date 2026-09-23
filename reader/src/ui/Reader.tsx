@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { ActivityRow } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
@@ -6,7 +6,8 @@ import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./features/activity-table/components/ActivityTable"
-import { useAutoScroll, type ColumnAutoScroll } from "./hooks/auto-scroll"
+import { Column, scrollportSelector } from "./components/Column"
+import { useAutoScroll } from "./hooks/auto-scroll"
 import {
   ConsoleFilters,
   consoleFilterKey,
@@ -360,7 +361,7 @@ export function Reader({
  * strip the scrollbar sits in, which is not part of what a row can be read from underneath.
  */
 function scrollToRow(row: Element) {
-  const port = row.closest(".column-body")
+  const port = row.closest(scrollportSelector())
   if (port === null) {
     row.scrollIntoView({ block: "nearest" })
     return
@@ -382,47 +383,4 @@ function scrollToRow(row: Element) {
 
   if (rowBox.top < visibleTop) port.scrollTop -= visibleTop - rowBox.top
   else if (rowBox.bottom > visibleBottom) port.scrollTop += rowBox.bottom - visibleBottom
-}
-
-type ColumnProps = {
-  place: "console" | "activity" | "detail"
-  /** The glossary's name for the column: what it is headed with, and what a screen reader announces. */
-  name: string
-  /**
-   * What sits in the heading beside the name — the Activity table's row-kind tabs and the
-   * Console's level chips. In the heading and not in the body, because the body is the
-   * scrollport: a filter that scrolled away with the rows it was filtering would be gone
-   * exactly when it is wanted.
-   */
-  controls?: ReactNode
-  /** This column's own *auto-scroll*: the scrollport it follows, and what the pill says. */
-  scroll: ColumnAutoScroll
-  children?: ReactNode
-}
-
-function Column({ place, name, controls, scroll, children }: ColumnProps) {
-  return (
-    <section className={`column column-${place}`} role="region" aria-label={name}>
-      <header className="column-heading">
-        <h2>{name}</h2>
-        {controls}
-      </header>
-      <div className="column-body" ref={scroll.port} onScroll={scroll.onScroll}>
-        {children}
-      </div>
-      {/* Only where there is something to go and see. A pill on a paused column with nothing
-          below it would read "0 new" — sending the reader to look at nothing, and covering
-          the lines they scrolled up to read while it did. Scrolling back down is the way out
-          of a pause either way; the pill is what the count is for. */}
-      {!scroll.following && scroll.unseen > 0 && (
-        <button type="button" className="new-pill" onClick={scroll.resume} title="Follow new activity again">
-          {/* `floor`: the Memory bound is evicting one row for every row it takes, so the
-              count below has stalled rather than stopped — "+" says so rather than reading
-              like a number that quietly froze. */}
-          <span aria-hidden="true">↓</span> {scroll.unseen}
-          {scroll.floor ? "+" : ""} new
-        </button>
-      )}
-    </section>
-  )
 }

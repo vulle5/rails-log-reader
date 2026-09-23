@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState, type RefObject } from "react"
 
+import { scrollportSelector } from "./components/Column"
 import { rowSelector } from "./features/activity-table/components/ActivityTable"
 import { lineSelector } from "./features/console/components/ConsoleRail"
 import { captionFor, ruleBetween, rulePath, type Box, type GroupingRule } from "./grouping"
@@ -45,7 +46,7 @@ export function HoverGrouping({ reader, line, row, layoutKey }: HoverGroupingPro
 
     // Both scrollports, because either end moving is the rule going stale — and passively,
     // since nothing here ever prevents a scroll.
-    const ports = [...host.querySelectorAll(".column-body")]
+    const ports = [...host.querySelectorAll(scrollportSelector())]
     for (const port of ports) port.addEventListener("scroll", measure, { passive: true })
     window.addEventListener("resize", measure)
 
@@ -83,7 +84,7 @@ export function HoverGrouping({ reader, line, row, layoutKey }: HoverGroupingPro
 
 function measureRule(host: HTMLElement, line: string, row: string | null): GroupingRule | null {
   const from = host.querySelector(lineSelector(line))
-  const port = host.querySelector(".column-activity .column-body")
+  const port = host.querySelector(scrollportSelector("activity"))
   if (from === null || port === null) return null
 
   // `null` is a row that is not rendered at all — hidden by a tab filter — which is a
