@@ -48,7 +48,8 @@ export function useUnseenCount(
 /**
  * The folded Console: a region still named "Console", so it is found where the Console was,
  * holding nothing but the strip. None of the Console's lines are rendered while it is folded.
- * The strip carries the *Unseen count*, uncoloured by level, and capped at "99+" where it is drawn.
+ * The strip carries the *Unseen count*, uncoloured by level, and capped at "99+" where it is
+ * drawn: in a badge at least as wide as it is tall, a circle around one digit and a pill around more.
  */
 export function CollapsedConsole({ unseen, onExpand }: { unseen: number; onExpand: () => void }) {
   const label = unseen === 0 ? "Expand Console" : `Expand Console, ${unseen} unseen ${unseen === 1 ? "line" : "lines"}`
@@ -65,7 +66,7 @@ export function CollapsedConsole({ unseen, onExpand }: { unseen: number; onExpan
         {/* Mirrored, so its chevron points out of the strip: the way the Console opens. */}
         <CollapseIcon className="-scale-x-100" />
         {unseen > 0 && (
-          <span className="rounded-full bg-border px-1 text-[0.625rem] leading-4 font-semibold text-foreground tabular-nums">
+          <span className="min-w-4 rounded-full bg-border px-1 text-center text-[0.625rem] leading-4 font-semibold text-foreground tabular-nums">
             {unseen > 99 ? "99+" : unseen}
           </span>
         )}
