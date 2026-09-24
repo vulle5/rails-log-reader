@@ -17,7 +17,7 @@ import { captionFor, ruleBetween, rulePath, type Box, type GroupingRule } from "
  *
  * Measurement is redone on either column's scroll and on a resize, and whenever `layoutKey`
  * changes — the caller's word for "something moved that is not which two ends these are": a
- * tab filter switching, a level chip going off, rows arriving.
+ * tab filter switching, a level chip going off, rows arriving, a Column divider moving.
  */
 
 type HoverGroupingProps = {

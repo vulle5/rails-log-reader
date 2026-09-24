@@ -5,7 +5,13 @@
  * guarded: `localStorage` throws outright in a browser with site data blocked, and a blocked
  * preference reads as its default.
  */
-export type PreferenceSetting = "theme" | "editor-scheme" | "console-filter" | "detail-filter"
+export type PreferenceSetting =
+  | "theme"
+  | "editor-scheme"
+  | "console-filter"
+  | "detail-filter"
+  | "console-width"
+  | "detail-width"
 
 function keyFor(setting: PreferenceSetting) {
   return `rails-log-reader.${setting}`

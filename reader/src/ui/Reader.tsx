@@ -7,7 +7,9 @@ import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./features/activity-table/components/ActivityTable"
 import { Column, scrollportSelector } from "./components/Column"
+import { ColumnDivider } from "./components/ColumnDivider"
 import { useAutoScroll } from "./hooks/auto-scroll"
+import { useColumnWidths } from "./hooks/column-widths"
 import {
   ConsoleFilters,
   consoleFilterKey,
@@ -200,6 +202,7 @@ export function Reader({
   // An object, so clicking the same line twice jumps twice.
   const [jumpTo, setJumpTo] = useState<{ row: string } | null>(null)
   const reader = useRef<HTMLDivElement>(null)
+  const widths = useColumnWidths(reader)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
   // which is a change of what the Activity table is showing, and a column that was following
@@ -293,15 +296,17 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The three tracks are fixed, so a column that fills scrolls inside its own track and
-              never widens, narrows or displaces its neighbours: the Console rail and the Detail
-              column's floor are the widths their content is laid out for, and the Activity table
-              takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
+          {/* The outer two tracks are the widths the Column dividers set, so a column that fills
+              scrolls inside its own track and never widens, narrows or displaces its neighbours;
+              the Activity table takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
               row grows to the tallest column and never shrinks to fit, which would hand the
               scroll to the window instead of to each column. Relative, for Hover grouping's
               overlay. */}
           <div
-            className="relative grid min-h-0 flex-auto grid-cols-[360px_minmax(0,1fr)_minmax(380px,40%)] grid-rows-1 overflow-hidden"
+            className="relative grid min-h-0 flex-auto grid-rows-1 overflow-hidden"
+            style={{
+              gridTemplateColumns: `${widths.console.width}px minmax(0,1fr) ${widths.detail.width}px`,
+            }}
             ref={reader}
           >
             <Column
@@ -320,6 +325,7 @@ export function Reader({
                 onPick={pick}
               />
             </Column>
+            <ColumnDivider name="Console" edge="right" column={widths.console} />
             <Column
               place="activity"
               name="Activity table"
@@ -339,6 +345,7 @@ export function Reader({
                   rows — not that a tab is showing none of the ones it holds. */}
               {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
             </Column>
+            <ColumnDivider name="Detail column" edge="left" column={widths.detail} />
             <Column
               place="detail"
               name="Detail column"
@@ -354,7 +361,7 @@ export function Reader({
               reader={reader}
               line={drawnFrom?.id ?? null}
               row={drawnFrom?.owner ?? null}
-              layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
+              layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length} ${widths.console.width} ${widths.detail.width}`}
             />
           </div>
         </EditorContext>
