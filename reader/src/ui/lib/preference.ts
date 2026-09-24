@@ -12,6 +12,7 @@ export type PreferenceSetting =
   | "detail-filter"
   | "console-width"
   | "detail-width"
+  | "console-collapsed"
 
 function keyFor(setting: PreferenceSetting) {
   return `rails-log-reader.${setting}`

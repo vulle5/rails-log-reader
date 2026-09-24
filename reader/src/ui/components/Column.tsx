@@ -28,12 +28,14 @@ type ColumnProps = {
    * exactly when it is wanted.
    */
   controls?: ReactNode
+  /** A control for the column itself, at the right end of the heading: the Console's collapse button. */
+  action?: ReactNode
   /** This column's own *auto-scroll*: the scrollport it follows, and what the pill says. */
   scroll: ColumnAutoScroll
   children?: ReactNode
 }
 
-export function Column({ place, name, controls, scroll, children }: ColumnProps) {
+export function Column({ place, name, controls, action, scroll, children }: ColumnProps) {
   // `min-h-0` for the same reason as `min-w-0`: a grid item's automatic minimum size is its
   // content, so without it a column would overflow the track the grid constrained it to and
   // hand the overflow back to the page.
@@ -51,7 +53,14 @@ export function Column({ place, name, controls, scroll, children }: ColumnProps)
     >
       <header className="flex min-h-7.5 flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border px-3 py-1">
         <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{name}</h2>
-        {controls}
+        {action === undefined ? (
+          controls
+        ) : (
+          <div className="flex min-w-0 items-start gap-x-2">
+            {controls}
+            {action}
+          </div>
+        )}
       </header>
       {/* The scrollport is also what the sticky headings inside the column stick against; without
           one of its own they would stick to the window's. The gutter is reserved whether or not

@@ -16,6 +16,7 @@ import {
   linesShown,
   useConsoleFilter,
 } from "./features/console/components/ConsoleFilters"
+import { CollapseConsoleButton, CollapsedConsole } from "./features/console/components/ConsoleFold"
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
@@ -296,7 +297,8 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The outer two tracks are the widths the Column dividers set, so a column that fills
+          {/* The outer two tracks are the widths the Column dividers set, or the Collapsed
+              Console's strip in place of the Console's, so a column that fills
               scrolls inside its own track and never widens, narrows or displaces its neighbours;
               the Activity table takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
               row grows to the tallest column and never shrinks to fit, which would hand the
@@ -304,28 +306,36 @@ export function Reader({
               overlay. */}
           <div
             className="relative grid min-h-0 flex-auto grid-rows-1 overflow-hidden"
-            style={{
-              gridTemplateColumns: `${widths.console.width}px minmax(0,1fr) ${widths.detail.width}px`,
-            }}
+            style={{ gridTemplateColumns: widths.template }}
             ref={reader}
           >
-            <Column
-              place="console"
-              name="Console"
-              scroll={consoleScroll}
-              controls={
-                <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
-              }
-            >
-              <ConsoleRail
-                lines={showingLines}
-                pinned={pinned?.owner ?? null}
-                hovered={hovered?.owner ?? null}
-                onHover={setHovered}
-                onPick={pick}
-              />
-            </Column>
-            <ColumnDivider name="Console" edge="right" column={widths.console} />
+            {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
+                the lines themselves are all held up here and open exactly as they were. Search
+                never unfolds it. */}
+            {widths.console.collapsed ? (
+              <CollapsedConsole onExpand={widths.console.expand} />
+            ) : (
+              <>
+                <Column
+                  place="console"
+                  name="Console"
+                  scroll={consoleScroll}
+                  controls={
+                    <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+                  }
+                  action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
+                >
+                  <ConsoleRail
+                    lines={showingLines}
+                    pinned={pinned?.owner ?? null}
+                    hovered={hovered?.owner ?? null}
+                    onHover={setHovered}
+                    onPick={pick}
+                  />
+                </Column>
+                <ColumnDivider name="Console" edge="right" column={widths.console} />
+              </>
+            )}
             <Column
               place="activity"
               name="Activity table"
@@ -361,7 +371,7 @@ export function Reader({
               reader={reader}
               line={drawnFrom?.id ?? null}
               row={drawnFrom?.owner ?? null}
-              layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length} ${widths.console.width} ${widths.detail.width}`}
+              layoutKey={`${widths.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
             />
           </div>
         </EditorContext>

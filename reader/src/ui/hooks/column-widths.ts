@@ -12,11 +12,18 @@ import { recallPreference, rememberPreference } from "../lib/preference"
  * `CONSOLE_DEFAULT`, the Detail column at `DETAIL_DEFAULT_SHARE` of the available width, so it
  * keeps that share as the window resizes.
  *
+ * The Console can also be folded into a *Collapsed Console*: a `COLLAPSED` strip, which hands
+ * the rest of its width to the Activity table. The fold is remembered across reloads, and
+ * keeps the Console's request, so unfolding reopens it at the width it had.
+ *
  * Requests are read synchronously on mount and the available width is measured before paint,
  * so the first frame is already the remembered layout.
  */
 
 export const MINIMUM = { console: 240, activity: 360, detail: 380 } as const
+
+/** The width of the *Collapsed Console*'s strip. */
+export const COLLAPSED = 32
 
 const CONSOLE_DEFAULT = 360
 const DETAIL_DEFAULT_SHARE = 0.4
@@ -38,12 +45,25 @@ export type DrawnColumn = {
   reset: () => void
 }
 
-export type ColumnWidths = Record<SizedColumn, DrawnColumn>
+/** The Console as drawn: `width` is what it opens at, and is kept while it is folded. */
+export type DrawnConsole = DrawnColumn & {
+  collapsed: boolean
+  collapse: () => void
+  expand: () => void
+}
+
+export type ColumnWidths = {
+  console: DrawnConsole
+  detail: DrawnColumn
+  /** The grid's `grid-template-columns`: the Console's track, the Activity table's, the Detail column's. */
+  template: string
+}
 
 /** `reader` is the element whose width the three columns share. */
 export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWidths {
   const [available, setAvailable] = useState(() => window.innerWidth)
   const [requests, setRequests] = useState<Requests>(() => ({ console: recall("console"), detail: recall("detail") }))
+  const [collapsed, setCollapsed] = useState(recallCollapsed)
 
   useLayoutEffect(() => {
     // `innerWidth` while there is no grid to measure — the refusal screen — or it measures as
@@ -55,7 +75,7 @@ export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWi
     return () => window.removeEventListener("resize", measure)
   }, [reader])
 
-  const drawn = fit(available, requests)
+  const drawn = fit(available, requests, collapsed)
 
   function request(column: SizedColumn, width: number | null) {
     rememberPreference(SETTING[column], width === null ? null : String(width))
@@ -74,19 +94,31 @@ export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWi
     }
   }
 
-  return { console: sized("console"), detail: sized("detail") }
+  function fold(to: boolean) {
+    rememberPreference("console-collapsed", to ? "true" : null)
+    setCollapsed(to)
+  }
+
+  const console = sized("console")
+  const detail = sized("detail")
+  return {
+    console: { ...console, collapsed, collapse: () => fold(true), expand: () => fold(false) },
+    detail,
+    template: `${collapsed ? COLLAPSED : console.width}px minmax(0,1fr) ${detail.width}px`,
+  }
 }
 
 /**
  * Each request held between its column's minimum and the room left once the other columns
  * have theirs. The Detail column gives way before the Console: the Console's room assumes the
- * Detail column at its minimum, the Detail column's room is what the drawn Console leaves.
+ * Detail column at its minimum, the Detail column's room is what the drawn Console leaves —
+ * the strip, while it is folded.
  */
-function fit(available: number, requests: Requests) {
+function fit(available: number, requests: Requests, collapsed: boolean) {
   const consoleRoom = Math.max(MINIMUM.console, available - MINIMUM.activity - MINIMUM.detail)
   const console = clamp(requests.console ?? CONSOLE_DEFAULT, MINIMUM.console, consoleRoom)
 
-  const detailRoom = Math.max(MINIMUM.detail, available - console - MINIMUM.activity)
+  const detailRoom = Math.max(MINIMUM.detail, available - (collapsed ? COLLAPSED : console) - MINIMUM.activity)
   const detail = clamp(requests.detail ?? Math.round(available * DETAIL_DEFAULT_SHARE), MINIMUM.detail, detailRoom)
 
   // A divider moves only its own column, so the Console's maximum leaves the drawn Detail
@@ -107,4 +139,8 @@ function recall(column: SizedColumn) {
     if (!Number.isFinite(width)) throw new Error(`not a width: ${stored}`)
     return width
   })
+}
+
+function recallCollapsed() {
+  return recallPreference("console-collapsed", false, (stored) => stored === "true")
 }

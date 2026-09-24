@@ -186,3 +186,13 @@ export async function search(user: UserEvent, term: string) {
   // `{` and `[` open a key descriptor in `user.type`; doubled, each is the character itself.
   if (term !== "") await user.type(box, term.replaceAll("{", "{{").replaceAll("[", "[["))
 }
+
+/** Folds the Console into its strip, by its own collapse button. */
+export async function collapseConsole(user: UserEvent) {
+  await user.click(within(column("Console")).getByRole("button", { name: "Collapse Console" }))
+}
+
+/** Reopens a *Collapsed Console*, by the strip that is its one button. */
+export async function expandConsole(user: UserEvent) {
+  await user.click(within(column("Console")).getByRole("button", { name: "Expand Console" }))
+}
