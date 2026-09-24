@@ -51,15 +51,26 @@ export function Column({ place, name, controls, action, scroll, children }: Colu
       aria-label={name}
       data-column={place}
     >
-      <header className="flex min-h-7.5 flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border px-3 py-1">
+      <header
+        className={cn(
+          "flex min-h-7.5 flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border px-3 py-1",
+          action !== undefined && "@container",
+        )}
+      >
         <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{name}</h2>
         {action === undefined ? (
           controls
         ) : (
-          <div className="flex min-w-0 items-start gap-x-2">
-            {controls}
-            {action}
-          </div>
+          <>
+            {/* One row — name, controls, action — once the heading is wide enough for the
+                Console's name, chips and collapse button side by side (27rem). Narrower, the
+                action stays on the name's row and the controls take a row of their own, so
+                the chips keep the full width rather than wrapping beside the button. */}
+            <div className="order-3 flex min-w-0 basis-full @min-[27rem]:order-2 @min-[27rem]:ml-auto @min-[27rem]:basis-auto">
+              {controls}
+            </div>
+            <div className="order-2 flex @min-[27rem]:order-3">{action}</div>
+          </>
         )}
       </header>
       {/* The scrollport is also what the sticky headings inside the column stick against; without
