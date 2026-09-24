@@ -431,7 +431,8 @@ Activity table, because you must scroll up to click a moving row anyway, and tha
 has already paused it.
 
 **Hover grouping** — hovering a *Console* line draws a gutter rule from that line to its
-*Activity table* row. Clicking pins the group lit and jumps: the table scrolls to the row
+*Activity table* row, turning down the Console's *Gutter* and crossing the *Column divider*
+between them to reach it. Clicking pins the group lit and jumps: the table scrolls to the row
 (clearing a hiding tab filter first, if that's why it's hidden), because clicking means
 "take me there" and neither a filter nor a scroll position should be able to break that
 promise. Pinning exists because the lit group is lost the moment the mouse moves, and
@@ -452,8 +453,9 @@ elsewhere without letting you read the connection to it.
 *Hover grouping*'s rule travels down. Part of the Console, not a boundary between columns.
 _Avoid_: using it for the *Column divider*.
 
-**Column divider** — the drag handle on the border between two of the Reader's columns: one
-between the *Console* and the *Activity table*, one between the table and the *Detail column*.
+**Column divider** — the narrow gap between two of the Reader's columns, which is its own drag
+handle and wears a three-dot grip so it reads as one: one between the *Console* and the
+*Activity table*, one between the table and the *Detail column*.
 Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
 is the view the other two serve. A width set is a *request*, remembered across reloads, and
 what is drawn is what the window can fit: a window too narrow gives width back from the
