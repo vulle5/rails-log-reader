@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { act, screen } from "@testing-library/react"
+import { act, screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
-import { column, lineSaying, openTheReader } from "./reader.harness"
+import { collapseConsole, column, expandConsole, lineSaying, openTheReader } from "./reader.harness"
 
 /**
  * The two *Column dividers*, through the rendered Reader: each found as the separator named
@@ -56,6 +56,10 @@ async function drag(user: UserEvent, name: "Console" | "Detail column", by: numb
 async function press(user: UserEvent, name: "Console" | "Detail column", keys: string) {
   act(() => divider(name).focus())
   await user.keyboard(keys)
+}
+
+function collapsed() {
+  return within(column("Console")).queryByRole("button", { name: /^Expand Console/ }) !== null
 }
 
 function resizeTo(width: number) {
@@ -238,6 +242,113 @@ describe("column widths across a reload", () => {
 
     expect(drawn("Console")).toBe(360)
     expect(drawn("Detail column")).toBe(800)
+  })
+})
+
+describe("a window too narrow for the requested widths", () => {
+  test("takes width from the Detail column first, then the Console, each down to its minimum", async () => {
+    const { user } = openTheReader()
+    await drag(user, "Console", 40)
+    await drag(user, "Detail column", -60)
+
+    resizeTo(1300)
+    expect(drawn("Detail column")).toBe(540)
+    expect(drawn("Console")).toBe(400)
+
+    resizeTo(1000)
+    expect(drawn("Detail column")).toBe(380)
+    expect(drawn("Console")).toBe(260)
+
+    resizeTo(980)
+    expect(drawn("Detail column")).toBe(380)
+    expect(drawn("Console")).toBe(240)
+    expect(collapsed()).toBe(false)
+  })
+
+  test("folds the Console once it cannot hold all three minimums", () => {
+    openTheReader()
+
+    resizeTo(979)
+
+    expect(collapsed()).toBe(true)
+    expect(drawn("Console")).toBe(32)
+    // Its default 40%, now the fold has freed the room for it.
+    expect(drawn("Detail column")).toBe(392)
+  })
+
+  test("reopens a Console it folded as soon as there is room", () => {
+    openTheReader()
+    resizeTo(900)
+
+    resizeTo(980)
+
+    expect(collapsed()).toBe(false)
+    expect(drawn("Console")).toBe(240)
+  })
+
+  test("does not remember the fold it made across a reload", () => {
+    const { unmount } = openTheReader()
+    resizeTo(900)
+    unmount()
+
+    available = 1600
+    openTheReader()
+
+    expect(collapsed()).toBe(false)
+  })
+
+  test("leaves a fold the developer made folded when it widens again", async () => {
+    const { user } = openTheReader()
+    await collapseConsole(user)
+    resizeTo(900)
+
+    resizeTo(1600)
+
+    expect(collapsed()).toBe(true)
+  })
+
+  test("opens a Console it folded when asked, at its minimum", async () => {
+    const { user } = openTheReader()
+    resizeTo(900)
+
+    await expandConsole(user)
+
+    expect(collapsed()).toBe(false)
+    expect(drawn("Console")).toBe(240)
+    expect(drawn("Detail column")).toBe(380)
+  })
+
+  test("folds the Console again when narrowed anew after it was opened", async () => {
+    const { user } = openTheReader()
+    resizeTo(900)
+    await expandConsole(user)
+    resizeTo(1600)
+
+    resizeTo(900)
+
+    expect(collapsed()).toBe(true)
+  })
+
+  test("never draws a column under its minimum, however narrow", () => {
+    openTheReader()
+
+    resizeTo(500)
+
+    expect(drawn("Console")).toBe(32)
+    expect(drawn("Detail column")).toBe(380)
+  })
+
+  test("restores exactly the requested widths when it widens again", async () => {
+    const { user } = openTheReader()
+    await drag(user, "Console", 40)
+    await drag(user, "Detail column", -60)
+
+    resizeTo(700)
+    resizeTo(1600)
+
+    expect(collapsed()).toBe(false)
+    expect(drawn("Console")).toBe(400)
+    expect(drawn("Detail column")).toBe(700)
   })
 })
 

@@ -13,8 +13,13 @@ import { recallPreference, rememberPreference } from "../lib/preference"
  * keeps that share as the window resizes.
  *
  * The Console can also be folded into a *Collapsed Console*: a `COLLAPSED` strip, which hands
- * the rest of its width to the Activity table. The fold is remembered across reloads, and
- * keeps the Console's request, so unfolding reopens it at the width it had.
+ * the rest of its width to the Activity table. The developer's fold is remembered across
+ * reloads, and keeps the Console's request, so unfolding reopens it at the width it had.
+ *
+ * A window narrower than the three columns' minimums folds the Console too, for only as long
+ * as it stays that narrow: that fold is never remembered, and unfolding the Console inside it
+ * opens it at its minimum until the window next widens past them. Narrower still than the
+ * strip and the other two minimums, the grid keeps `minWidth` and the Reader scrolls sideways.
  *
  * Requests are read synchronously on mount and the available width is measured before paint,
  * so the first frame is already the remembered layout.
@@ -57,13 +62,19 @@ export type ColumnWidths = {
   detail: DrawnColumn
   /** The grid's `grid-template-columns`: the Console's track, the Activity table's, the Detail column's. */
   template: string
+  /** The narrowest the grid is drawn: every column at its drawn width, the Activity table at its minimum. */
+  minWidth: number
 }
+
+const NARROW = MINIMUM.console + MINIMUM.activity + MINIMUM.detail
 
 /** `reader` is the element whose width the three columns share. */
 export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWidths {
   const [available, setAvailable] = useState(() => window.innerWidth)
   const [requests, setRequests] = useState<Requests>(() => ({ console: recall("console"), detail: recall("detail") }))
-  const [collapsed, setCollapsed] = useState(recallCollapsed)
+  const [folded, setFolded] = useState(recallCollapsed)
+  // Unfolded by the developer while the window was folding it.
+  const [opened, setOpened] = useState(false)
 
   useLayoutEffect(() => {
     // `innerWidth` while there is no grid to measure — the refusal screen — or it measures as
@@ -74,6 +85,10 @@ export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWi
     window.addEventListener("resize", measure)
     return () => window.removeEventListener("resize", measure)
   }, [reader])
+
+  const narrow = available < NARROW
+  if (opened && !narrow) setOpened(false)
+  const collapsed = folded || (narrow && !opened)
 
   const drawn = fit(available, requests, collapsed)
 
@@ -96,15 +111,18 @@ export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWi
 
   function fold(to: boolean) {
     rememberPreference("console-collapsed", to ? "true" : null)
-    setCollapsed(to)
+    setFolded(to)
+    setOpened(!to && narrow)
   }
 
   const console = sized("console")
   const detail = sized("detail")
+  const consoleTrack = collapsed ? COLLAPSED : console.width
   return {
     console: { ...console, collapsed, collapse: () => fold(true), expand: () => fold(false) },
     detail,
-    template: `${collapsed ? COLLAPSED : console.width}px minmax(0,1fr) ${detail.width}px`,
+    template: `${consoleTrack}px minmax(0,1fr) ${detail.width}px`,
+    minWidth: consoleTrack + MINIMUM.activity + detail.width,
   }
 }
 

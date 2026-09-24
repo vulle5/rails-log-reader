@@ -206,7 +206,8 @@ export function Reader({
   // An object, so clicking the same line twice jumps twice.
   const [jumpTo, setJumpTo] = useState<{ row: string } | null>(null)
   const reader = useRef<HTMLDivElement>(null)
-  const widths = useColumnWidths(reader)
+  const viewport = useRef<HTMLDivElement>(null)
+  const widths = useColumnWidths(viewport)
   const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
@@ -307,75 +308,78 @@ export function Reader({
               the Activity table takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
               row grows to the tallest column and never shrinks to fit, which would hand the
               scroll to the window instead of to each column. Relative, for Hover grouping's
-              overlay. */}
-          <div
-            className="relative grid min-h-0 flex-auto grid-rows-1 overflow-hidden"
-            style={{ gridTemplateColumns: widths.template }}
-            ref={reader}
-          >
-            {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
-                the lines themselves are all held up here and open exactly as they were. Search
-                never unfolds it. */}
-            {widths.console.collapsed ? (
-              <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
-            ) : (
+              overlay. Never narrower than its columns' minimums: a window narrower than
+              that scrolls the grid sideways inside the viewport, the width the columns share. */}
+          <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden" ref={viewport}>
+            <div
+              className="relative grid h-full grid-rows-1 overflow-hidden"
+              style={{ gridTemplateColumns: widths.template, minWidth: `${widths.minWidth}px` }}
+              ref={reader}
+            >
+              {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
+                  the lines themselves are all held up here and open exactly as they were. Search
+                  never unfolds it. */}
+              {widths.console.collapsed ? (
+                <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
+              ) : (
+                <Column
+                  place="console"
+                  name="Console"
+                  scroll={consoleScroll}
+                  controls={
+                    <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+                  }
+                  action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
+                >
+                  <ConsoleRail
+                    lines={showingLines}
+                    pinned={pinned?.owner ?? null}
+                    hovered={hovered?.owner ?? null}
+                    onHover={setHovered}
+                    onPick={pick}
+                  />
+                </Column>
+              )}
+              {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
+              <ColumnDivider name="Console" edge="right" column={widths.console} folds={widths.console} />
               <Column
-                place="console"
-                name="Console"
-                scroll={consoleScroll}
-                controls={
-                  <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
-                }
-                action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
+                place="activity"
+                name="Activity table"
+                scroll={activityScroll}
+                controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
               >
-                <ConsoleRail
-                  lines={showingLines}
+                <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
+                <ActivityTable
+                  rows={showingRows}
+                  selected={selected}
                   pinned={pinned?.owner ?? null}
-                  hovered={hovered?.owner ?? null}
-                  onHover={setHovered}
-                  onPick={pick}
+                  lit={hovered?.owner ?? null}
+                  onSelect={selectRow}
                 />
+                {/* Under the headings rather than in place of the table, so the first row of the
+                    session replaces this and moves nothing else. Empty means the Reader holds no
+                    rows — not that a tab is showing none of the ones it holds. */}
+                {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
               </Column>
-            )}
-            {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
-            <ColumnDivider name="Console" edge="right" column={widths.console} folds={widths.console} />
-            <Column
-              place="activity"
-              name="Activity table"
-              scroll={activityScroll}
-              controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
-            >
-              <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
-              <ActivityTable
-                rows={showingRows}
-                selected={selected}
-                pinned={pinned?.owner ?? null}
-                lit={hovered?.owner ?? null}
-                onSelect={selectRow}
+              <ColumnDivider name="Detail column" edge="left" column={widths.detail} />
+              <Column
+                place="detail"
+                name="Detail column"
+                scroll={detailScroll}
+                controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
+              >
+                <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
+              </Column>
+              {/* Over all three, because the rule belongs to none of them: it leaves the Console's
+                  gutter and lands on a row in the table beside it. `layoutKey` is everything that
+                  could have moved an end without changing which two ends they are. */}
+              <HoverGrouping
+                reader={reader}
+                line={drawnFrom?.id ?? null}
+                row={drawnFrom?.owner ?? null}
+                layoutKey={`${widths.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
               />
-              {/* Under the headings rather than in place of the table, so the first row of the
-                  session replaces this and moves nothing else. Empty means the Reader holds no
-                  rows — not that a tab is showing none of the ones it holds. */}
-              {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
-            </Column>
-            <ColumnDivider name="Detail column" edge="left" column={widths.detail} />
-            <Column
-              place="detail"
-              name="Detail column"
-              scroll={detailScroll}
-              controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
-            >
-              <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
-            </Column>
-            {/* Over all three, because the rule belongs to none of them: it leaves the Console's
-                gutter and lands on a row in the table beside it. `layoutKey` is everything that
-                could have moved an end without changing which two ends they are. */}
-            <HoverGrouping
-              reader={reader}
-              line={drawnFrom?.id ?? null}
-              row={drawnFrom?.owner ?? null}
-              layoutKey={`${widths.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
-            />
+            </div>
           </div>
         </EditorContext>
       </SearchContext>
