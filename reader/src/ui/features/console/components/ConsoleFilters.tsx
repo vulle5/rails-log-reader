@@ -107,8 +107,10 @@ type ConsoleFiltersProps = {
  */
 export function ConsoleFilters({ filter, onToggleLevel, onToggleRails }: ConsoleFiltersProps) {
   return (
-    <div className="flex flex-none flex-wrap items-center gap-x-2 gap-y-0.5">
-      <div className="flex flex-wrap gap-0.5" role="group" aria-label="Filter by level">
+    // Shrinks with the Console, and only the level chips wrap: the source group stays beside
+    // them, so the rule between the two groups never starts a line of its own.
+    <div className="flex min-w-0 items-start gap-x-2">
+      <div className="flex min-w-0 flex-wrap gap-0.5" role="group" aria-label="Filter by level">
         {SEVERITIES.map((level) => (
           <Chip
             key={level}
@@ -120,7 +122,7 @@ export function ConsoleFilters({ filter, onToggleLevel, onToggleRails }: Console
           />
         ))}
       </div>
-      <div className="flex flex-wrap gap-0.5 border-l border-border pl-2" role="group" aria-label="Filter by source">
+      <div className="flex flex-none gap-0.5 border-l border-border pl-2" role="group" aria-label="Filter by source">
         <Chip
           named="rails"
           kind="source-rails"
