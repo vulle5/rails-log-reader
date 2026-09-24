@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from "react"
 
+import { recallPreference, rememberPreference } from "../lib/preference"
+
 /**
  * Light and dark are both required — standing constraint 5 — and the Reader follows the OS
  * unless told otherwise, because it is read beside a terminal and an editor that already do.
@@ -22,9 +24,6 @@ const CHOICES: readonly { choice: ThemeChoice; named: string; title: string }[] 
   { choice: "dark", named: "Dark", title: "Always dark" },
   { choice: "system", named: "System", title: "Follow the OS" },
 ]
-
-/** The same key `index.html`'s inline script reads — the two are one decision, made twice. */
-const REMEMBERED = "rails-log-reader.theme"
 
 const OS_PREFERS_DARK = "(prefers-color-scheme: dark)"
 
@@ -96,23 +95,17 @@ export function ThemeSwitch({ choice, onChoose }: ThemeSwitchProps) {
 }
 
 /**
- * Guarded as the Console's filter is: `localStorage` throws outright in a browser with site
- * data blocked. Anything unreadable — absent, blocked, or a theme this Reader has never heard
- * of — is following the OS, which is what the inline script will have painted for it too.
+ * The `theme` preference is the key `index.html`'s inline script reads — the two are one
+ * decision, made twice. Anything unreadable — absent, blocked, or a theme this Reader has
+ * never heard of — is following the OS, which is what the inline script will have painted for
+ * it too.
  */
 function recall(): ThemeChoice {
-  try {
-    const remembered = window.localStorage.getItem(REMEMBERED)
-    return remembered === "light" || remembered === "dark" ? remembered : "system"
-  } catch {
-    return "system"
-  }
+  return recallPreference<ThemeChoice>("theme", "system", (remembered) =>
+    remembered === "light" || remembered === "dark" ? remembered : "system",
+  )
 }
 
 function remember(choice: ThemeChoice) {
-  try {
-    window.localStorage.setItem(REMEMBERED, choice)
-  } catch {
-    // Nothing to do and nothing to say: the theme still changes for this session.
-  }
+  rememberPreference("theme", choice)
 }

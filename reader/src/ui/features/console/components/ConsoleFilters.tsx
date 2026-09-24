@@ -3,6 +3,7 @@ import { useCallback, useState } from "react"
 import type { ConsoleLine } from "../../../../shared/console"
 import { SEVERITIES, type Severity } from "../../../../shared/wire"
 import { Chip } from "../../../components/Chip"
+import { recallPreference, rememberPreference } from "../../../lib/preference"
 
 /**
  * Everything that thins the *Console*, in one place — so "what is the rail showing?" has one
@@ -27,8 +28,6 @@ import { Chip } from "../../../components/Chip"
  * Reader has never heard of is then shown by whatever it is upgraded into, rather than
  * silently missing from a list written before it existed.
  */
-
-const REMEMBERED = "rails-log-reader.console-filter"
 
 export type ConsoleFilter = {
   /** Levels turned off by hand. Empty on a Reader nobody has told otherwise. */
@@ -135,18 +134,12 @@ export function ConsoleFilters({ filter, onToggleLevel, onToggleRails }: Console
 }
 
 /**
- * Every read and write is guarded: `localStorage` throws outright in a browser with site
- * data blocked, and a Reader that cannot remember a filter must still show the log.
- *
- * Anything unreadable — absent, corrupt, or written by a Reader that filtered on something
- * this one has never heard of — falls back to the opening filter rather than to nothing, so
- * a bad key costs the reader their chips and never their Console.
+ * Anything unreadable — absent, blocked, corrupt, or written by a Reader that filtered on
+ * something this one has never heard of — falls back to the opening filter rather than to
+ * nothing, so a bad key costs the reader their chips and never their Console.
  */
 function recall(): ConsoleFilter {
-  try {
-    const remembered = localStorage.getItem(REMEMBERED)
-    if (remembered === null) return CONSOLE_FILTER_ON_OPEN
-
+  return recallPreference("console-filter", CONSOLE_FILTER_ON_OPEN, (remembered) => {
     const stored: unknown = JSON.parse(remembered)
     if (stored === null || typeof stored !== "object") return CONSOLE_FILTER_ON_OPEN
 
@@ -159,9 +152,7 @@ function recall(): ConsoleFilter {
       ),
       showingRails: rails === true,
     }
-  } catch {
-    return CONSOLE_FILTER_ON_OPEN
-  }
+  })
 }
 
 /**
@@ -173,9 +164,5 @@ function stored(filter: ConsoleFilter) {
 }
 
 function remember(filter: ConsoleFilter) {
-  try {
-    localStorage.setItem(REMEMBERED, consoleFilterKey(filter))
-  } catch {
-    // Nothing to do and nothing to say: the chips still work for this session.
-  }
+  rememberPreference("console-filter", consoleFilterKey(filter))
 }

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 
 import type { TimelineEvent } from "../../../../shared/activity"
 import { Chip } from "../../../components/Chip"
+import { recallPreference, rememberPreference } from "../../../lib/preference"
 
 /**
  * The *Detail column*'s one thinning, on the axis `ConsoleFilters` does not touch.
@@ -23,8 +24,6 @@ import { Chip } from "../../../components/Chip"
  * Sidecar, and still reachable the moment the chip is turned on, the same guarantee
  * `ConsoleFilters` gives Rails' own lines.
  */
-
-const REMEMBERED = "rails-log-reader.detail-filter"
 
 /** The two names `IGNORE_PAYLOAD_NAMES` drops, spelled out once rather than imported: the
  * Reader has no dependency on Rails to import them from. */
@@ -100,30 +99,17 @@ export function DetailFilters({ filter, onToggleSchema }: DetailFiltersProps) {
   )
 }
 
-/**
- * Every read and write is guarded, for the reason `ConsoleFilters`' `recall`/`remember` are:
- * `localStorage` throws outright with site data blocked, and a Reader that cannot remember a
- * filter must still show the Detail column.
- */
+/** Anything unreadable — absent, blocked, or corrupt — is the opening filter. */
 function recall(): DetailFilter {
-  try {
-    const remembered = localStorage.getItem(REMEMBERED)
-    if (remembered === null) return DETAIL_FILTER_ON_OPEN
-
+  return recallPreference("detail-filter", DETAIL_FILTER_ON_OPEN, (remembered) => {
     const stored: unknown = JSON.parse(remembered)
     if (stored === null || typeof stored !== "object") return DETAIL_FILTER_ON_OPEN
 
     const { showingSchema } = stored as { showingSchema?: unknown }
     return { showingSchema: showingSchema === true }
-  } catch {
-    return DETAIL_FILTER_ON_OPEN
-  }
+  })
 }
 
 function remember(filter: DetailFilter) {
-  try {
-    localStorage.setItem(REMEMBERED, detailFilterKey(filter))
-  } catch {
-    // Nothing to do and nothing to say: the chip still works for this session.
-  }
+  rememberPreference("detail-filter", detailFilterKey(filter))
 }

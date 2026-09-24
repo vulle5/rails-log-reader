@@ -1,11 +1,11 @@
 import { createContext, useState } from "react"
 
+import { recallPreference, rememberPreference } from "../lib/preference"
+
 /**
  * The *Editor scheme*: a URI template with `{path}` and, optionally, `{line}` in it, or `null`
  * while none has been set. Nothing is guessed in its place.
  */
-
-const REMEMBERED = "rails-log-reader.editor-scheme"
 
 /** The setting's label, which is also what Settings is opened at to ask for one. */
 export const EDITOR_SCHEME = "Editor scheme"
@@ -84,24 +84,11 @@ function isAcceptable(template: string) {
   return template === "" || template.includes("{path}")
 }
 
-/**
- * `localStorage` throws outright with site data blocked. That, anything absent, and anything
- * stored with no `{path}` in it are all unset.
- */
+/** Anything absent, blocked, or stored with no `{path}` in it is unset. */
 function recall(): string | null {
-  try {
-    const remembered = window.localStorage.getItem(REMEMBERED)
-    return remembered?.includes("{path}") ? remembered : null
-  } catch {
-    return null
-  }
+  return recallPreference("editor-scheme", null, (remembered) => (remembered.includes("{path}") ? remembered : null))
 }
 
 function remember(scheme: string | null) {
-  try {
-    if (scheme === null) window.localStorage.removeItem(REMEMBERED)
-    else window.localStorage.setItem(REMEMBERED, scheme)
-  } catch {
-    // The scheme still applies for this session.
-  }
+  rememberPreference("editor-scheme", scheme)
 }
