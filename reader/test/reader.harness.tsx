@@ -194,5 +194,5 @@ export async function collapseConsole(user: UserEvent) {
 
 /** Reopens a *Collapsed Console*, by the strip that is its one button. */
 export async function expandConsole(user: UserEvent) {
-  await user.click(within(column("Console")).getByRole("button", { name: "Expand Console" }))
+  await user.click(within(column("Console")).getByRole("button", { name: /^Expand Console/ }))
 }

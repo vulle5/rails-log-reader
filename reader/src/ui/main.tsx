@@ -47,6 +47,7 @@ function LiveReader() {
       onDismissRepair={dismiss}
       earlier={earlier}
       onLoadEarlier={loadEarlier}
+      historyLoaded={historyLoaded}
       emptyState={detectEmptyState(fileStatus, historyLoaded)}
       appName={resolveAppName(appNameOverride, identity?.appName ?? null)}
       railsRoot={identity?.railsRoot ?? null}

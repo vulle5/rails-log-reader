@@ -16,7 +16,7 @@ import {
   linesShown,
   useConsoleFilter,
 } from "./features/console/components/ConsoleFilters"
-import { CollapseConsoleButton, CollapsedConsole } from "./features/console/components/ConsoleFold"
+import { CollapseConsoleButton, CollapsedConsole, useUnseenCount } from "./features/console/components/ConsoleFold"
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
@@ -80,6 +80,8 @@ type ReaderProps = {
   /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
+  /** Whether the load-on-open history is all here — always, for a seeded fold. */
+  historyLoaded?: boolean
   /** Why there is nothing to show, from `detectEmptyState` — `null` while that is not known. */
   emptyState?: EmptyState | null
   /**
@@ -107,6 +109,7 @@ export function Reader({
   onDismissRepair = () => {},
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
+  historyLoaded = true,
   emptyState = null,
   appName = null,
   railsRoot = null,
@@ -204,6 +207,7 @@ export function Reader({
   const [jumpTo, setJumpTo] = useState<{ row: string } | null>(null)
   const reader = useRef<HTMLDivElement>(null)
   const widths = useColumnWidths(reader)
+  const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
   // which is a change of what the Activity table is showing, and a column that was following
@@ -313,7 +317,7 @@ export function Reader({
                 the lines themselves are all held up here and open exactly as they were. Search
                 never unfolds it. */}
             {widths.console.collapsed ? (
-              <CollapsedConsole onExpand={widths.console.expand} />
+              <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
             ) : (
               <>
                 <Column
