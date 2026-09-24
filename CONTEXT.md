@@ -188,8 +188,8 @@ indistinguishable from a broken one.
 **Collapsed Console** — the *Console rail* folded down to a narrow vertical strip carrying its
 name and its *Unseen count*, so it takes no room while it isn't needed. Folded by its own
 collapse control, or by dragging its *Column divider* past its minimum; remembered across
-reloads. A window too narrow for all three columns' minimums folds it too, but only for as
-long as the window stays that narrow: that fold is the window's, not the developer's, so it is
+reloads. A window too narrow to keep it open without narrowing the *Detail column* folds it
+too, but only for as long as the window stays that narrow: that fold is the window's, not the developer's, so it is
 never remembered and the Console reopens the moment there is room. Unfolded inside that fold,
 it opens at its minimum and the Reader scrolls sideways, until the window next has room.
 The Console is the only column that folds: the *Detail column* is pinned once opened, and the
@@ -457,9 +457,9 @@ between the *Console* and the *Activity table*, one between the table and the *D
 Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
 is the view the other two serve. A width set is a *request*, remembered across reloads, and
 what is drawn is what the window can fit: a window too narrow gives width back from the
-*Activity table* first, then the *Console*, then the *Detail column*, each only down to its minimum —
-then folds the Console (see *Collapsed Console*), then scrolls rather than draw a column under
-its minimum. Shrinking the window never rewrites the request, so widening it restores the
+*Activity table* first, then the *Console*, each only down to its minimum — then folds the
+Console (see *Collapsed Console*), then narrows the *Detail column* to its minimum, then scrolls
+rather than draw a column under its minimum. Shrinking the window never rewrites the request, so widening it restores the
 layout. Double-clicking a divider returns its column to its default width. There is no
 "maximize" of any column: a hidden *Activity table* would break every Console click's promise
 to take you to a row.

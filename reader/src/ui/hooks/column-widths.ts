@@ -16,10 +16,12 @@ import { recallPreference, rememberPreference } from "../lib/preference"
  * the rest of its width to the Activity table. The developer's fold is remembered across
  * reloads, and keeps the Console's request, so unfolding reopens it at the width it had.
  *
- * A window narrower than the three columns' minimums folds the Console too, for only as long
- * as it stays that narrow: that fold is never remembered, and unfolding the Console inside it
- * opens it at its minimum until the window next widens past them. Narrower still than the
- * strip and the other two minimums, the grid keeps `minWidth` and the Reader scrolls sideways.
+ * A window too narrow to keep the Console at its minimum beside the Activity table's and the
+ * Detail column's request folds the Console too, before the Detail column gives up any width,
+ * for only as long as it stays that narrow: that fold is never remembered, and unfolding the
+ * Console inside it opens it at its minimum until the window next widens past it. Narrower
+ * still than the strip and the other two minimums, the grid keeps `minWidth` and the Reader
+ * scrolls sideways.
  *
  * Requests are read synchronously on mount and the available width is measured before paint,
  * so the first frame is already the remembered layout.
@@ -66,8 +68,6 @@ export type ColumnWidths = {
   minWidth: number
 }
 
-const ALL_MINIMUMS = MINIMUM.console + MINIMUM.activity + MINIMUM.detail
-
 /** `viewport` is the element whose width the three columns share. */
 export function useColumnWidths(viewport: RefObject<HTMLElement | null>): ColumnWidths {
   const [available, setAvailable] = useState(() => window.innerWidth)
@@ -86,7 +86,8 @@ export function useColumnWidths(viewport: RefObject<HTMLElement | null>): Column
     return () => window.removeEventListener("resize", measure)
   }, [viewport])
 
-  const narrow = available < ALL_MINIMUMS
+  // Too narrow to keep the Console open without narrowing the Detail column under its request.
+  const narrow = available < MINIMUM.console + MINIMUM.activity + detailRequest(available, requests)
   if (openedWhileNarrow && !narrow) setOpenedWhileNarrow(false)
   const collapsed = folded || (narrow && !openedWhileNarrow)
 
@@ -134,7 +135,7 @@ export function useColumnWidths(viewport: RefObject<HTMLElement | null>): Column
  */
 function fit(available: number, requests: Requests, collapsed: boolean) {
   const detailRoom = Math.max(MINIMUM.detail, available - (collapsed ? COLLAPSED : MINIMUM.console) - MINIMUM.activity)
-  const detail = clamp(requests.detail ?? Math.round(available * DETAIL_DEFAULT_SHARE), MINIMUM.detail, detailRoom)
+  const detail = clamp(detailRequest(available, requests), MINIMUM.detail, detailRoom)
 
   const consoleRoom = Math.max(MINIMUM.console, available - detail - MINIMUM.activity)
   const console = clamp(requests.console ?? CONSOLE_DEFAULT, MINIMUM.console, consoleRoom)
@@ -148,6 +149,11 @@ function fit(available: number, requests: Requests, collapsed: boolean) {
       max: Math.max(MINIMUM.detail, available - (collapsed ? COLLAPSED : console) - MINIMUM.activity),
     },
   }
+}
+
+/** The Detail column's request, or its default share of `available`; never under its minimum. */
+function detailRequest(available: number, requests: Requests) {
+  return Math.max(MINIMUM.detail, requests.detail ?? Math.round(available * DETAIL_DEFAULT_SHARE))
 }
 
 function clamp(value: number, min: number, max: number) {

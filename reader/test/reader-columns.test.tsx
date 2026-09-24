@@ -242,7 +242,7 @@ describe("column widths across a reload", () => {
 })
 
 describe("a window too narrow for the requested widths", () => {
-  test("takes width from the Console first, then the Detail column, each down to its minimum", async () => {
+  test("takes width from the Console first, down to its minimum, leaving the Detail column's", async () => {
     const { user } = openTheReader()
     await drag(user, "Console", 40)
     await drag(user, "Detail column", -60)
@@ -251,14 +251,45 @@ describe("a window too narrow for the requested widths", () => {
     expect(drawn("Console")).toBe(340)
     expect(drawn("Detail column")).toBe(700)
 
+    resizeTo(1300)
+    expect(drawn("Console")).toBe(240)
+    expect(drawn("Detail column")).toBe(700)
+    expect(consoleCollapsed()).toBe(false)
+  })
+
+  test("folds the Console rather than narrow the Detail column under its request", async () => {
+    const { user } = openTheReader()
+    await drag(user, "Detail column", -60)
+
+    resizeTo(1299)
+
+    expect(consoleCollapsed()).toBe(true)
+    expect(drawn("Console")).toBe(32)
+    expect(drawn("Detail column")).toBe(700)
+  })
+
+  test("then takes width from the Detail column, down to its minimum", async () => {
+    const { user } = openTheReader()
+    await drag(user, "Detail column", -60)
+
     resizeTo(1000)
+    expect(drawn("Detail column")).toBe(608)
+
+    resizeTo(772)
+    expect(drawn("Detail column")).toBe(380)
+  })
+
+  test("folds a Console beside a default Detail column once the Console is at its minimum", () => {
+    openTheReader()
+
+    resizeTo(1000)
+    expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(240)
     expect(drawn("Detail column")).toBe(400)
 
-    resizeTo(980)
-    expect(drawn("Detail column")).toBe(380)
-    expect(drawn("Console")).toBe(240)
-    expect(consoleCollapsed()).toBe(false)
+    resizeTo(999)
+    expect(consoleCollapsed()).toBe(true)
+    expect(drawn("Detail column")).toBe(400)
   })
 
   test("folds the Console once it cannot hold all three minimums", () => {
@@ -268,15 +299,13 @@ describe("a window too narrow for the requested widths", () => {
 
     expect(consoleCollapsed()).toBe(true)
     expect(drawn("Console")).toBe(32)
-    // Its default 40%, now the fold has freed the room for it.
-    expect(drawn("Detail column")).toBe(392)
   })
 
   test("reopens a Console it folded as soon as there is room", () => {
     openTheReader()
     resizeTo(900)
 
-    resizeTo(980)
+    resizeTo(1000)
 
     expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(240)
