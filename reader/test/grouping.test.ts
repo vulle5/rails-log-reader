@@ -36,6 +36,15 @@ describe("the gutter rule", () => {
     expect(rule.to).toEqual({ x: 340, y: 272 })
   })
 
+  test("lands on the table's visible left edge when the table is scrolled sideways", () => {
+    // Scrolled 160px: the row's own left edge sits under the Console.
+    const rule = ruleBetween(READER, box(200, 220, 100, 422), box(300, 324, 280, 1260), PORT)
+
+    expect(rule.kind).toBe("connected")
+    expect(rule.to).toEqual({ x: 340, y: 272 })
+    expect(rulePath(rule)).toBe("M 322 170 H 331 V 272 H 340")
+  })
+
   test("ends in a stub when the row is below the fold, and never scrolls to fetch it", () => {
     const rule = ruleBetween(READER, box(200, 220, 100, 422), box(720, 744, 440, 1100), PORT)
 

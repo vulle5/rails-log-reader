@@ -65,7 +65,8 @@ const ELBOW = 0.5
  *
  * Containment is total rather than partial, and deliberately: half a row is not somewhere
  * the eye can land, so a rule ending at one would be claiming a connection the reader cannot
- * actually follow.
+ * actually follow. It is vertical only: a row the table has scrolled sideways is still on
+ * screen, and is connected at the scrollport's left edge, where it starts on screen.
  */
 export function ruleBetween(reader: Box, line: Box, row: Box | null, port: Box): GroupingRule {
   const from = { x: line.right - reader.left, y: middle(line) - reader.top }
@@ -74,7 +75,10 @@ export function ruleBetween(reader: Box, line: Box, row: Box | null, port: Box):
   if (row === null) return { kind: "not-shown", from, to: stub }
   if (row.top < port.top || row.bottom > port.bottom) return { kind: "off-screen", from, to: stub }
 
-  return { kind: "connected", from, to: { x: row.left - reader.left, y: middle(row) - reader.top } }
+  // A table scrolled sideways carries the row's own left edge past the scrollport's, under
+  // the Console.
+  const visibleLeft = Math.max(row.left, port.left)
+  return { kind: "connected", from, to: { x: visibleLeft - reader.left, y: middle(row) - reader.top } }
 }
 
 /**
