@@ -1,3 +1,5 @@
+import { cn } from "../../../lib/cn"
+
 /**
  * The two controls of the *Collapsed Console*: the button in the Console's header that folds
  * it, and the strip it folds into, which is one button that reopens it.
@@ -31,17 +33,21 @@ export function CollapsedConsole({ onExpand }: { onExpand: () => void }) {
         title="Expand Console"
         onClick={onExpand}
       >
-        <CollapseIcon />
+        {/* Mirrored, so its chevron points out of the strip: the way the Console opens. */}
+        <CollapseIcon className="-scale-x-100" />
         <span className="text-xs font-semibold tracking-wider uppercase [writing-mode:vertical-rl]">Console</span>
       </button>
     </section>
   )
 }
 
-function CollapseIcon() {
+function CollapseIcon({ className }: { className?: string }) {
   return (
     <svg
-      className="size-3.5 flex-none fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
+      className={cn(
+        "size-3.5 flex-none fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]",
+        className,
+      )}
       viewBox="0 0 24 24"
       aria-hidden="true"
     >
