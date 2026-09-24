@@ -84,7 +84,9 @@ export function Marked({ text, from = 0, matches }: { text: string; from?: numbe
 
     const unlit = Math.min(stop, end)
     pieces.push(
-      <mark key={lit} className="search-match">
+      // Lit, never hidden: a background under the characters that matched, and nothing done to
+      // anything that did not. Inheriting the colour is what keeps a matched keyword a keyword.
+      <mark key={lit} className="rounded-xs bg-match text-inherit">
         {text.slice(lit - from, unlit - from)}
       </mark>,
     )
@@ -101,10 +103,11 @@ type SearchBoxProps = {
 }
 
 export function SearchBox({ term, onChange }: SearchBoxProps) {
+  // The placeholder keeps the browser's own grey, which Preflight would replace.
   return (
     <input
       type="search"
-      className="search-box"
+      className="w-80 max-w-full rounded border border-border bg-raised px-2 py-0.75 font-mono text-sm text-foreground placeholder:[color:revert] focus:outline-2 focus:-outline-offset-1 focus:outline-accent/50"
       placeholder="Search"
       aria-label="Search — highlights every match, hides nothing"
       title="Highlights every match, hides nothing"

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { ActivityRow } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
@@ -6,7 +6,8 @@ import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./features/activity-table/components/ActivityTable"
-import { useAutoScroll, type ColumnAutoScroll } from "./hooks/auto-scroll"
+import { Column, scrollportSelector } from "./components/Column"
+import { useAutoScroll } from "./hooks/auto-scroll"
 import {
   ConsoleFilters,
   consoleFilterKey,
@@ -250,7 +251,10 @@ export function Reader({
   }
 
   return (
-    <div className="reader-shell">
+    // The banner sits above the grid rather than inside it, as a track of its own: the grid is
+    // this flex column's one growing child, so it is never sized against a height that leaves
+    // it short of the shell or unaware the banner exists.
+    <div className="flex h-full flex-col overflow-hidden">
       <InitializerBanner
         mismatch={mismatch}
         repairState={repairState}
@@ -258,10 +262,12 @@ export function Reader({
         onDismiss={onDismissRepair}
       />
       {/* Above the three columns rather than in any one of them, because neither belongs to
-          one: a term lights every column at once, and a theme paints them. */}
-      <header className="reader-bar">
-        <span className="app-name">{appName ?? "Rails log reader"}</span>
-        <div className="reader-bar-controls">
+          one: a term lights every column at once, and a theme paints them. Present from the
+          first paint, so it never arrives and pushes the columns down. */}
+      <header className="flex flex-none items-center justify-between gap-3 border-b border-border bg-sunken px-3 py-1">
+        <span className="truncate text-sm font-semibold text-muted">{appName ?? "Rails log reader"}</span>
+        {/* Never shrunk, so it is the app name alone that gives ground when the bar is narrow. */}
+        <div className="flex shrink-0 items-center gap-3">
           <SearchBox term={term} onChange={setTerm} />
           <Settings ref={settings}>
             <Setting label="Theme">
@@ -271,7 +277,11 @@ export function Reader({
               label={EDITOR_SCHEME}
               description={
                 <>
-                  URI your editor opens files with, like <code>{EDITOR_SCHEME_EXAMPLE}</code>. {openModifier()}-click
+                  URI your editor opens files with, like{" "}
+                  <code className="rounded bg-code px-1.25 py-px font-mono text-xs whitespace-nowrap text-foreground">
+                    {EDITOR_SCHEME_EXAMPLE}
+                  </code>
+                  . {openModifier()}-click
                   a file location in the Detail column to open it.
                 </>
               }
@@ -283,7 +293,17 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          <div className="reader" ref={reader}>
+          {/* The three tracks are fixed, so a column that fills scrolls inside its own track and
+              never widens, narrows or displaces its neighbours: the Console rail and the Detail
+              column's floor are the widths their content is laid out for, and the Activity table
+              takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
+              row grows to the tallest column and never shrinks to fit, which would hand the
+              scroll to the window instead of to each column. Relative, for Hover grouping's
+              overlay. */}
+          <div
+            className="relative grid min-h-0 flex-auto grid-cols-[360px_minmax(0,1fr)_minmax(380px,40%)] grid-rows-1 overflow-hidden"
+            ref={reader}
+          >
             <Column
               place="console"
               name="Console"
@@ -360,7 +380,7 @@ export function Reader({
  * strip the scrollbar sits in, which is not part of what a row can be read from underneath.
  */
 function scrollToRow(row: Element) {
-  const port = row.closest(".column-body")
+  const port = row.closest(scrollportSelector())
   if (port === null) {
     row.scrollIntoView({ block: "nearest" })
     return
@@ -382,47 +402,4 @@ function scrollToRow(row: Element) {
 
   if (rowBox.top < visibleTop) port.scrollTop -= visibleTop - rowBox.top
   else if (rowBox.bottom > visibleBottom) port.scrollTop += rowBox.bottom - visibleBottom
-}
-
-type ColumnProps = {
-  place: "console" | "activity" | "detail"
-  /** The glossary's name for the column: what it is headed with, and what a screen reader announces. */
-  name: string
-  /**
-   * What sits in the heading beside the name — the Activity table's row-kind tabs and the
-   * Console's level chips. In the heading and not in the body, because the body is the
-   * scrollport: a filter that scrolled away with the rows it was filtering would be gone
-   * exactly when it is wanted.
-   */
-  controls?: ReactNode
-  /** This column's own *auto-scroll*: the scrollport it follows, and what the pill says. */
-  scroll: ColumnAutoScroll
-  children?: ReactNode
-}
-
-function Column({ place, name, controls, scroll, children }: ColumnProps) {
-  return (
-    <section className={`column column-${place}`} role="region" aria-label={name}>
-      <header className="column-heading">
-        <h2>{name}</h2>
-        {controls}
-      </header>
-      <div className="column-body" ref={scroll.port} onScroll={scroll.onScroll}>
-        {children}
-      </div>
-      {/* Only where there is something to go and see. A pill on a paused column with nothing
-          below it would read "0 new" — sending the reader to look at nothing, and covering
-          the lines they scrolled up to read while it did. Scrolling back down is the way out
-          of a pause either way; the pill is what the count is for. */}
-      {!scroll.following && scroll.unseen > 0 && (
-        <button type="button" className="new-pill" onClick={scroll.resume} title="Follow new activity again">
-          {/* `floor`: the Memory bound is evicting one row for every row it takes, so the
-              count below has stalled rather than stopped — "+" says so rather than reading
-              like a number that quietly froze. */}
-          <span aria-hidden="true">↓</span> {scroll.unseen}
-          {scroll.floor ? "+" : ""} new
-        </button>
-      )}
-    </section>
-  )
 }

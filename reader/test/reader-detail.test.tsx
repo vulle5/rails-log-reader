@@ -136,7 +136,7 @@ describe("selecting a row", () => {
 
     const row = await select(user, "/posts/12")
 
-    expect(cellUnder(row, "Method")).toHaveAttribute("data-method", "delete")
+    expect(within(cellUnder(row, "Method")).getByText("DELETE")).toHaveAttribute("data-method", "delete")
     expect(within(detail()).getByText("DELETE")).toHaveAttribute("data-method", "delete")
   })
 })

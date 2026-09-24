@@ -1,6 +1,9 @@
 import type { ConsoleLine } from "../../../../shared/console"
+import { LevelText } from "../../../components/LevelText"
+import { Tag } from "../../../components/Tag"
 import { groupingMarks } from "../../../grouping"
 import { Highlight } from "../../../hooks/search"
+import { cn } from "../../../lib/cn"
 
 /**
  * The **Console rail**: the leftmost of the Reader's three columns, and a global stream of
@@ -43,7 +46,9 @@ type ConsoleRailProps = {
 
 export function ConsoleRail({ lines, pinned, hovered, onHover, onPick }: ConsoleRailProps) {
   return (
-    <ol className="console-lines">
+    // The right padding is the **gutter**: the strip *Hover grouping*'s rule travels down, kept
+    // clear of text so the rule never crosses a word on its way to the row.
+    <ol className="pr-4.5 pb-6">
       {lines.map((line) => (
         <Line
           key={line.id}
@@ -75,6 +80,9 @@ type LineProps = {
  * crosses on the way is another chance to lose what you just fixed in place — so the pinned
  * group keeps its mark while the hovered one gets a lighter one of its own.
  *
+ * The level colours the severity and the message, over a Rails line's muted message: a Rails
+ * warning is still a warning.
+ *
  * Lighting is additive and stops there — **dimming** the non-matching lines, **colour
  * coding** by request and **scrollbar markers** were all built and rejected, and none of them
  * is coming back through here.
@@ -84,7 +92,11 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
 
   return (
     <li
-      className="console-line"
+      className={cn(
+        "group flex cursor-default items-baseline gap-1.5 border-b border-border py-0.5 pl-3 text-sm whitespace-nowrap data-[source=rails]:text-muted",
+        // A marked line ignores the hover, and the pinned group wins over the lit one passing across it.
+        "not-data-grouping:hover:bg-raised data-[grouping~=lit]:not-data-[grouping~=pinned]:bg-lit data-[grouping~=pinned]:bg-pinned data-[grouping~=pinned]:shadow-pinned",
+      )}
       data-line={line.id}
       data-level={severity}
       data-source={source}
@@ -95,22 +107,20 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
       onMouseLeave={() => onHover(null)}
       onClick={() => onPick(line)}
     >
-      <span className="console-severity">{severity}</span>
-      {source === "rails" && (
-        <span className="console-source" title="Rails wrote this line, not the app">
-          rails
-        </span>
-      )}
+      {/* 5ch holds every level but `unknown`, so the lines' messages start in one column. */}
+      <LevelText className="w-[5ch] flex-none font-mono text-2xs tracking-wider text-faint uppercase">{severity}</LevelText>
+      {/* The app's own lines carry no mark, so they are the ones the eye lands on first. */}
+      {source === "rails" && <Tag title="Rails wrote this line, not the app">rails</Tag>}
       {/* The app's own `log_tags`, in the order it tagged with them — so a tag's position is
           its identity, and a request tagged twice with one word is two chips. */}
       {tags.map((tag, at) => (
-        <span key={at} className="console-tag">
+        <Tag key={at}>
           <Highlight text={tag} />
-        </span>
+        </Tag>
       ))}
-      <span className="console-message" title={message}>
+      <LevelText className="min-w-0 truncate" title={message}>
         <Highlight text={message} />
-      </span>
+      </LevelText>
     </li>
   )
 }

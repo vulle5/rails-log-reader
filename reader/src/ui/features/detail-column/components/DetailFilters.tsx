@@ -86,8 +86,8 @@ type DetailFiltersProps = {
 /** One chip, in its own group: there is only the one axis here, unlike the Console's two. */
 export function DetailFilters({ filter, onToggleSchema }: DetailFiltersProps) {
   return (
-    <div className="detail-filters">
-      <div className="chips" role="group" aria-label="Filter by query kind">
+    <div className="flex flex-none items-center">
+      <div className="flex flex-wrap gap-0.5" role="group" aria-label="Filter by query kind">
         <Chip
           named="schema"
           kind="schema"

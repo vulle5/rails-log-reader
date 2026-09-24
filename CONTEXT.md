@@ -31,7 +31,7 @@ _Avoid_: flag file, lock file, config.
 
 **Host app** — the user's real Rails 8 application at their job. The Reader must work
 against it with only the Initializer added, opt-in per developer. Its display name, shown in
-the Reader's tab title and `reader-bar` header, is the wire's own `app_name` — off *Run
+the Reader's tab title and *Reader bar*, is the wire's own `app_name` — off *Run
 identity*, which is where that latching lives — unless `RAILS_LOG_READER_APP_NAME` overrides
 it, which always wins. See
 `docs/adr/0009-the-app-name-override-is-a-reader-side-env-var.md`.
@@ -341,7 +341,7 @@ those same fields, which stays display-only: a Run row shows what *that row's ow
 said, and reverts to `null` if the row is evicted and its Run reopens a fresh, header-less one
 — exactly the row-level regression Run identity exists so no *correctness-critical* read has
 to suffer. Two such reads: backtrace highlighting (`isHostFrame`'s caller) and the tab
-title/`reader-bar` header both read `railsRoot`/`appName` off Run identity, never off a row.
+title/*Reader bar* both read `railsRoot`/`appName` off Run identity, never off a row.
 First `run_header` wins and is held for the rest of the session, never reconsidered against a
 later Run's own header — the same latch `appName` alone used before Run identity generalized
 it (#95, #97).
@@ -475,6 +475,11 @@ never refollows on its own — only a new Selection does.
 _Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
 is the control).
 
+**Reader bar** — the strip across the top of the Reader, over all three columns, holding
+what belongs to none of them: the *Host app*'s display name, *Search*, and the *Settings*
+trigger.
+_Avoid_: header, toolbar, top bar.
+
 **Search** — one global, case-insensitive substring, typed once and lit wherever the Reader
 renders log text: *Console* lines, SQL, paths, `Controller#action`, and the rest of what the
 *Detail column* reads out of an Event. It **highlights and never hides**: v1 filters the
@@ -495,7 +500,7 @@ flashes a cause it is about to take back; and re-read when the Reader's window r
 since the command is always run somewhere else.
 
 **Settings** — the Reader's own preferences surface: a native `<dialog>`, opened from a
-trigger in the `reader-bar`, holding a flat list of settings with no save action of its
+trigger in the *Reader bar*, holding a flat list of settings with no save action of its
 own — each setting applies and persists the moment it is set, the same way *Theme* always
 has. Never a Reader-side config file, for the same reason ADR-0004 and ADR-0009 already
 ruled one out for the Initializer and the app-name override: `localStorage`, guarded and

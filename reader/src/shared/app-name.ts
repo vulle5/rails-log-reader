@@ -1,6 +1,6 @@
 /**
  * The Host app's display name — `MyApp — Rails log reader` in the tab, `MyApp` in the
- * `reader-bar` header. `null` until `RunIdentity` has latched one off a `run_header`, or the
+ * *Reader bar*. `null` until `RunIdentity` has latched one off a `run_header`, or the
  * developer set `RAILS_LOG_READER_APP_NAME`, which is when both places show the generic
  * "Rails log reader" fallback instead.
  *

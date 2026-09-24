@@ -20,5 +20,5 @@
     "resolveJsonModule": true,
     "types": ["bun"]
   },
-  "include": ["src", "test"]
+  "include": ["bin", "src", "test"]
 }

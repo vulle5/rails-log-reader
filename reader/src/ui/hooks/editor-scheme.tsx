@@ -61,7 +61,7 @@ export function EditorSchemeField({ scheme, onChoose }: EditorSchemeFieldProps) 
     <>
       <input
         type="text"
-        className="editor-scheme"
+        className="rounded border border-border bg-background px-2 py-0.75 font-mono text-sm text-foreground focus:outline-2 focus:-outline-offset-1 focus:outline-accent/50 aria-invalid:border-error"
         aria-label={EDITOR_SCHEME}
         aria-invalid={erring || undefined}
         aria-errormessage={erring ? "editor-scheme-error" : undefined}
@@ -72,7 +72,7 @@ export function EditorSchemeField({ scheme, onChoose }: EditorSchemeFieldProps) 
         onBlur={commit}
       />
       {erring && (
-        <p id="editor-scheme-error" className="setting-error" role="alert">
+        <p id="editor-scheme-error" className="text-xs text-error" role="alert">
           Needs {"{path}"} where the file goes — not saved.
         </p>
       )}
