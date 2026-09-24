@@ -302,15 +302,16 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The outer two tracks are the widths the Column dividers set, or the Collapsed
-              Console's strip in place of the Console's, so a column that fills
-              scrolls inside its own track and never widens, narrows or displaces its neighbours;
-              the Activity table takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
-              row grows to the tallest column and never shrinks to fit, which would hand the
-              scroll to the window instead of to each column. Relative, for Hover grouping's
-              overlay. Never narrower than its columns' minimums: a window narrower than
-              that scrolls the grid sideways inside the viewport, the width the columns share. */}
+          {/* The width the columns share. A window too narrow for the grid's `minWidth`
+              scrolls the grid sideways in here rather than drawing a column under its minimum. */}
           <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden" ref={viewport}>
+            {/* The outer two tracks are the widths the Column dividers set, or the Collapsed
+                Console's strip in place of the Console's, so a column that fills
+                scrolls inside its own track and never widens, narrows or displaces its neighbours;
+                the Activity table takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
+                row grows to the tallest column and never shrinks to fit, which would hand the
+                scroll to the window instead of to each column. Relative, for Hover grouping's
+                overlay. */}
             <div
               className="relative grid h-full grid-rows-1 overflow-hidden"
               style={{ gridTemplateColumns: widths.template, minWidth: `${widths.minWidth}px` }}

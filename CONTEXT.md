@@ -190,7 +190,8 @@ name and its *Unseen count*, so it takes no room while it isn't needed. Folded b
 collapse control, or by dragging its *Column divider* past its minimum; remembered across
 reloads. A window too narrow for all three columns' minimums folds it too, but only for as
 long as the window stays that narrow: that fold is the window's, not the developer's, so it is
-never remembered and the Console reopens the moment there is room.
+never remembered and the Console reopens the moment there is room. Unfolded inside that fold,
+it opens at its minimum and the Reader scrolls sideways, until the window next has room.
 The Console is the only column that folds: the *Detail column* is pinned once opened, and the
 *Activity table* is what the other two exist to serve. Folding is never dropping — the fold
 holds every line exactly as it would open, with its chips and its *Auto-scroll* as they were.

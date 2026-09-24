@@ -11,6 +11,7 @@ import {
   chip,
   collapseConsole,
   column,
+  consoleCollapsed,
   consoleLines,
   expandConsole,
   lit,
@@ -59,10 +60,6 @@ function divider(name: "Console" | "Detail column") {
   return screen.getByRole("separator", { name })
 }
 
-function collapsed() {
-  return within(column("Console")).queryByRole("button", { name: /^Expand Console/ }) !== null
-}
-
 async function drag(user: UserEvent, name: "Console" | "Detail column", by: number) {
   const target = divider(name)
   await user.pointer([
@@ -85,7 +82,7 @@ describe("Collapse Console", () => {
 
     await collapseConsole(user)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
     expect(within(column("Console")).queryByRole("list")).not.toBeInTheDocument()
     expect(screen.queryByText("Feed cache MISS")).not.toBeInTheDocument()
   })
@@ -118,7 +115,7 @@ describe("the Collapsed Console's strip", () => {
     await collapseConsole(user)
     await expandConsole(user)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "420")
     expect(consoleLines().map((line) => line.textContent)).toEqual([
       expect.stringContaining("boot: environment loaded"),
@@ -136,7 +133,7 @@ describe("a Collapsed Console across a reload", () => {
 
     openTheReader(TRAFFIC)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
   test("stays open once it has been reopened", async () => {
@@ -147,7 +144,7 @@ describe("a Collapsed Console across a reload", () => {
 
     openTheReader(TRAFFIC)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
   })
 })
 
@@ -173,7 +170,7 @@ describe("Search and a Collapsed Console", () => {
 
     await search(user, "Feed")
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
   test("the Detail column still lights what the folded Console holds", async () => {
@@ -323,7 +320,7 @@ describe("dragging the Console's divider past its minimum", () => {
 
     await drag(user, "Console", -250)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
   test("leaves the Console at its minimum when the drag ends short of that", async () => {
@@ -331,7 +328,7 @@ describe("dragging the Console's divider past its minimum", () => {
 
     await drag(user, "Console", -230)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
   })
 
@@ -346,7 +343,7 @@ describe("dragging the Console's divider past its minimum", () => {
       { keys: "[/MouseLeft]", target, coords: { clientX: 800 } },
     ])
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "360")
   })
 
@@ -357,7 +354,7 @@ describe("dragging the Console's divider past its minimum", () => {
 
     openTheReader(TRAFFIC)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 })
 
@@ -369,7 +366,7 @@ describe("the keyboard on the Console's divider", () => {
     act(() => divider("Console").focus())
     await user.keyboard("{ArrowLeft}")
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
   test("stops at the minimum before folding, from a width off the arrow's step", async () => {
@@ -379,12 +376,12 @@ describe("the keyboard on the Console's divider", () => {
     act(() => divider("Console").focus())
     await user.keyboard("{ArrowLeft}")
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
 
     await user.keyboard("{ArrowLeft}")
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
   test("unfolds a Collapsed Console by arrowing it outward", async () => {
@@ -394,7 +391,7 @@ describe("the keyboard on the Console's divider", () => {
     act(() => divider("Console").focus())
     await user.keyboard("{ArrowRight}")
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "360")
   })
 })
@@ -414,7 +411,7 @@ describe("dragging the Collapsed Console's divider outward", () => {
 
     await drag(user, "Console", 200)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
   })
 
   test("leaves it folded short of that", async () => {
@@ -423,7 +420,7 @@ describe("dragging the Collapsed Console's divider outward", () => {
 
     await drag(user, "Console", 50)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 })
 

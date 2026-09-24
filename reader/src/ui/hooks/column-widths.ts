@@ -66,29 +66,29 @@ export type ColumnWidths = {
   minWidth: number
 }
 
-const NARROW = MINIMUM.console + MINIMUM.activity + MINIMUM.detail
+const ALL_MINIMUMS = MINIMUM.console + MINIMUM.activity + MINIMUM.detail
 
-/** `reader` is the element whose width the three columns share. */
-export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWidths {
+/** `viewport` is the element whose width the three columns share. */
+export function useColumnWidths(viewport: RefObject<HTMLElement | null>): ColumnWidths {
   const [available, setAvailable] = useState(() => window.innerWidth)
   const [requests, setRequests] = useState<Requests>(() => ({ console: recall("console"), detail: recall("detail") }))
   const [folded, setFolded] = useState(recallCollapsed)
   // Unfolded by the developer while the window was folding it.
-  const [opened, setOpened] = useState(false)
+  const [openedWhileNarrow, setOpenedWhileNarrow] = useState(false)
 
   useLayoutEffect(() => {
     // `innerWidth` while there is no grid to measure — the refusal screen — or it measures as
     // nothing, the way it does in a DOM with no layout.
-    const measure = () => setAvailable(reader.current?.clientWidth || window.innerWidth)
+    const measure = () => setAvailable(viewport.current?.clientWidth || window.innerWidth)
     measure()
 
     window.addEventListener("resize", measure)
     return () => window.removeEventListener("resize", measure)
-  }, [reader])
+  }, [viewport])
 
-  const narrow = available < NARROW
-  if (opened && !narrow) setOpened(false)
-  const collapsed = folded || (narrow && !opened)
+  const narrow = available < ALL_MINIMUMS
+  if (openedWhileNarrow && !narrow) setOpenedWhileNarrow(false)
+  const collapsed = folded || (narrow && !openedWhileNarrow)
 
   const drawn = fit(available, requests, collapsed)
 
@@ -112,7 +112,7 @@ export function useColumnWidths(reader: RefObject<HTMLElement | null>): ColumnWi
   function fold(to: boolean) {
     rememberPreference("console-collapsed", to ? "true" : null)
     setFolded(to)
-    setOpened(!to && narrow)
+    setOpenedWhileNarrow(!to && narrow)
   }
 
   const console = sized("console")

@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { act, screen, within } from "@testing-library/react"
+import { act, screen } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
-import { collapseConsole, column, expandConsole, lineSaying, openTheReader } from "./reader.harness"
+import { collapseConsole, column, consoleCollapsed, expandConsole, lineSaying, openTheReader } from "./reader.harness"
 
 /**
  * The two *Column dividers*, through the rendered Reader: each found as the separator named
@@ -56,10 +56,6 @@ async function drag(user: UserEvent, name: "Console" | "Detail column", by: numb
 async function press(user: UserEvent, name: "Console" | "Detail column", keys: string) {
   act(() => divider(name).focus())
   await user.keyboard(keys)
-}
-
-function collapsed() {
-  return within(column("Console")).queryByRole("button", { name: /^Expand Console/ }) !== null
 }
 
 function resizeTo(width: number) {
@@ -262,7 +258,7 @@ describe("a window too narrow for the requested widths", () => {
     resizeTo(980)
     expect(drawn("Detail column")).toBe(380)
     expect(drawn("Console")).toBe(240)
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
   })
 
   test("folds the Console once it cannot hold all three minimums", () => {
@@ -270,7 +266,7 @@ describe("a window too narrow for the requested widths", () => {
 
     resizeTo(979)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
     expect(drawn("Console")).toBe(32)
     // Its default 40%, now the fold has freed the room for it.
     expect(drawn("Detail column")).toBe(392)
@@ -282,7 +278,7 @@ describe("a window too narrow for the requested widths", () => {
 
     resizeTo(980)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(240)
   })
 
@@ -294,7 +290,7 @@ describe("a window too narrow for the requested widths", () => {
     available = 1600
     openTheReader()
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
   })
 
   test("leaves a fold the developer made folded when it widens again", async () => {
@@ -304,7 +300,7 @@ describe("a window too narrow for the requested widths", () => {
 
     resizeTo(1600)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
   test("opens a Console it folded when asked, at its minimum", async () => {
@@ -313,7 +309,7 @@ describe("a window too narrow for the requested widths", () => {
 
     await expandConsole(user)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(240)
     expect(drawn("Detail column")).toBe(380)
   })
@@ -326,10 +322,10 @@ describe("a window too narrow for the requested widths", () => {
 
     resizeTo(900)
 
-    expect(collapsed()).toBe(true)
+    expect(consoleCollapsed()).toBe(true)
   })
 
-  test("never draws a column under its minimum, however narrow", () => {
+  test("keeps the Console folded to its strip and the Detail column at its minimum, however narrow", () => {
     openTheReader()
 
     resizeTo(500)
@@ -346,7 +342,7 @@ describe("a window too narrow for the requested widths", () => {
     resizeTo(700)
     resizeTo(1600)
 
-    expect(collapsed()).toBe(false)
+    expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(400)
     expect(drawn("Detail column")).toBe(700)
   })

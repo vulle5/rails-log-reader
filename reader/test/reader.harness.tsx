@@ -192,6 +192,11 @@ export async function collapseConsole(user: UserEvent) {
   await user.click(within(column("Console")).getByRole("button", { name: "Collapse Console" }))
 }
 
+/** Whether the Console is drawn as its *Collapsed Console*. */
+export function consoleCollapsed() {
+  return within(column("Console")).queryByRole("button", { name: /^Expand Console/ }) !== null
+}
+
 /** Reopens a *Collapsed Console*, by the strip that is its one button. */
 export async function expandConsole(user: UserEvent) {
   await user.click(within(column("Console")).getByRole("button", { name: /^Expand Console/ }))
