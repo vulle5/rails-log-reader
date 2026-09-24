@@ -11,10 +11,10 @@ import { COLLAPSED, type DrawnColumn, type DrawnConsole } from "../hooks/column-
  * drawn width in pixels. Arrow keys move it `STEP` pixels; Enter and a double-click reset
  * the column to its default.
  *
- * A divider whose column `folds` snaps it shut the way VS Code's sidebar does: a drag that
- * takes it under half its minimum folds it, and one taking the folded strip back out past
- * that unfolds it; by keyboard, arrowing it under its minimum folds it and arrowing it
- * outward unfolds it. Folding never touches the column's request, so it always reopens at
+ * A divider whose column `folds` snaps it shut: a drag that takes it under half its minimum
+ * folds it, and one taking the folded strip back out past that unfolds it. By keyboard, an
+ * arrow press that would take it under its minimum stops it there, the next folds it, and
+ * arrowing the folded strip outward unfolds it. Folding never touches the column's request, so it always reopens at
  * the last width it had at or above its minimum. A fold or an unfold mid-drag restarts the
  * drag from the width the column now has, so the pointer moves on from there.
  */
@@ -40,7 +40,7 @@ export function ColumnDivider({ name, edge, column, folds }: ColumnDividerProps)
   const widening = (by: number) => (edge === "right" ? by : -by)
   const collapsed = folds?.collapsed ?? false
   const drawn = collapsed ? COLLAPSED : column.width
-  const snap = column.min / 2
+  const foldsBelow = column.min / 2
 
   function start(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return
@@ -55,10 +55,10 @@ export function ColumnDivider({ name, edge, column, folds }: ColumnDividerProps)
 
     if (folds === undefined) column.resize(to)
     else if (collapsed) {
-      if (to < snap) return
+      if (to < foldsBelow) return
       folds.expand()
       drag.current = { from: event.clientX, width: column.width }
-    } else if (to < snap) {
+    } else if (to < foldsBelow) {
       folds.collapse()
       drag.current = { from: event.clientX, width: COLLAPSED }
     } else column.resize(to)
@@ -77,7 +77,7 @@ export function ColumnDivider({ name, edge, column, folds }: ColumnDividerProps)
       if (folds === undefined) column.resize(column.width + by)
       else if (collapsed) {
         if (by > 0) folds.expand()
-      } else if (column.width + by < column.min) folds.collapse()
+      } else if (column.width === column.min && by < 0) folds.collapse()
       else column.resize(column.width + by)
     } else if (event.key === "Enter") {
       event.preventDefault()

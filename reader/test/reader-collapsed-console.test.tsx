@@ -372,6 +372,21 @@ describe("the keyboard on the Console's divider", () => {
     expect(collapsed()).toBe(true)
   })
 
+  test("stops at the minimum before folding, from a width off the arrow's step", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await drag(user, "Console", -110)
+
+    act(() => divider("Console").focus())
+    await user.keyboard("{ArrowLeft}")
+
+    expect(collapsed()).toBe(false)
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
+
+    await user.keyboard("{ArrowLeft}")
+
+    expect(collapsed()).toBe(true)
+  })
+
   test("unfolds a Collapsed Console by arrowing it outward", async () => {
     const { user } = openTheReader(TRAFFIC)
     await collapseConsole(user)
