@@ -66,7 +66,7 @@ export function CollapsedConsole({ unseen, onExpand }: { unseen: number; onExpan
         {/* Mirrored, so its chevron points out of the strip: the way the Console opens. */}
         <CollapseIcon className="-scale-x-100" />
         {unseen > 0 && (
-          <span className="min-w-4 rounded-full bg-border px-1 text-center text-[0.625rem] leading-4 font-semibold text-foreground tabular-nums">
+          <span className="min-w-4 rounded-full bg-accent px-1 text-center text-[0.625rem] leading-4 font-semibold text-background tabular-nums">
             {unseen > 99 ? "99+" : unseen}
           </span>
         )}
