@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { screen, within } from "@testing-library/react"
+import { act, screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
@@ -314,5 +314,144 @@ describe("the Unseen count", () => {
     fold.fold([later.log(null, "news")])
     view.rerender(<Reader {...fold.props} historyLoaded={true} />)
     expect(strip()).toHaveAccessibleName("Expand Console, 1 unseen line")
+  })
+})
+
+describe("dragging the Console's divider past its minimum", () => {
+  test("folds the Console once the drag is under half its minimum", async () => {
+    const { user } = openTheReader(TRAFFIC)
+
+    await drag(user, "Console", -250)
+
+    expect(collapsed()).toBe(true)
+  })
+
+  test("leaves the Console at its minimum when the drag ends short of that", async () => {
+    const { user } = openTheReader(TRAFFIC)
+
+    await drag(user, "Console", -230)
+
+    expect(collapsed()).toBe(false)
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
+  })
+
+  test("reopens it when the same drag comes back out past half its minimum", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    const target = divider("Console")
+
+    await user.pointer([
+      { keys: "[MouseLeft>]", target, coords: { clientX: 1000 } },
+      { target, coords: { clientX: 700 } },
+      { target, coords: { clientX: 800 } },
+      { keys: "[/MouseLeft]", target, coords: { clientX: 800 } },
+    ])
+
+    expect(collapsed()).toBe(false)
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "360")
+  })
+
+  test("is remembered across a reload, like a fold by the button", async () => {
+    const { user, unmount } = openTheReader(TRAFFIC)
+    await drag(user, "Console", -250)
+    unmount()
+
+    openTheReader(TRAFFIC)
+
+    expect(collapsed()).toBe(true)
+  })
+})
+
+describe("the keyboard on the Console's divider", () => {
+  test("folds the Console by arrowing it below its minimum", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await drag(user, "Console", -120)
+
+    act(() => divider("Console").focus())
+    await user.keyboard("{ArrowLeft}")
+
+    expect(collapsed()).toBe(true)
+  })
+
+  test("unfolds a Collapsed Console by arrowing it outward", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await collapseConsole(user)
+
+    act(() => divider("Console").focus())
+    await user.keyboard("{ArrowRight}")
+
+    expect(collapsed()).toBe(false)
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "360")
+  })
+})
+
+describe("dragging the Collapsed Console's divider outward", () => {
+  test("reports the strip's width while folded", async () => {
+    const { user } = openTheReader(TRAFFIC)
+
+    await collapseConsole(user)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "32")
+  })
+
+  test("unfolds the Console once past half its minimum", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await collapseConsole(user)
+
+    await drag(user, "Console", 200)
+
+    expect(collapsed()).toBe(false)
+  })
+
+  test("leaves it folded short of that", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await collapseConsole(user)
+
+    await drag(user, "Console", 50)
+
+    expect(collapsed()).toBe(true)
+  })
+})
+
+describe("unfolding after a fold", () => {
+  test("restores the last width at or above the minimum, by the strip", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await drag(user, "Console", 60)
+    await drag(user, "Console", -400)
+
+    await expandConsole(user)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "420")
+  })
+
+  test("restores it by dragging outward", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await drag(user, "Console", 60)
+    await drag(user, "Console", -400)
+
+    await drag(user, "Console", 200)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "420")
+  })
+
+  test("restores the minimum a drag passed through on its way to folding", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await drag(user, "Console", -200)
+    await drag(user, "Console", -200)
+
+    await expandConsole(user)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
+  })
+
+  test("restores it after a reload onto a drag-folded Console", async () => {
+    const { user, unmount } = openTheReader(TRAFFIC)
+    await drag(user, "Console", 60)
+    await drag(user, "Console", -400)
+    unmount()
+
+    const reopened = openTheReader(TRAFFIC)
+    await expandConsole(reopened.user)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "420")
   })
 })

@@ -130,7 +130,8 @@ describe("dragging a Column divider", () => {
   test("stops each column at its minimum", async () => {
     const { user } = openTheReader()
 
-    await drag(user, "Console", -1000)
+    // Short of half the Console's minimum, where it would fold instead.
+    await drag(user, "Console", -200)
     await drag(user, "Detail column", 1000)
 
     expect(drawn("Console")).toBe(240)
@@ -166,13 +167,11 @@ describe("the keyboard on a Column divider", () => {
     expect(drawn("Detail column")).toBe(672)
   })
 
-  test("never takes a column below its minimum", async () => {
+  test("never takes the Detail column below its minimum", async () => {
     const { user } = openTheReader()
 
-    await press(user, "Console", "{ArrowLeft>10/}")
     await press(user, "Detail column", "{ArrowRight>30/}")
 
-    expect(drawn("Console")).toBe(240)
     expect(drawn("Detail column")).toBe(380)
   })
 })

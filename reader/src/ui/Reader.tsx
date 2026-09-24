@@ -319,27 +319,26 @@ export function Reader({
             {widths.console.collapsed ? (
               <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
             ) : (
-              <>
-                <Column
-                  place="console"
-                  name="Console"
-                  scroll={consoleScroll}
-                  controls={
-                    <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
-                  }
-                  action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
-                >
-                  <ConsoleRail
-                    lines={showingLines}
-                    pinned={pinned?.owner ?? null}
-                    hovered={hovered?.owner ?? null}
-                    onHover={setHovered}
-                    onPick={pick}
-                  />
-                </Column>
-                <ColumnDivider name="Console" edge="right" column={widths.console} />
-              </>
+              <Column
+                place="console"
+                name="Console"
+                scroll={consoleScroll}
+                controls={
+                  <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+                }
+                action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
+              >
+                <ConsoleRail
+                  lines={showingLines}
+                  pinned={pinned?.owner ?? null}
+                  hovered={hovered?.owner ?? null}
+                  onHover={setHovered}
+                  onPick={pick}
+                />
+              </Column>
             )}
+            {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
+            <ColumnDivider name="Console" edge="right" column={widths.console} folds={widths.console} />
             <Column
               place="activity"
               name="Activity table"
