@@ -242,18 +242,18 @@ describe("column widths across a reload", () => {
 })
 
 describe("a window too narrow for the requested widths", () => {
-  test("takes width from the Detail column first, then the Console, each down to its minimum", async () => {
+  test("takes width from the Console first, then the Detail column, each down to its minimum", async () => {
     const { user } = openTheReader()
     await drag(user, "Console", 40)
     await drag(user, "Detail column", -60)
 
-    resizeTo(1300)
-    expect(drawn("Detail column")).toBe(540)
-    expect(drawn("Console")).toBe(400)
+    resizeTo(1400)
+    expect(drawn("Console")).toBe(340)
+    expect(drawn("Detail column")).toBe(700)
 
     resizeTo(1000)
-    expect(drawn("Detail column")).toBe(380)
-    expect(drawn("Console")).toBe(260)
+    expect(drawn("Console")).toBe(240)
+    expect(drawn("Detail column")).toBe(400)
 
     resizeTo(980)
     expect(drawn("Detail column")).toBe(380)

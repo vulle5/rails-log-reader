@@ -457,7 +457,7 @@ between the *Console* and the *Activity table*, one between the table and the *D
 Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
 is the view the other two serve. A width set is a *request*, remembered across reloads, and
 what is drawn is what the window can fit: a window too narrow gives width back from the
-*Detail column* first, then the *Console*, and the table last, each only down to its minimum —
+*Activity table* first, then the *Console*, then the *Detail column*, each only down to its minimum —
 then folds the Console (see *Collapsed Console*), then scrolls rather than draw a column under
 its minimum. Shrinking the window never rewrites the request, so widening it restores the
 layout. Double-clicking a divider returns its column to its default width. There is no

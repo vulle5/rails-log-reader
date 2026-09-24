@@ -128,22 +128,25 @@ export function useColumnWidths(viewport: RefObject<HTMLElement | null>): Column
 
 /**
  * Each request held between its column's minimum and the room left once the other columns
- * have theirs. The Detail column gives way before the Console: the Console's room assumes the
- * Detail column at its minimum, the Detail column's room is what the drawn Console leaves —
- * the strip, while it is folded.
+ * have theirs. The Console gives way before the Detail column: the Detail column's room
+ * assumes the Console at its minimum — the strip, while it is folded — and the Console's room
+ * is what the drawn Detail column leaves.
  */
 function fit(available: number, requests: Requests, collapsed: boolean) {
-  const consoleRoom = Math.max(MINIMUM.console, available - MINIMUM.activity - MINIMUM.detail)
-  const console = clamp(requests.console ?? CONSOLE_DEFAULT, MINIMUM.console, consoleRoom)
-
-  const detailRoom = Math.max(MINIMUM.detail, available - (collapsed ? COLLAPSED : console) - MINIMUM.activity)
+  const detailRoom = Math.max(MINIMUM.detail, available - (collapsed ? COLLAPSED : MINIMUM.console) - MINIMUM.activity)
   const detail = clamp(requests.detail ?? Math.round(available * DETAIL_DEFAULT_SHARE), MINIMUM.detail, detailRoom)
 
-  // A divider moves only its own column, so the Console's maximum leaves the drawn Detail
-  // column where it is rather than pushing it narrower.
+  const consoleRoom = Math.max(MINIMUM.console, available - detail - MINIMUM.activity)
+  const console = clamp(requests.console ?? CONSOLE_DEFAULT, MINIMUM.console, consoleRoom)
+
+  // A divider moves only its own column, so the Detail column's maximum leaves the drawn
+  // Console where it is rather than pushing it narrower.
   return {
-    console: { width: console, max: Math.max(MINIMUM.console, available - detail - MINIMUM.activity) },
-    detail: { width: detail, max: detailRoom },
+    console: { width: console, max: consoleRoom },
+    detail: {
+      width: detail,
+      max: Math.max(MINIMUM.detail, available - (collapsed ? COLLAPSED : console) - MINIMUM.activity),
+    },
   }
 }
 
