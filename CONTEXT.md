@@ -325,6 +325,30 @@ drifted into.
 _Avoid_: request table (it holds more than requests), trace (promises spans and sampling
 that are not shipped), feed.
 
+**Table column** — one of the *Activity table*'s own columns: Started, Status, Method, Path,
+`Controller#action`, SQL, Log, DB, View, Total. Always called a *table* column, because a bare
+*column* is one of the Reader's three. The developer can hide any of them except the three that
+carry a row's state rather than its data: Started (*Partial request*, over the *Memory
+bound*), Status (*In-flight*, *Interrupted*, raised before a response) and Total (the climbing
+elapsed, which is how a hang is seen). Hiding one of those would make the table stop saying
+something it promises to say. Hiding exists for room: when the window narrows, the table
+gives width back first, and Path is the one table column with slack to give. So all of
+them start shown, and one set applies across every tab. Remembered as what is hidden, so a
+table column the Reader gains later arrives shown. Show and hide only: table columns are
+never reordered or resized one by one. Each table column carries a one-line, plain-language
+description of what it measures. Total's matters most: it is the whole request as the
+Initializer's own middleware timed it, routing and the middleware either side included, so it
+runs a little longer than Rails' own `Completed … in` line, which times the controller action
+alone. The width a hidden table column frees stays in the
+table and goes to Path. It never moves to the Console or the *Detail column*: the table's
+minimum is the same whatever it shows.
+
+*Search* never brings a hidden table column back, for the reason it never opens a *Collapsed
+Console*: the developer hid it, and a table that grew columns as you typed would be moving
+under you. Nothing goes unfound, because the method, path and `Controller#action` it lights
+in the table are rendered and lit in the *Detail column* too.
+_Avoid_: column (alone), field (a wire field is something else).
+
 **Request row** — an *Activity table* row for one Request event.
 
 **Run row** — an *Activity table* row holding everything a *Run* emitted with no owning
