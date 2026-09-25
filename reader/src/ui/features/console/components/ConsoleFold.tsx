@@ -56,7 +56,7 @@ export function CollapsedConsole({ unseen, onExpand }: { unseen: number; onExpan
 
   return (
     <section
-      className="min-h-0 min-w-0 overflow-hidden rounded-md border border-border bg-sunken"
+      className="min-h-0 min-w-0 overflow-hidden rounded-md border border-outline bg-sunken"
       role="region"
       aria-label="Console"
       data-column="console"

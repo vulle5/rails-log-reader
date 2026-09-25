@@ -10,7 +10,7 @@ import { COLLAPSED, type DrawnColumn, type DrawnConsole } from "../hooks/column-
  *
  * It lights — `data-lit` — once the pointer has rested on it `REST` milliseconds, so a pointer
  * sweeping across it does not flicker it, and at once for a drag; keyboard focus lights it at
- * once too. It goes off the moment the pointer leaves.
+ * once too. It goes off the moment the pointer leaves. Lighting and going off both fade.
  *
  * A separator in the ARIA sense, named for the column it sizes, whose value is that column's
  * drawn width in pixels. Arrow keys move it `STEP` pixels; Enter and a double-click reset
@@ -109,7 +109,7 @@ export function ColumnDivider({ name, edge, column, folds }: ColumnDividerProps)
     // `select-none` and the cancelled `mousedown` keep a drag from selecting the text it passes
     // over.
     <div
-      className="group flex cursor-col-resize touch-none items-center justify-center rounded-full outline-none select-none focus-visible:bg-accent data-lit:bg-accent"
+      className="group flex cursor-col-resize touch-none items-center justify-center rounded-full outline-none transition-colors select-none focus-visible:bg-accent data-lit:bg-accent motion-reduce:transition-none"
       role="separator"
       aria-orientation="vertical"
       aria-label={name}
@@ -132,7 +132,7 @@ export function ColumnDivider({ name, edge, column, folds }: ColumnDividerProps)
         {[0, 1, 2].map((dot) => (
           <span
             key={dot}
-            className="size-0.75 rounded-full bg-muted group-focus-visible:bg-accent group-data-lit:bg-accent"
+            className="size-0.5 rounded-full bg-muted transition-colors group-focus-visible:bg-accent group-data-lit:bg-accent motion-reduce:transition-none"
           />
         ))}
       </span>

@@ -44,7 +44,7 @@ export function Column({ place, name, controls, action, scroll, children }: Colu
   return (
     <section
       className={cn(
-        "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-border",
+        "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-outline",
         place === "console" && "bg-sunken",
         place === "activity" && "bg-background",
         place === "detail" && "bg-raised",
