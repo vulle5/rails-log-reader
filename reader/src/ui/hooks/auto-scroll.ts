@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react"
+import { useCallback, useLayoutEffect, useRef, useState, type RefCallback } from "react"
 
 /**
  * The Reader's **auto-scroll**: three of them, one per column, and one rule between them.
@@ -96,8 +96,12 @@ export function arrived(state: AutoScroll, howMany: number, evicted = 0): AutoSc
 
 /** What a column needs to follow: the port to attach, and what the pill renders from. */
 export type ColumnAutoScroll = AutoScroll & {
-  /** Goes on the scrollport — the column's own body, never the window. */
-  port: RefObject<HTMLDivElement | null>
+  /**
+   * Goes on the scrollport — the column's own body, never the window. A scrollport that
+   * unmounts and mounts again, the way the Console's does across a fold, comes back where the
+   * column was: on the bottom if it is following, and where it was left if it is paused.
+   */
+  port: RefCallback<HTMLDivElement>
   onScroll: () => void
   /** The pill's click: back to the bottom, and back to following. */
   resume: () => void
@@ -164,6 +168,22 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
   const port = useRef<HTMLDivElement>(null)
   const [state, setState] = useState<AutoScroll>(FOLLOWING)
   const rendered = useRef({ items, listing, refollowsWhen, evicted })
+  // Read by `attach`, which is stable and so cannot close over `state`.
+  const following = useRef(state.following)
+  following.current = state.following
+  // Where a paused column's scrollport was when it unmounted.
+  const left = useRef(0)
+
+  const attach = useCallback((element: HTMLDivElement) => {
+    port.current = element
+    if (following.current) stickToBottom(element)
+    else element.scrollTop = left.current
+
+    return () => {
+      left.current = element.scrollTop
+      port.current = null
+    }
+  }, [])
 
   // A layout effect, so the port is put back on the bottom in the same frame the thing that
   // pushed it off was added: after the DOM has the new rows and before anything is painted,
@@ -202,7 +222,7 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
     stickToBottom(port.current)
   }, [])
 
-  return { ...state, port, onScroll, resume }
+  return { ...state, port: attach, onScroll, resume }
 }
 
 /**

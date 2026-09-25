@@ -7,7 +7,7 @@ import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
 import type { Envelope } from "../src/shared/wire"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { Reader } from "../src/ui/Reader"
-import { aFold, chip, column, itemsOf, lit, rowShowing, search, select, tab, timeline } from "./reader.harness"
+import { aFold, chip, collapseConsole, column, expandConsole, itemsOf, lit, rowShowing, search, select, tab, timeline } from "./reader.harness"
 
 /**
  * The three *auto-scrolls*, through the columns that own them. `auto-scroll.test.ts` has the
@@ -479,6 +479,41 @@ describe("what may never resume a column", () => {
 
     expect(pinnedToBottom("Console")).toBe(false)
     expect(pill("Console")).toHaveTextContent("1 new")
+  })
+})
+
+describe("a Collapsed Console", () => {
+  test("that was following opens at the bottom of what arrived while it was folded", async () => {
+    const { user, arrive } = openTheReader(...HISTORY)
+    await collapseConsole(user)
+
+    arrive(...aRequest("r4", "/late", 4))
+    await expandConsole(user)
+
+    expect(pinnedToBottom("Console")).toBe(true)
+    expect(pill("Console")).not.toBeInTheDocument()
+  })
+
+  test("that was paused opens where it was left, counting what arrived while it was folded", async () => {
+    const { user, arrive } = openTheReader(...HISTORY)
+    scrollUp("Console", 2 * ROW)
+    const wasAt = scrollport("Console").scrollTop
+    await collapseConsole(user)
+
+    arrive(run.log(null, "job one"), run.log(null, "job two"))
+    await expandConsole(user)
+
+    expect(scrollport("Console").scrollTop).toBe(wasAt)
+    expect(pill("Console")).toHaveTextContent("2 new")
+  })
+
+  test("leaves the other two columns following", async () => {
+    const { user, arrive } = openTheReader(...HISTORY)
+
+    await collapseConsole(user)
+    arrive(...aRequest("r4", "/late", 2))
+
+    expect(pinnedToBottom("Activity table")).toBe(true)
   })
 })
 

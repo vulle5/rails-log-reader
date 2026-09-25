@@ -17,6 +17,9 @@
   --color-sunken: #f4f5f7;
   --color-raised: #ffffff;
   --color-border: #d8dce1;
+  /* A column panel's edge against the backdrop: darker than `border`, which the backdrop's
+     `sunken` would all but swallow. */
+  --color-outline: #c8ced6;
   --color-foreground: #14181d;
   --color-muted: #5c6773;
   --color-faint: #8b95a1;
@@ -113,6 +116,7 @@
     --color-sunken: #0a0c0f;
     --color-raised: #171b21;
     --color-border: #262d36;
+    --color-outline: #262d36;
     --color-foreground: #e4e8ee;
     --color-muted: #9aa5b1;
     --color-faint: #6b7682;

@@ -55,8 +55,12 @@ export function captionFor(kind: RuleKind) {
  */
 const STUB = 12
 
-/** Where the elbow turns, as a fraction of the gutter. Halfway is the gutter's own middle. */
-const ELBOW = 0.5
+/**
+ * How far past the line's end the elbow turns: the middle of the Console's 18px gutter — its
+ * `pr-4.5`. Measured from the line rather than the row, so the vertical leg stays in the gutter
+ * whatever lies between it and the row: the Console's edge, the gap, the divider's grip.
+ */
+const ELBOW = 9
 
 /**
  * `port` is the band a row has to lie inside to count as on screen — the Activity table's
@@ -65,7 +69,8 @@ const ELBOW = 0.5
  *
  * Containment is total rather than partial, and deliberately: half a row is not somewhere
  * the eye can land, so a rule ending at one would be claiming a connection the reader cannot
- * actually follow.
+ * actually follow. It is vertical only: a row the table has scrolled sideways is still on
+ * screen, and is connected at the scrollport's left edge, where it starts on screen.
  */
 export function ruleBetween(reader: Box, line: Box, row: Box | null, port: Box): GroupingRule {
   const from = { x: line.right - reader.left, y: middle(line) - reader.top }
@@ -74,19 +79,22 @@ export function ruleBetween(reader: Box, line: Box, row: Box | null, port: Box):
   if (row === null) return { kind: "not-shown", from, to: stub }
   if (row.top < port.top || row.bottom > port.bottom) return { kind: "off-screen", from, to: stub }
 
-  return { kind: "connected", from, to: { x: row.left - reader.left, y: middle(row) - reader.top } }
+  // A table scrolled sideways carries the row's own left edge past the scrollport's, under
+  // the Console.
+  const visibleLeft = Math.max(row.left, port.left)
+  return { kind: "connected", from, to: { x: visibleLeft - reader.left, y: middle(row) - reader.top } }
 }
 
 /**
  * The rule as an SVG path. A connected rule elbows: out of the line, down the gutter, into
- * the row — so the vertical travel happens in the strip between the two columns rather than
- * across the rows, which would be a diagonal drawn over the data it is pointing at.
+ * the row — so the vertical travel happens in the Console's gutter rather than across the
+ * rows, which would be a diagonal drawn over the data it is pointing at.
  */
 export function rulePath(rule: GroupingRule) {
   const { from, to } = rule
   if (rule.kind !== "connected") return `M ${round(from.x)} ${round(from.y)} H ${round(to.x)}`
 
-  const elbow = from.x + (to.x - from.x) * ELBOW
+  const elbow = from.x + ELBOW
   return `M ${round(from.x)} ${round(from.y)} H ${round(elbow)} V ${round(to.y)} H ${round(to.x)}`
 }
 

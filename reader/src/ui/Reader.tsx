@@ -7,13 +7,16 @@ import { WIRE_VERSION } from "../shared/wire"
 import { isWireVersionUnderstood } from "../shared/wire-compatibility"
 import { ActivityTable, rowSelector } from "./features/activity-table/components/ActivityTable"
 import { Column, scrollportSelector } from "./components/Column"
+import { ColumnDivider } from "./components/ColumnDivider"
 import { useAutoScroll } from "./hooks/auto-scroll"
+import { useColumnWidths } from "./hooks/column-widths"
 import {
   ConsoleFilters,
   consoleFilterKey,
   linesShown,
   useConsoleFilter,
 } from "./features/console/components/ConsoleFilters"
+import { CollapseConsoleButton, CollapsedConsole, useUnseenCount } from "./features/console/components/ConsoleFold"
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
@@ -77,6 +80,8 @@ type ReaderProps = {
   /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
+  /** Whether the load-on-open history is all here — always, for a seeded fold. */
+  historyLoaded?: boolean
   /** Why there is nothing to show, from `detectEmptyState` — `null` while that is not known. */
   emptyState?: EmptyState | null
   /**
@@ -104,6 +109,7 @@ export function Reader({
   onDismissRepair = () => {},
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
+  historyLoaded = true,
   emptyState = null,
   appName = null,
   railsRoot = null,
@@ -200,6 +206,9 @@ export function Reader({
   // An object, so clicking the same line twice jumps twice.
   const [jumpTo, setJumpTo] = useState<{ row: string } | null>(null)
   const reader = useRef<HTMLDivElement>(null)
+  const viewport = useRef<HTMLDivElement>(null)
+  const widths = useColumnWidths(viewport)
+  const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
   // which is a change of what the Activity table is showing, and a column that was following
@@ -263,8 +272,9 @@ export function Reader({
       />
       {/* Above the three columns rather than in any one of them, because neither belongs to
           one: a term lights every column at once, and a theme paints them. Present from the
-          first paint, so it never arrives and pushes the columns down. */}
-      <header className="flex flex-none items-center justify-between gap-3 border-b border-border bg-sunken px-3 py-1">
+          first paint, so it never arrives and pushes the columns down. It sits on the backdrop
+          the columns float on. */}
+      <header className="flex flex-none items-center justify-between gap-3 bg-sunken px-3 py-1">
         <span className="truncate text-sm font-semibold text-muted">{appName ?? "Rails log reader"}</span>
         {/* Never shrunk, so it is the app name alone that gives ground when the bar is narrow. */}
         <div className="flex shrink-0 items-center gap-3">
@@ -293,69 +303,87 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The three tracks are fixed, so a column that fills scrolls inside its own track and
-              never widens, narrows or displaces its neighbours: the Console rail and the Detail
-              column's floor are the widths their content is laid out for, and the Activity table
-              takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
-              row grows to the tallest column and never shrinks to fit, which would hand the
-              scroll to the window instead of to each column. Relative, for Hover grouping's
-              overlay. */}
-          <div
-            className="relative grid min-h-0 flex-auto grid-cols-[360px_minmax(0,1fr)_minmax(380px,40%)] grid-rows-1 overflow-hidden"
-            ref={reader}
-          >
-            <Column
-              place="console"
-              name="Console"
-              scroll={consoleScroll}
-              controls={
-                <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
-              }
+          {/* The width the columns and their gaps share, and the backdrop the columns float
+              on. A window too narrow for the grid's `minWidth` scrolls the grid sideways in here
+              rather than drawing a column under its minimum. */}
+          <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden bg-sunken" ref={viewport}>
+            {/* The outer two column tracks are the widths the Column dividers set, or the
+                Collapsed Console's strip in place of the Console's, so a column that fills
+                scrolls inside its own track and never widens, narrows or displaces its neighbours;
+                the Activity table takes the rest. Between each two is a divider's track, and
+                `p-1` is the gap around all three — the `GAP`s the widths are fitted around. The
+                row's minimum is pinned to 0 (`grid-rows-1`) because an `auto` row grows to the
+                tallest column and never shrinks to fit, which would hand the scroll to the window
+                instead of to each column. Relative, for Hover grouping's overlay. */}
+            <div
+              className="relative grid h-full grid-rows-1 overflow-hidden p-1"
+              style={{ gridTemplateColumns: widths.template, minWidth: `${widths.minWidth}px` }}
+              ref={reader}
             >
-              <ConsoleRail
-                lines={showingLines}
-                pinned={pinned?.owner ?? null}
-                hovered={hovered?.owner ?? null}
-                onHover={setHovered}
-                onPick={pick}
+              {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
+                  the lines themselves are all held up here and open exactly as they were. Search
+                  never unfolds it. */}
+              {widths.console.collapsed ? (
+                <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
+              ) : (
+                <Column
+                  place="console"
+                  name="Console"
+                  scroll={consoleScroll}
+                  controls={
+                    <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+                  }
+                  action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
+                >
+                  <ConsoleRail
+                    lines={showingLines}
+                    pinned={pinned?.owner ?? null}
+                    hovered={hovered?.owner ?? null}
+                    onHover={setHovered}
+                    onPick={pick}
+                  />
+                </Column>
+              )}
+              {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
+              <ColumnDivider name="Console" edge="right" column={widths.console} folds={widths.console} />
+              <Column
+                place="activity"
+                name="Activity table"
+                scroll={activityScroll}
+                controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
+              >
+                <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
+                <ActivityTable
+                  rows={showingRows}
+                  selected={selected}
+                  pinned={pinned?.owner ?? null}
+                  lit={hovered?.owner ?? null}
+                  onSelect={selectRow}
+                />
+                {/* Under the headings rather than in place of the table, so the first row of the
+                    session replaces this and moves nothing else. Empty means the Reader holds no
+                    rows — not that a tab is showing none of the ones it holds. */}
+                {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
+              </Column>
+              <ColumnDivider name="Detail column" edge="left" column={widths.detail} />
+              <Column
+                place="detail"
+                name="Detail column"
+                scroll={detailScroll}
+                controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
+              >
+                <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
+              </Column>
+              {/* Over all three, because the rule belongs to none of them: it leaves the Console's
+                  gutter and lands on a row in the table beside it. `layoutKey` is everything that
+                  could have moved an end without changing which two ends they are. */}
+              <HoverGrouping
+                reader={reader}
+                line={drawnFrom?.id ?? null}
+                row={drawnFrom?.owner ?? null}
+                layoutKey={`${widths.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
               />
-            </Column>
-            <Column
-              place="activity"
-              name="Activity table"
-              scroll={activityScroll}
-              controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
-            >
-              <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
-              <ActivityTable
-                rows={showingRows}
-                selected={selected}
-                pinned={pinned?.owner ?? null}
-                lit={hovered?.owner ?? null}
-                onSelect={selectRow}
-              />
-              {/* Under the headings rather than in place of the table, so the first row of the
-                  session replaces this and moves nothing else. Empty means the Reader holds no
-                  rows — not that a tab is showing none of the ones it holds. */}
-              {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
-            </Column>
-            <Column
-              place="detail"
-              name="Detail column"
-              scroll={detailScroll}
-              controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
-            >
-              <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
-            </Column>
-            {/* Over all three, because the rule belongs to none of them: it leaves the Console's
-                gutter and lands on a row in the table beside it. `layoutKey` is everything that
-                could have moved an end without changing which two ends they are. */}
-            <HoverGrouping
-              reader={reader}
-              line={drawnFrom?.id ?? null}
-              row={drawnFrom?.owner ?? null}
-              layoutKey={`${showingKind} ${showingRows.length} ${showingLines.length}`}
-            />
+            </div>
           </div>
         </EditorContext>
       </SearchContext>

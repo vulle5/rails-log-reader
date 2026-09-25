@@ -47,7 +47,8 @@ type ConsoleRailProps = {
 export function ConsoleRail({ lines, pinned, hovered, onHover, onPick }: ConsoleRailProps) {
   return (
     // The right padding is the **gutter**: the strip *Hover grouping*'s rule travels down, kept
-    // clear of text so the rule never crosses a word on its way to the row.
+    // clear of text so the rule never crosses a word on its way to the row. `grouping.ts`'s
+    // `ELBOW` turns the rule down its middle.
     <ol className="pr-4.5 pb-6">
       {lines.map((line) => (
         <Line

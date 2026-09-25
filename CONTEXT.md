@@ -185,6 +185,31 @@ The rail says so rather than thinning quietly: the `rails` chip wears the struck
 "off" mark from the first paint, because a Console silently not showing what it holds is
 indistinguishable from a broken one.
 
+**Collapsed Console** — the *Console rail* folded down to a narrow vertical strip carrying its
+name and its *Unseen count*, so it takes no room while it isn't needed. Folded by its own
+collapse control, or by dragging its *Column divider* past its minimum; remembered across
+reloads. A window too narrow to keep it open without narrowing the *Detail column* folds it
+too, but only for as long as the window stays that narrow: that fold is the window's, not the developer's, so it is
+never remembered and the Console reopens the moment there is room. Unfolded inside that fold,
+it opens at its minimum and the Reader scrolls sideways, until the window next has room.
+The Console is the only column that folds: the *Detail column* is pinned once opened, and the
+*Activity table* is what the other two exist to serve. Folding is never dropping — the fold
+holds every line exactly as it would open, with its chips and its *Auto-scroll* as they were.
+
+*Search* does not open it, unlike the gem-frame marker a match force-opens in a backtrace.
+The difference is who folded it: the Reader folds gem frames by default and so owes you what is
+inside them, while the Console folds only when the developer or the window folds it, and a
+column that sprang open as you typed would be the layout moving under you. Nothing goes
+unfound for it either: every line it holds is rendered, and lit, in its row's *Detail
+column* too — an *Echo* as the SQL event it renders.
+_Avoid_: minimized, hidden (*hidden* is what a chip does to a line).
+
+**Unseen count** — the number on the *Collapsed Console*: lines appended since it folded that
+its chips would show, so it never counts a line opening the Console wouldn't show. Lines the
+*Memory bound* evicts while it is folded come off it, so it never promises a line that is gone.
+Unfolding clears it. A reload opening on a folded Console starts it at zero once the
+load-on-open history has arrived: history is not news.
+
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
 most valuable thing to see — and is *not a separate state*: because in-flight requests
@@ -406,7 +431,8 @@ Activity table, because you must scroll up to click a moving row anyway, and tha
 has already paused it.
 
 **Hover grouping** — hovering a *Console* line draws a gutter rule from that line to its
-*Activity table* row. Clicking pins the group lit and jumps: the table scrolls to the row
+*Activity table* row, turning down the Console's *Gutter* and crossing the *Column divider*
+between them to reach it. Clicking pins the group lit and jumps: the table scrolls to the row
 (clearing a hiding tab filter first, if that's why it's hidden), because clicking means
 "take me there" and neither a filter nor a scroll position should be able to break that
 promise. Pinning exists because the lit group is lost the moment the mouse moves, and
@@ -422,6 +448,24 @@ occurrence, including off screen) were all built and rejected — colour collide
 before a busy dev app runs out of requests, dimming makes everything else unreadable
 exactly when you are hovering constantly, and markers tell you *that* something is
 elsewhere without letting you read the connection to it.
+
+**Gutter** — the strip down the *Console rail*'s inner edge, kept clear of text, that
+*Hover grouping*'s rule travels down. Part of the Console, not a boundary between columns.
+_Avoid_: using it for the *Column divider*.
+
+**Column divider** — the narrow gap between two of the Reader's columns, which is its own drag
+handle and wears a three-dot grip so it reads as one: one between the *Console* and the
+*Activity table*, one between the table and the *Detail column*.
+Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
+is the view the other two serve. A width set is a *request*, remembered across reloads, and
+what is drawn is what the window can fit: a window too narrow gives width back from the
+*Activity table* first, then the *Console*, each only down to its minimum — then folds the
+Console (see *Collapsed Console*), then narrows the *Detail column* to its minimum, then scrolls
+rather than draw a column under its minimum. Shrinking the window never rewrites the request, so widening it restores the
+layout. Double-clicking a divider returns its column to its default width. There is no
+"maximize" of any column: a hidden *Activity table* would break every Console click's promise
+to take you to a row.
+_Avoid_: gutter, splitter, resizer.
 
 **Auto-scroll** — a column following new activity: stuck to the bottom, so whatever arrives
 is on screen the moment it does. There are three, one per column, and they share the rule and

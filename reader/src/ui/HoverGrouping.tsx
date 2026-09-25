@@ -17,7 +17,7 @@ import { captionFor, ruleBetween, rulePath, type Box, type GroupingRule } from "
  *
  * Measurement is redone on either column's scroll and on a resize, and whenever `layoutKey`
  * changes — the caller's word for "something moved that is not which two ends these are": a
- * tab filter switching, a level chip going off, rows arriving.
+ * tab filter switching, a level chip going off, rows arriving, a Column divider moving.
  */
 
 type HoverGroupingProps = {
@@ -112,7 +112,8 @@ function measureRule(host: HTMLElement, line: string, row: string | null): Group
  * is as unreadable as one below the fold — and, when the table is wider than the column, a
  * horizontal scrollbar's height taken off the bottom the same way, `clientHeight` rather
  * than the rect's own, because the rect is the scrollport's border box and includes the
- * strip the scrollbar sits in.
+ * strip the scrollbar sits in. Its left edge is where a row scrolled sideways starts on
+ * screen, and so where a connected rule ends.
  */
 function visibleBand(port: Element): Box {
   const box = port.getBoundingClientRect()

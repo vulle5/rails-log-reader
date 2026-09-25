@@ -4,7 +4,9 @@ import type { ColumnAutoScroll } from "../hooks/auto-scroll"
 import { cn } from "../lib/cn"
 
 /**
- * One of the Reader's three columns: a heading, and a body that is the column's scrollport.
+ * One of the Reader's three columns: a heading, and a body that is the column's scrollport. An
+ * outlined panel, floating on the backdrop behind the columns: the Console in the backdrop's
+ * own fill, the other two lighter.
  *
  * `data-column` says which column an element is, and `data-scrollport` marks its body: what
  * *Hover grouping* and its jump find a column and its scrollport by.
@@ -28,30 +30,50 @@ type ColumnProps = {
    * exactly when it is wanted.
    */
   controls?: ReactNode
+  /** A control for the column itself, at the right end of the heading: the Console's collapse button. */
+  action?: ReactNode
   /** This column's own *auto-scroll*: the scrollport it follows, and what the pill says. */
   scroll: ColumnAutoScroll
   children?: ReactNode
 }
 
-export function Column({ place, name, controls, scroll, children }: ColumnProps) {
+export function Column({ place, name, controls, action, scroll, children }: ColumnProps) {
   // `min-h-0` for the same reason as `min-w-0`: a grid item's automatic minimum size is its
   // content, so without it a column would overflow the track the grid constrained it to and
   // hand the overflow back to the page.
   return (
     <section
       className={cn(
-        "relative flex min-h-0 min-w-0 flex-col border-border",
-        place === "console" && "border-r bg-sunken",
-        place === "activity" && "border-r",
+        "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-outline",
+        place === "console" && "bg-sunken",
+        place === "activity" && "bg-background",
         place === "detail" && "bg-raised",
       )}
       role="region"
       aria-label={name}
       data-column={place}
     >
-      <header className="flex min-h-7.5 flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border px-3 py-1">
+      <header
+        className={cn(
+          "flex min-h-7.5 flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border px-3 py-1",
+          action !== undefined && "@container",
+        )}
+      >
         <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{name}</h2>
-        {controls}
+        {action === undefined ? (
+          controls
+        ) : (
+          <>
+            {/* One row — name, controls, action — once the heading is wide enough for the
+                Console's name, chips and collapse button side by side (27rem). Narrower, the
+                action stays on the name's row and the controls take a row of their own, so
+                the chips keep the full width rather than wrapping beside the button. */}
+            <div className="order-3 flex min-w-0 basis-full @min-[27rem]:order-2 @min-[27rem]:ml-auto @min-[27rem]:basis-auto">
+              {controls}
+            </div>
+            <div className="order-2 flex @min-[27rem]:order-3">{action}</div>
+          </>
+        )}
       </header>
       {/* The scrollport is also what the sticky headings inside the column stick against; without
           one of its own they would stick to the window's. The gutter is reserved whether or not
