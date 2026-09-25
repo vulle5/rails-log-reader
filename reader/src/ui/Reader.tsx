@@ -272,8 +272,9 @@ export function Reader({
       />
       {/* Above the three columns rather than in any one of them, because neither belongs to
           one: a term lights every column at once, and a theme paints them. Present from the
-          first paint, so it never arrives and pushes the columns down. */}
-      <header className="flex flex-none items-center justify-between gap-3 border-b border-border bg-sunken px-3 py-1">
+          first paint, so it never arrives and pushes the columns down. It sits on the backdrop
+          the columns float on. */}
+      <header className="flex flex-none items-center justify-between gap-3 bg-sunken px-3 py-1">
         <span className="truncate text-sm font-semibold text-muted">{appName ?? "Rails log reader"}</span>
         {/* Never shrunk, so it is the app name alone that gives ground when the bar is narrow. */}
         <div className="flex shrink-0 items-center gap-3">
@@ -302,18 +303,20 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The width the columns share. A window too narrow for the grid's `minWidth`
-              scrolls the grid sideways in here rather than drawing a column under its minimum. */}
-          <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden" ref={viewport}>
-            {/* The outer two tracks are the widths the Column dividers set, or the Collapsed
-                Console's strip in place of the Console's, so a column that fills
+          {/* The width the columns and their gaps share, and the backdrop the columns float
+              on. A window too narrow for the grid's `minWidth` scrolls the grid sideways in here
+              rather than drawing a column under its minimum. */}
+          <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden bg-sunken" ref={viewport}>
+            {/* The outer two column tracks are the widths the Column dividers set, or the
+                Collapsed Console's strip in place of the Console's, so a column that fills
                 scrolls inside its own track and never widens, narrows or displaces its neighbours;
-                the Activity table takes the rest. The row's minimum is pinned to 0 (`grid-rows-1`) because an `auto`
-                row grows to the tallest column and never shrinks to fit, which would hand the
-                scroll to the window instead of to each column. Relative, for Hover grouping's
-                overlay. */}
+                the Activity table takes the rest. Between each two is a divider's track, and
+                `p-1` is the gap around all three — the `GAP`s the widths are fitted around. The
+                row's minimum is pinned to 0 (`grid-rows-1`) because an `auto` row grows to the
+                tallest column and never shrinks to fit, which would hand the scroll to the window
+                instead of to each column. Relative, for Hover grouping's overlay. */}
             <div
-              className="relative grid h-full grid-rows-1 overflow-hidden"
+              className="relative grid h-full grid-rows-1 overflow-hidden p-1"
               style={{ gridTemplateColumns: widths.template, minWidth: `${widths.minWidth}px` }}
               ref={reader}
             >

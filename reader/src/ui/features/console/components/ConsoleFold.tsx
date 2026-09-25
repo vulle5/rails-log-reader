@@ -55,7 +55,12 @@ export function CollapsedConsole({ unseen, onExpand }: { unseen: number; onExpan
   const label = unseen === 0 ? "Expand Console" : `Expand Console, ${unseen} unseen ${unseen === 1 ? "line" : "lines"}`
 
   return (
-    <section className="min-h-0 min-w-0 border-r border-border bg-sunken" role="region" aria-label="Console" data-column="console">
+    <section
+      className="min-h-0 min-w-0 overflow-hidden rounded-md border border-border bg-sunken"
+      role="region"
+      aria-label="Console"
+      data-column="console"
+    >
       <button
         type="button"
         className="flex size-full cursor-pointer flex-col items-center gap-2 py-2 text-muted hover:bg-selected hover:text-foreground"

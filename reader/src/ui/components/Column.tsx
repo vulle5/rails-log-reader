@@ -4,7 +4,9 @@ import type { ColumnAutoScroll } from "../hooks/auto-scroll"
 import { cn } from "../lib/cn"
 
 /**
- * One of the Reader's three columns: a heading, and a body that is the column's scrollport.
+ * One of the Reader's three columns: a heading, and a body that is the column's scrollport. An
+ * outlined panel, floating on the backdrop behind the columns: the Console in the backdrop's
+ * own fill, the other two lighter.
  *
  * `data-column` says which column an element is, and `data-scrollport` marks its body: what
  * *Hover grouping* and its jump find a column and its scrollport by.
@@ -42,9 +44,9 @@ export function Column({ place, name, controls, action, scroll, children }: Colu
   return (
     <section
       className={cn(
-        "relative flex min-h-0 min-w-0 flex-col border-border",
-        place === "console" && "border-r bg-sunken",
-        place === "activity" && "border-r",
+        "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-border",
+        place === "console" && "bg-sunken",
+        place === "activity" && "bg-background",
         place === "detail" && "bg-raised",
       )}
       role="region"

@@ -1,6 +1,6 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, test } from "bun:test"
 import { act, screen } from "@testing-library/react"
-import type { UserEvent } from "@testing-library/user-event"
+import userEvent, { type UserEvent } from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
 import { collapseConsole, column, consoleCollapsed, expandConsole, lineSaying, openTheReader } from "./reader.harness"
@@ -12,9 +12,12 @@ import { collapseConsole, column, consoleCollapsed, expandConsole, lineSaying, o
  * happy-dom does no layout, so the one input the dividers read — the Reader's available width —
  * is supplied: every element is `available` pixels wide, and a window resize is that number
  * changing and a `resize` dispatched. Faking the input, not the answer.
+ *
+ * Every width here is the columns' 1600px, or whatever the test narrows them to, plus the 16px
+ * of the four 4px gaps around and between them.
  */
 
-let available = 1600
+let available = 1616
 
 const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
 
@@ -27,7 +30,7 @@ afterAll(() => {
 })
 
 beforeEach(() => {
-  available = 1600
+  available = 1616
 })
 
 afterEach(() => {
@@ -90,7 +93,7 @@ describe("the Column dividers", () => {
   test("keep the default Detail column at 40% of whatever width the window has", () => {
     openTheReader()
 
-    resizeTo(2000)
+    resizeTo(2016)
 
     expect(drawn("Detail column")).toBe(800)
     expect(drawn("Console")).toBe(360)
@@ -150,7 +153,7 @@ describe("dragging a Column divider", () => {
     const { user } = openTheReader()
     await drag(user, "Detail column", -60)
 
-    resizeTo(2000)
+    resizeTo(2016)
 
     expect(drawn("Detail column")).toBe(700)
   })
@@ -173,6 +176,72 @@ describe("the keyboard on a Column divider", () => {
     await press(user, "Detail column", "{ArrowRight>30/}")
 
     expect(drawn("Detail column")).toBe(380)
+  })
+})
+
+describe("a Column divider's light", () => {
+  // A clock the test moves, so the pointer rests as long as the test says — give or take the
+  // millisecond Testing Library's `act` moves a faked clock by each time it runs. `delay: null`,
+  // because user-event would otherwise wait on this clock between its events.
+  let user: UserEvent
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    user = userEvent.setup({ delay: null })
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  function wait(ms: number) {
+    act(() => jest.advanceTimersByTime(ms))
+  }
+
+  test("comes on once the pointer has rested on it for 300ms", async () => {
+    openTheReader()
+
+    await user.hover(divider("Console"))
+    wait(250)
+    expect(divider("Console")).not.toHaveAttribute("data-lit")
+
+    wait(50)
+    expect(divider("Console")).toHaveAttribute("data-lit")
+  })
+
+  test("never comes on for a pointer sweeping across it", async () => {
+    openTheReader()
+
+    await user.hover(divider("Detail column"))
+    wait(200)
+    await user.unhover(divider("Detail column"))
+    wait(300)
+
+    expect(divider("Detail column")).not.toHaveAttribute("data-lit")
+  })
+
+  test("goes off the moment the pointer leaves", async () => {
+    openTheReader()
+    await user.hover(divider("Console"))
+    wait(300)
+
+    await user.unhover(divider("Console"))
+
+    expect(divider("Console")).not.toHaveAttribute("data-lit")
+  })
+
+  test("comes on at once for a drag, and stays on until it ends", async () => {
+    openTheReader()
+    const target = divider("Console")
+
+    await user.pointer({ keys: "[MouseLeft>]", target, coords: { clientX: 1000 } })
+    expect(target).toHaveAttribute("data-lit")
+
+    await user.pointer({ target, coords: { clientX: 1040 } })
+    expect(target).toHaveAttribute("data-lit")
+
+    await user.pointer({ keys: "[/MouseLeft]", target, coords: { clientX: 1040 } })
+    expect(target).not.toHaveAttribute("data-lit")
   })
 })
 
@@ -206,7 +275,7 @@ describe("resetting a Column divider", () => {
     await drag(user, "Detail column", -80)
     await press(user, "Detail column", "{Enter}")
 
-    resizeTo(2000)
+    resizeTo(2016)
 
     expect(drawn("Detail column")).toBe(800)
   })
@@ -234,7 +303,7 @@ describe("column widths across a reload", () => {
     unmount()
 
     openTheReader()
-    resizeTo(2000)
+    resizeTo(2016)
 
     expect(drawn("Console")).toBe(360)
     expect(drawn("Detail column")).toBe(800)
@@ -247,11 +316,11 @@ describe("a window too narrow for the requested widths", () => {
     await drag(user, "Console", 40)
     await drag(user, "Detail column", -60)
 
-    resizeTo(1400)
+    resizeTo(1416)
     expect(drawn("Console")).toBe(340)
     expect(drawn("Detail column")).toBe(700)
 
-    resizeTo(1300)
+    resizeTo(1316)
     expect(drawn("Console")).toBe(240)
     expect(drawn("Detail column")).toBe(700)
     expect(consoleCollapsed()).toBe(false)
@@ -261,7 +330,7 @@ describe("a window too narrow for the requested widths", () => {
     const { user } = openTheReader()
     await drag(user, "Detail column", -60)
 
-    resizeTo(1299)
+    resizeTo(1315)
 
     expect(consoleCollapsed()).toBe(true)
     expect(drawn("Console")).toBe(32)
@@ -272,22 +341,22 @@ describe("a window too narrow for the requested widths", () => {
     const { user } = openTheReader()
     await drag(user, "Detail column", -60)
 
-    resizeTo(1000)
+    resizeTo(1016)
     expect(drawn("Detail column")).toBe(608)
 
-    resizeTo(772)
+    resizeTo(788)
     expect(drawn("Detail column")).toBe(380)
   })
 
   test("folds a Console beside a default Detail column once the Console is at its minimum", () => {
     openTheReader()
 
-    resizeTo(1000)
+    resizeTo(1016)
     expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(240)
     expect(drawn("Detail column")).toBe(400)
 
-    resizeTo(999)
+    resizeTo(1015)
     expect(consoleCollapsed()).toBe(true)
     expect(drawn("Detail column")).toBe(400)
   })
@@ -295,7 +364,7 @@ describe("a window too narrow for the requested widths", () => {
   test("folds the Console once it cannot hold all three minimums", () => {
     openTheReader()
 
-    resizeTo(979)
+    resizeTo(995)
 
     expect(consoleCollapsed()).toBe(true)
     expect(drawn("Console")).toBe(32)
@@ -303,9 +372,9 @@ describe("a window too narrow for the requested widths", () => {
 
   test("reopens a Console it folded as soon as there is room", () => {
     openTheReader()
-    resizeTo(900)
+    resizeTo(916)
 
-    resizeTo(1000)
+    resizeTo(1016)
 
     expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(240)
@@ -313,10 +382,10 @@ describe("a window too narrow for the requested widths", () => {
 
   test("does not remember the fold it made across a reload", () => {
     const { unmount } = openTheReader()
-    resizeTo(900)
+    resizeTo(916)
     unmount()
 
-    available = 1600
+    available = 1616
     openTheReader()
 
     expect(consoleCollapsed()).toBe(false)
@@ -325,16 +394,16 @@ describe("a window too narrow for the requested widths", () => {
   test("leaves a fold the developer made folded when it widens again", async () => {
     const { user } = openTheReader()
     await collapseConsole(user)
-    resizeTo(900)
+    resizeTo(916)
 
-    resizeTo(1600)
+    resizeTo(1616)
 
     expect(consoleCollapsed()).toBe(true)
   })
 
   test("opens a Console it folded when asked, at its minimum", async () => {
     const { user } = openTheReader()
-    resizeTo(900)
+    resizeTo(916)
 
     await expandConsole(user)
 
@@ -345,11 +414,11 @@ describe("a window too narrow for the requested widths", () => {
 
   test("folds the Console again when narrowed anew after it was opened", async () => {
     const { user } = openTheReader()
-    resizeTo(900)
+    resizeTo(916)
     await expandConsole(user)
-    resizeTo(1600)
+    resizeTo(1616)
 
-    resizeTo(900)
+    resizeTo(916)
 
     expect(consoleCollapsed()).toBe(true)
   })
@@ -357,7 +426,7 @@ describe("a window too narrow for the requested widths", () => {
   test("keeps the Console folded to its strip and the Detail column at its minimum, however narrow", () => {
     openTheReader()
 
-    resizeTo(500)
+    resizeTo(516)
 
     expect(drawn("Console")).toBe(32)
     expect(drawn("Detail column")).toBe(380)
@@ -368,8 +437,8 @@ describe("a window too narrow for the requested widths", () => {
     await drag(user, "Console", 40)
     await drag(user, "Detail column", -60)
 
-    resizeTo(700)
-    resizeTo(1600)
+    resizeTo(716)
+    resizeTo(1616)
 
     expect(consoleCollapsed()).toBe(false)
     expect(drawn("Console")).toBe(400)

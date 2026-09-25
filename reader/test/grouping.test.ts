@@ -90,8 +90,16 @@ describe("the path the rule is drawn along", () => {
     const rule = ruleBetween(READER, box(200, 220, 100, 422), box(300, 324, 440, 1100), PORT)
 
     // Out of the line, down the gutter, into the row: the vertical travel happens in the
-    // strip between the two columns and nowhere else.
+    // Console's gutter and nowhere else.
     expect(rulePath(rule)).toBe("M 322 170 H 331 V 272 H 340")
+  })
+
+  test("turns down the Console's gutter however far past it the row starts", () => {
+    // The row 30px further on, across the gap between the columns: the vertical leg stays in
+    // the gutter, and only the leg into the row grows.
+    const rule = ruleBetween(READER, box(200, 220, 100, 422), box(300, 324, 470, 1100), box(100, 700, 470, 1100))
+
+    expect(rulePath(rule)).toBe("M 322 170 H 331 V 272 H 370")
   })
 
   test("draws a stub as the one horizontal segment it is", () => {

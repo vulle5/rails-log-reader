@@ -32,6 +32,15 @@ export const MINIMUM = { console: 240, activity: 360, detail: 380 } as const
 /** The width of the *Collapsed Console*'s strip. */
 export const COLLAPSED = 32
 
+/**
+ * The gap around and between the columns, each *Column divider* being one of the two between.
+ * The grid's own padding — `p-1` — is the other two, so the columns share `4 × GAP` less than
+ * the viewport has.
+ */
+export const GAP = 4
+/** The width all four gaps take together. */
+const GAPS_WIDTH = 4 * GAP
+
 const CONSOLE_DEFAULT = 360
 const DETAIL_DEFAULT_SHARE = 0.4
 
@@ -62,15 +71,22 @@ export type DrawnConsole = DrawnColumn & {
 export type ColumnWidths = {
   console: DrawnConsole
   detail: DrawnColumn
-  /** The grid's `grid-template-columns`: the Console's track, the Activity table's, the Detail column's. */
+  /**
+   * The grid's `grid-template-columns`: the Console's track, a divider's, the Activity table's,
+   * a divider's, the Detail column's.
+   */
   template: string
-  /** The narrowest the grid is drawn: every column at its drawn width, the Activity table at its minimum. */
+  /**
+   * The narrowest the grid is drawn: every column at its drawn width, the Activity table at its
+   * minimum, and the gaps.
+   */
   minWidth: number
 }
 
-/** `viewport` is the element whose width the three columns share. */
+/** `viewport` is the element whose width the three columns and their gaps share. */
 export function useColumnWidths(viewport: RefObject<HTMLElement | null>): ColumnWidths {
-  const [available, setAvailable] = useState(() => window.innerWidth)
+  // The width the columns share, the gaps taken off.
+  const [available, setAvailable] = useState(() => window.innerWidth - GAPS_WIDTH)
   const [requests, setRequests] = useState<Requests>(() => ({ console: recall("console"), detail: recall("detail") }))
   const [folded, setFolded] = useState(recallCollapsed)
   // Unfolded by the developer while the window was folding it.
@@ -79,7 +95,7 @@ export function useColumnWidths(viewport: RefObject<HTMLElement | null>): Column
   useLayoutEffect(() => {
     // `innerWidth` while there is no grid to measure — the refusal screen — or it measures as
     // nothing, the way it does in a DOM with no layout.
-    const measure = () => setAvailable(viewport.current?.clientWidth || window.innerWidth)
+    const measure = () => setAvailable((viewport.current?.clientWidth || window.innerWidth) - GAPS_WIDTH)
     measure()
 
     window.addEventListener("resize", measure)
@@ -122,8 +138,8 @@ export function useColumnWidths(viewport: RefObject<HTMLElement | null>): Column
   return {
     console: { ...console, collapsed, collapse: () => fold(true), expand: () => fold(false) },
     detail,
-    template: `${consoleTrack}px minmax(0,1fr) ${detail.width}px`,
-    minWidth: consoleTrack + MINIMUM.activity + detail.width,
+    template: `${consoleTrack}px ${GAP}px minmax(0,1fr) ${GAP}px ${detail.width}px`,
+    minWidth: consoleTrack + MINIMUM.activity + detail.width + GAPS_WIDTH,
   }
 }
 
