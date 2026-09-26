@@ -27,6 +27,7 @@ import type { RepairState } from "./features/setup-status/lib/initializer-repair
 import type { EarlierState } from "./hooks/live"
 import { LoadEarlier } from "./features/activity-table/components/LoadEarlier"
 import { RowKindTabs, rowsOfKind, showsRow, type RowKindFilter } from "./features/activity-table/components/RowKindTabs"
+import { TableColumnSelect, useHiddenTableColumns } from "./features/activity-table/components/TableColumnSelect"
 import { Setting, Settings, type SettingsHandle } from "./features/settings/components/Settings"
 import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
@@ -127,6 +128,7 @@ export function Reader({
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
   const { filter: detailFilter, toggleSchema } = useDetailFilter()
+  const tableColumns = useHiddenTableColumns()
 
   // The search is here for the reason the filters are, and is the one thing here that is not
   // one: it reaches every column through context and changes what they *mark*, never what
@@ -350,7 +352,12 @@ export function Reader({
                 place="activity"
                 name="Activity table"
                 scroll={activityScroll}
-                controls={<RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />}
+                controls={
+                  <div className="flex items-center gap-2">
+                    <RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />
+                    <TableColumnSelect hidden={tableColumns.hidden} onToggle={tableColumns.toggle} />
+                  </div>
+                }
               >
                 <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
                 <ActivityTable
@@ -359,6 +366,7 @@ export function Reader({
                   pinned={pinned?.owner ?? null}
                   lit={hovered?.owner ?? null}
                   onSelect={selectRow}
+                  hidden={tableColumns.hidden}
                 />
                 {/* Under the headings rather than in place of the table, so the first row of the
                     session replaces this and moves nothing else. Empty means the Reader holds no
