@@ -70,6 +70,25 @@ describe("the Activity table", () => {
     ])
   })
 
+  test("describes what each column measures on its header", () => {
+    const run = aRun("srv-1")
+    theActivityTable(run.start("req-1"), run.finish("req-1"))
+
+    const header = (name: string) => within(column("Activity table")).getByRole("columnheader", { name })
+    expect(header("Started")).toHaveAccessibleDescription("When it started")
+    expect(header("Status")).toHaveAccessibleDescription("The HTTP status of the response")
+    expect(header("Method")).toHaveAccessibleDescription("The HTTP method")
+    expect(header("Path")).toHaveAccessibleDescription("The URL that was requested")
+    expect(header("Controller#action")).toHaveAccessibleDescription("The controller action that handled it")
+    expect(header("SQL")).toHaveAccessibleDescription("How many database queries it ran")
+    expect(header("Log")).toHaveAccessibleDescription("How many log lines it wrote")
+    expect(header("DB")).toHaveAccessibleDescription("Time spent in the database")
+    expect(header("View")).toHaveAccessibleDescription("Time spent rendering views")
+    expect(header("Total")).toHaveAccessibleDescription(
+      `The whole request, middleware included, so a bit longer than Rails' "Completed in" time`,
+    )
+  })
+
   test("shows one row per request, folded from its three events and its children", () => {
     const run = aRun("srv-1")
     theActivityTable(

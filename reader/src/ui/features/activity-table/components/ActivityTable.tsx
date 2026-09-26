@@ -56,14 +56,16 @@ type Request = Extract<ActivityRow, { kind: "request" }>
 type Run = Extract<ActivityRow, { kind: "run" }>
 
 /**
- * A *Table column*: its header, and what it renders for each row kind. A Run row's cell is
- * `"description"` where the column is one the run's description spans instead — the columns a
- * request fills with its method, path and outcome, which a Run has none of. Those columns sit
- * next to each other, because the description is one cell spanning all of them.
+ * A *Table column*: its header, what it measures, and what it renders for each row kind. A Run
+ * row's cell is `"description"` where the column is one the run's description spans instead —
+ * the columns a request fills with its method, path and outcome, which a Run has none of. Those
+ * columns sit next to each other, because the description is one cell spanning all of them.
  */
 type TableColumn = {
   key: string
   heading: string
+  /** What the column measures, in one plain-language line: the header's tooltip. */
+  description: string
   request: (row: Request) => ReactNode
   run: ((row: Run) => ReactNode) | "description"
 }
@@ -72,6 +74,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "started",
     heading: "Started",
+    description: "When it started",
     request: (row) => (
       // A *Partial request* has no start to show, which is exactly where it says so: the
       // column that would have said when this began says instead that nobody saw it begin.
@@ -96,6 +99,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "status",
     heading: "Status",
+    description: "The HTTP status of the response",
     request: (row) => (
       <Cell>
         <Status row={row} />
@@ -106,6 +110,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "method",
     heading: "Method",
+    description: "The HTTP method",
     request: (row) => (
       <Cell className="font-bold">
         {/* Important, because the method's own colour would otherwise outrank the fade. */}
@@ -119,6 +124,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "path",
     heading: "Path",
+    description: "The URL that was requested",
     request: (row) => (
       // The path and the action are capped in characters, the unit they are read in.
       <Cell className="max-w-[40ch] group-data-[state=interrupted]:text-faint" title={row.path ?? undefined}>
@@ -130,6 +136,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "action",
     heading: "Controller#action",
+    description: "The controller action that handled it",
     request: (row) => (
       <Cell className="max-w-[28ch] text-muted group-data-[state=interrupted]:text-faint">
         <Highlight text={controllerAction(row)} />
@@ -140,12 +147,14 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "sql",
     heading: "SQL",
+    description: "How many database queries it ran, including cached ones",
     request: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
     run: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
   },
   {
     key: "log",
     heading: "Log",
+    description: "How many log lines it wrote",
     request: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
     run: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
   },
@@ -154,18 +163,21 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "db",
     heading: "DB",
+    description: "Time spent in the database",
     request: (row) => <NumberCell>{ms(row.dbRuntimeMs)}</NumberCell>,
     run: () => <NumberCell />,
   },
   {
     key: "view",
     heading: "View",
+    description: "Time spent rendering views",
     request: (row) => <NumberCell>{ms(row.viewRuntimeMs)}</NumberCell>,
     run: () => <NumberCell />,
   },
   {
     key: "total",
     heading: "Total",
+    description: `The whole request, middleware included, so a bit longer than Rails' "Completed in" time`,
     // What the request said it took, or — where it said nothing — what the Reader can prove
     // it took. A finish that carried no `duration_ms` at all, the Initializer having never
     // seen that request start, reads exactly as an in-flight row does, as the distance
@@ -212,6 +224,7 @@ export function ActivityTable({ rows, selected, pinned, lit, onSelect }: Activit
                 "sticky top-0 z-1 border-b border-border bg-background px-2 py-1 text-left text-2xs font-semibold tracking-wider whitespace-nowrap text-faint uppercase",
                 column.key === "path" && "w-full",
               )}
+              title={column.description}
             >
               {column.heading}
             </th>
