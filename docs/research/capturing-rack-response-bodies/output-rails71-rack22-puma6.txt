@@ -1,0 +1,172 @@
+{"rails" => "7.1.5.2", "rack" => "2.2.20", "puma" => "6.6.1", "ruby" => "3.4.10"}
+== json_small  GET /probe/json_small -> 200 (client 200, 62 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=62 B in 1 chunks
+  seen bytes: "{\"id\":1,\"title\":\"Hello\",\"tags\":[\"a\",\"b\"," (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "application/json; charset=utf-8", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "application/json; charset=utf-8", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "f808e3d1-f78e-46a8-8410-850673822e1b", "x-runtime" => "0.005591"}
+  headers client got: {"content-type" => "application/json; charset=utf-8", "content-length" => "62", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "x-request-id" => "f808e3d1-f78e-46a8-8410-850673822e1b", "x-runtime" => "0.005591"}
+  timeline (ms): middleware call @35.68 | middleware return @40.31 | to_ary @41.25 | body close @41.31 | request.action_dispatch finish @41.34 | client got last byte @41.8
+  (no rack.response_finished in env)
+== json_large  GET /probe/json_large -> 200 (client 200, 713781 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=713781 B in 1 chunks
+  seen bytes: "[{\"id\":0,\"title\":\"Post 0\",\"body\":\"xxxxxx" (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "application/json; charset=utf-8", "etag" => "W/\"19c43eb7bc1fac047727a3cba44fc917\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "application/json; charset=utf-8", "etag" => "W/\"19c43eb7bc1fac047727a3cba44fc917\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "5221791e-e032-4bf3-a5bb-2c52e8ab5374", "x-runtime" => "0.019142"}
+  headers client got: {"content-type" => "application/json; charset=utf-8", "content-length" => "713781", "etag" => "W/\"19c43eb7bc1fac047727a3cba44fc917\"", "x-request-id" => "5221791e-e032-4bf3-a5bb-2c52e8ab5374", "x-runtime" => "0.019142"}
+  timeline (ms): middleware call @42.93 | middleware return @61.98 | to_ary @62.12 | body close @63.41 | request.action_dispatch finish @63.44 | client got last byte @64.37
+  (no rack.response_finished in env)
+== xml  GET /probe/xml -> 200 (client 200, 188 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=188 B in 1 chunks
+  seen bytes: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<" (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "application/xml; charset=utf-8", "etag" => "W/\"93ce1e614f88fde510c7c9184c9bcb26\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "application/xml; charset=utf-8", "etag" => "W/\"93ce1e614f88fde510c7c9184c9bcb26\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "7da2dfe6-0ab5-4f8b-8d73-b0aa2d26deef", "x-runtime" => "0.004413"}
+  headers client got: {"content-type" => "application/xml; charset=utf-8", "content-length" => "188", "etag" => "W/\"93ce1e614f88fde510c7c9184c9bcb26\"", "x-request-id" => "7da2dfe6-0ab5-4f8b-8d73-b0aa2d26deef", "x-runtime" => "0.004413"}
+  timeline (ms): middleware call @65.3 | middleware return @69.65 | to_ary @69.72 | body close @69.75 | request.action_dispatch finish @69.77 | client got last byte @70.1
+  (no rack.response_finished in env)
+== html  GET /probe/html -> 200 (client 200, 14 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=14 B in 1 chunks
+  seen bytes: "<h1>Hello</h1>" (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "text/html; charset=utf-8", "etag" => "W/\"e2c6c0ea7c7900c31f953e48d30d5e83\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "text/html; charset=utf-8", "etag" => "W/\"e2c6c0ea7c7900c31f953e48d30d5e83\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "6de1caa2-4897-49f6-aa23-0dd30383b8c0", "x-runtime" => "0.002549"}
+  headers client got: {"content-type" => "text/html; charset=utf-8", "content-length" => "14", "etag" => "W/\"e2c6c0ea7c7900c31f953e48d30d5e83\"", "x-request-id" => "6de1caa2-4897-49f6-aa23-0dd30383b8c0", "x-runtime" => "0.002549"}
+  timeline (ms): middleware call @71.1 | middleware return @73.6 | to_ary @73.67 | body close @73.7 | request.action_dispatch finish @73.71 | client got last byte @74.0
+  (no rack.response_finished in env)
+== send_data_pdf  GET /probe/send_data_pdf -> 200 (client 200, 2064 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=2064 B in 1 chunks
+  seen bytes: "%PDF-1.4\n\xE2\xE3\xCF\xD3\xE2\xE3\xCF\xD3\xE2\xE3\xCF\xD3\xE2\xE3\xCF\xD3\xE2\xE3\xCF\xD3\xE2\xE3\xCF\xD3\xE2\xE3\xCF\xD3\xE2\xE3\xCF" (first chunk "ASCII-8BIT", valid UTF-8: false)
+  headers at return: {"content-type" => "application/pdf", "content-disposition" => "inline; filename=\"a.pdf\"; filename*=UTF-8''a.pdf", "content-transfer-encoding" => "binary", "etag" => "W/\"9af936aa934cc38184cf9a469b875838\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "application/pdf", "content-disposition" => "inline; filename=\"a.pdf\"; filename*=UTF-8''a.pdf", "content-transfer-encoding" => "binary", "etag" => "W/\"9af936aa934cc38184cf9a469b875838\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "cb74a99d-07f5-4960-bd53-38a6a55a43d8", "x-runtime" => "0.002147"}
+  headers client got: {"content-type" => "application/pdf", "content-length" => "2064", "etag" => "W/\"9af936aa934cc38184cf9a469b875838\"", "x-request-id" => "cb74a99d-07f5-4960-bd53-38a6a55a43d8", "x-runtime" => "0.002147"}
+  timeline (ms): middleware call @74.77 | middleware return @76.87 | to_ary @76.94 | body close @76.97 | request.action_dispatch finish @76.99 | client got last byte @77.31
+  (no rack.response_finished in env)
+== send_file_png  GET /probe/send_file_png -> 200 (client 200, 2056 B)
+  body at return: Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > ActionDispatch::Response::RackBody[each,to_path,close] > ActionDispatch::Response::FileBody[each,to_path]
+  served via: ["to_path"]  seen=0 B in 0 chunks to_path={"path" => "/tmp/probe20260926-44308-d0wyqo/pixel.png", "size" => 2056}
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "image/png", "content-disposition" => "inline; filename=\"pixel.png\"; filename*=UTF-8''pixel.png", "content-transfer-encoding" => "binary", "cache-control" => "no-cache"}
+  headers at close:  {"content-type" => "image/png", "content-disposition" => "inline; filename=\"pixel.png\"; filename*=UTF-8''pixel.png", "content-transfer-encoding" => "binary", "cache-control" => "no-cache", "x-request-id" => "33acb45e-24a6-4133-a178-66450902c37d", "x-runtime" => "0.000638"}
+  headers client got: {"content-type" => "image/png", "content-length" => "2056", "x-request-id" => "33acb45e-24a6-4133-a178-66450902c37d", "x-runtime" => "0.000638"}
+  timeline (ms): middleware call @77.99 | middleware return @78.58 | body close @78.7 | request.action_dispatch finish @78.71 | client got last byte @78.92
+  (no rack.response_finished in env)
+== rack_files  GET /probe/rack_files -> 200 (client 200, 2056 B)
+  body at return: Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > ActionDispatch::Response::RackBody[each,to_path,close] > Rack::Files::Iterator[each,to_path,close]
+  served via: ["to_path", "to_path"]  seen=0 B in 0 chunks to_path={"path" => "/tmp/probe20260926-44308-d0wyqo/pixel.png", "size" => 2056}
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "image/png", "content-length" => "2056", "cache-control" => "max-age=0, private, must-revalidate", "last-modified" => "Sat, 26 Sep 2026 11:48:56 GMT"}
+  headers at close:  {"content-type" => "image/png", "content-length" => "2056", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "7699b5ba-af60-4451-8a02-74da49e1277e", "x-runtime" => "0.000581", "last-modified" => "Sat, 26 Sep 2026 11:48:56 GMT"}
+  headers client got: {"content-type" => "image/png", "content-length" => "2056", "x-request-id" => "7699b5ba-af60-4451-8a02-74da49e1277e", "x-runtime" => "0.000581"}
+  timeline (ms): middleware call @79.59 | middleware return @80.12 | body close @80.24 | request.action_dispatch finish @80.25 | client got last byte @80.57
+  (no rack.response_finished in env)
+== enumerator  GET /probe/enumerator -> 200 (client 200, 21 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=21 B in 3 chunks
+  seen bytes: "line 0\nline 1\nline 2\n" (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "text/plain; charset=utf-8", "etag" => "W/\"706694f8398f1cc3450dfecbf6d81321\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "text/plain; charset=utf-8", "etag" => "W/\"706694f8398f1cc3450dfecbf6d81321\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "c02eb7da-f944-4b66-9016-a8a113a79be3", "x-runtime" => "0.000497"}
+  headers client got: {"content-type" => "text/plain; charset=utf-8", "content-length" => "21", "etag" => "W/\"706694f8398f1cc3450dfecbf6d81321\"", "x-request-id" => "c02eb7da-f944-4b66-9016-a8a113a79be3", "x-runtime" => "0.000497"}
+  timeline (ms): middleware call @81.27 | middleware return @81.73 | to_ary @81.79 | body close @81.85 | request.action_dispatch finish @81.86 | client got last byte @82.1
+  (no rack.response_finished in env)
+== redirect  GET /probe/redirect -> 302 (client 302, 0 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > ActionDispatch::Response::RackBody[each,to_ary,close] > ActionDispatch::Response::Buffer[each,to_ary,close]
+  served via: ["to_ary"]  seen=0 B in 1 chunks
+  seen bytes: "" (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "text/html; charset=utf-8", "cache-control" => "no-cache"}
+  headers at close:  {"content-type" => "text/html; charset=utf-8", "cache-control" => "no-cache", "x-request-id" => "eb0d6970-5705-4a49-a5bc-3080bdd49060", "x-runtime" => "0.000645"}
+  headers client got: {"content-type" => "text/html; charset=utf-8", "content-length" => "0", "x-request-id" => "eb0d6970-5705-4a49-a5bc-3080bdd49060", "x-runtime" => "0.000645"}
+  timeline (ms): middleware call @82.93 | middleware return @83.52 | to_ary @83.6 | body close @83.63 | request.action_dispatch finish @83.64 | client got last byte @83.84
+  (no rack.response_finished in env)
+== sse  GET /probe/sse -> 200 (client 200, 45 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=45 B in 5 chunks
+  seen bytes: "data: 0\n\ndata: 1\n\ndata: 2\n\ndata: 3\n\ndata" (first chunk "UTF-8", valid UTF-8: true)
+  headers at return: {"content-type" => "text/event-stream", "etag" => "W/\"7ad66f1c027f5bd7955435f5e9c94d0f\"", "cache-control" => "no-cache"}
+  headers at close:  {"content-type" => "text/event-stream", "etag" => "W/\"7ad66f1c027f5bd7955435f5e9c94d0f\"", "cache-control" => "no-cache", "x-request-id" => "f9c359bb-3926-416e-9d47-397290e31388", "x-runtime" => "0.104115"}
+  headers client got: {"content-type" => "text/event-stream", "content-length" => "45", "etag" => "W/\"7ad66f1c027f5bd7955435f5e9c94d0f\"", "x-request-id" => "f9c359bb-3926-416e-9d47-397290e31388", "x-runtime" => "0.104115"}
+  timeline (ms): middleware call @84.36 | middleware return @188.42 | to_ary @188.53 | body close @188.58 | request.action_dispatch finish @188.62 | client got last byte @188.98
+  (no rack.response_finished in env)
+== send_stream_blob  GET /probe/send_stream_blob -> 200 (client 200, 2056 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=2056 B in 5 chunks
+  seen bytes: "\x89PNG\r\n\x1A\n\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" (first chunk "ASCII-8BIT", valid UTF-8: false)
+  headers at return: {"content-type" => "image/png", "content-disposition" => "inline; filename=\"pixel.png\"; filename*=UTF-8''pixel.png", "etag" => "W/\"0ab65e8a450a0ca7f2fc7dbacaddb2e9\"", "cache-control" => "no-cache"}
+  headers at close:  {"content-type" => "image/png", "content-disposition" => "inline; filename=\"pixel.png\"; filename*=UTF-8''pixel.png", "etag" => "W/\"0ab65e8a450a0ca7f2fc7dbacaddb2e9\"", "cache-control" => "no-cache", "x-request-id" => "adaf97d3-1826-4950-9ba0-4b51251d0694", "x-runtime" => "0.001594"}
+  headers client got: {"content-type" => "image/png", "content-length" => "2056", "etag" => "W/\"0ab65e8a450a0ca7f2fc7dbacaddb2e9\"", "x-request-id" => "adaf97d3-1826-4950-9ba0-4b51251d0694", "x-runtime" => "0.001594"}
+  timeline (ms): middleware call @190.12 | middleware return @191.61 | to_ary @191.7 | body close @191.75 | request.action_dispatch finish @191.77 | client got last byte @192.05
+  (no rack.response_finished in env)
+== boom  GET /probe/boom -> 500 (client 500, 0 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["each"]  seen=0 B in 0 chunks
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "text/html; charset=UTF-8", "content-length" => "0"}
+  headers at close:  {"content-type" => "text/html; charset=UTF-8", "content-length" => "0", "x-request-id" => "d500938b-5f07-4ff2-9ce4-0309cbc891f1"}
+  headers client got: {"content-type" => "text/html; charset=UTF-8", "content-length" => "0", "x-request-id" => "d500938b-5f07-4ff2-9ce4-0309cbc891f1", "x-runtime" => "0.000830"}
+  timeline (ms): middleware call @192.95 | middleware return @193.74 | each start @193.81 | each end @193.81 | body close @193.82 | request.action_dispatch finish @193.83 | client got last byte @194.09
+  (no rack.response_finished in env)
+== missing_route  GET /probe/nope -> 404 (client 404, 0 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["each"]  seen=0 B in 0 chunks
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "text/html; charset=UTF-8", "content-length" => "0"}
+  headers at close:  {"content-type" => "text/html; charset=UTF-8", "content-length" => "0", "x-request-id" => "6497b5b7-acb0-4e3a-a17d-934072bce8a7"}
+  headers client got: {"content-type" => "text/html; charset=UTF-8", "content-length" => "0", "x-request-id" => "6497b5b7-acb0-4e3a-a17d-934072bce8a7", "x-runtime" => "0.000314"}
+  timeline (ms): middleware call @194.81 | middleware return @195.09 | each start @195.19 | each end @195.19 | body close @195.2 | request.action_dispatch finish @195.21 | client got last byte @195.51
+  (no rack.response_finished in env)
+== json_small_304  GET /probe/json_small -> 304 (client 304, 0 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=0 B in 0 chunks
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "7f4f5f64-c335-42cd-8fdd-1a314e42f48d", "x-runtime" => "0.000587"}
+  headers client got: {"content-length" => "0", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "x-request-id" => "7f4f5f64-c335-42cd-8fdd-1a314e42f48d", "x-runtime" => "0.000587"}
+  timeline (ms): middleware call @196.19 | middleware return @196.74 | to_ary @196.8 | body close @196.82 | request.action_dispatch finish @196.83 | client got last byte @197.08
+  (no rack.response_finished in env)
+== json_small_head  HEAD /probe/json_small -> 200 (client 200, 0 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=0 B in 0 chunks
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "application/json; charset=utf-8", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "application/json; charset=utf-8", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "8178f319-c717-452b-8a4b-0c7713c84dbc", "x-runtime" => "0.000508"}
+  headers client got: {"content-type" => "application/json; charset=utf-8", "content-length" => "0", "etag" => "W/\"5c94184f926fe04d3430a49c4a69e8b6\"", "x-request-id" => "8178f319-c717-452b-8a4b-0c7713c84dbc", "x-runtime" => "0.000508"}
+  timeline (ms): middleware call @197.76 | middleware return @198.23 | to_ary @198.28 | body close @198.3 | request.action_dispatch finish @198.31 | client got last byte @198.49
+  (no rack.response_finished in env)
+== rack_files_range  GET /probe/rack_files -> 206 (client 206, 100 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > ActionDispatch::Response::RackBody[each,to_ary,close] > ActionDispatch::Response::Buffer[each,to_ary,close]
+  served via: ["each"]  seen=100 B in 1 chunks
+  seen bytes: "\x89PNG\r\n\x1A\n\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00" (first chunk "ASCII-8BIT", valid UTF-8: false)
+  headers at return: {"content-type" => "image/png", "content-length" => "100", "cache-control" => "max-age=0, private, must-revalidate", "last-modified" => "Sat, 26 Sep 2026 11:48:56 GMT"}
+  headers at close:  {"content-type" => "image/png", "content-length" => "100", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "ddc21abb-0f07-446a-9a09-d72ffbdb48eb", "x-runtime" => "0.000478", "last-modified" => "Sat, 26 Sep 2026 11:48:56 GMT"}
+  headers client got: {"content-type" => "image/png", "content-length" => "100", "x-request-id" => "ddc21abb-0f07-446a-9a09-d72ffbdb48eb", "x-runtime" => "0.000478"}
+  timeline (ms): middleware call @199.21 | middleware return @199.64 | each start @199.72 | each end @199.75 | body close @199.76 | request.action_dispatch finish @199.77 | client got last byte @199.99
+  (no rack.response_finished in env)
+== json_large_deflater_inside  GET /probe/json_large -> 200 (client 200, 23586 B)
+  body at return: Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Rack::BodyProxy[each,to_ary,close] > Array[each,to_ary]
+  served via: ["to_ary"]  seen=23586 B in 3 chunks
+  seen bytes: "\x1F\x8B\b\x00(\xB1\xB7j\x00\x03\xCC\xFC1\x8E\xBD\xC1\x0Ff\xE7m\xC5\xF8\xC7\x13\xFC\x8Ad\x15\xC9Y\x85sA\x81\x04\t\xC2\x00\x02&" (first chunk "ASCII-8BIT", valid UTF-8: false)
+  headers at return: {"content-type" => "application/json; charset=utf-8", "content-encoding" => "gzip", "etag" => "W/\"bc937b5d3f3c86a118f5299b0987f323\"", "cache-control" => "max-age=0, private, must-revalidate"}
+  headers at close:  {"content-type" => "application/json; charset=utf-8", "content-encoding" => "gzip", "etag" => "W/\"bc937b5d3f3c86a118f5299b0987f323\"", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "04fb0116-4c91-49d8-ae89-d246494e81f2", "x-runtime" => "0.064151"}
+  headers client got: {"content-type" => "application/json; charset=utf-8", "content-length" => "23586", "content-encoding" => "gzip", "etag" => "W/\"bc937b5d3f3c86a118f5299b0987f323\"", "x-request-id" => "04fb0116-4c91-49d8-ae89-d246494e81f2", "x-runtime" => "0.064151"}
+  timeline (ms): middleware call @204.54 | middleware return @268.62 | to_ary @268.73 | body close @268.84 | request.action_dispatch finish @268.86 | client got last byte @269.39
+  (no rack.response_finished in env)
+== send_file_png_x_sendfile  GET /probe/send_file_png -> 200 (client 200, 0 B)
+  body at return: Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > ActionDispatch::Response::RackBody[each,to_path,close] > ActionDispatch::Response::FileBody[each,to_path]
+  served via: ["to_path"]  seen=0 B in 0 chunks to_path={"path" => "/tmp/probe20260926-44308-d0wyqo/pixel.png", "size" => 2056}
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "image/png", "content-disposition" => "inline; filename=\"pixel.png\"; filename*=UTF-8''pixel.png", "content-transfer-encoding" => "binary", "cache-control" => "no-cache"}
+  headers at close:  {"content-type" => "image/png", "content-length" => "0", "content-disposition" => "inline; filename=\"pixel.png\"; filename*=UTF-8''pixel.png", "content-transfer-encoding" => "binary", "cache-control" => "no-cache", "x-request-id" => "12402b87-ed74-4059-b73e-38b4338b7683", "x-runtime" => "0.001032", "x-sendfile" => "/tmp/probe20260926-44308-d0wyqo/pixel.png"}
+  headers client got: {"content-type" => "image/png", "content-length" => "0", "x-request-id" => "12402b87-ed74-4059-b73e-38b4338b7683", "x-runtime" => "0.001032", "x-sendfile" => "/tmp/probe20260926-44308-d0wyqo/pixel.png"}
+  timeline (ms): middleware call @273.13 | middleware return @274.09 | body close @274.24 | request.action_dispatch finish @274.27 | client got last byte @274.5
+  (no rack.response_finished in env)
+== rack_files_x_sendfile  GET /probe/rack_files -> 200 (client 200, 0 B)
+  body at return: Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > Rack::BodyProxy[each,to_path,close] > ActionDispatch::Response::RackBody[each,to_path,close] > Rack::Files::Iterator[each,to_path,close]
+  served via: ["to_path"]  seen=0 B in 0 chunks to_path={"path" => "/tmp/probe20260926-44308-d0wyqo/pixel.png", "size" => 2056}
+  seen bytes: "" (first chunk nil, valid UTF-8: true)
+  headers at return: {"content-type" => "image/png", "content-length" => "2056", "cache-control" => "max-age=0, private, must-revalidate", "last-modified" => "Sat, 26 Sep 2026 11:48:56 GMT"}
+  headers at close:  {"content-type" => "image/png", "content-length" => "0", "cache-control" => "max-age=0, private, must-revalidate", "x-request-id" => "51119bd3-022c-41d0-881e-efe372a8fc2e", "x-runtime" => "0.000583", "x-sendfile" => "/tmp/probe20260926-44308-d0wyqo/pixel.png", "last-modified" => "Sat, 26 Sep 2026 11:48:56 GMT"}
+  headers client got: {"content-type" => "image/png", "content-length" => "0", "x-request-id" => "51119bd3-022c-41d0-881e-efe372a8fc2e", "x-runtime" => "0.000583", "x-sendfile" => "/tmp/probe20260926-44308-d0wyqo/pixel.png"}
+  timeline (ms): middleware call @275.41 | middleware return @275.95 | body close @276.04 | request.action_dispatch finish @276.05 | client got last byte @276.31
+  (no rack.response_finished in env)

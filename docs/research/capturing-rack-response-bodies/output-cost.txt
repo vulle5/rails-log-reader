@@ -1,0 +1,16 @@
+Ruby 3.4.10, json 2.21.2
+
+A JSON body carried as one string field of an envelope
+records      body bytes     line bytes    ratio    generate ms   join+scan ms
+1                   174            242     1.39          0.000          0.000
+10                 1731           1943     1.12          0.001          0.000
+100               17481          19133     1.09          0.010          0.002
+350               61731          67383     1.09          0.050          0.001
+4000             713781         777833     1.09          0.387          0.034
+
+An XML body of 62134 B becomes 62862 B on a line (1.01x)
+
+Binary bodies
+    65536 B: base64     87384 B (1.33x) in   0.038 ms | File.binread   0.006 ms | first 64 KB  0.006 ms | File.size 0.0010 ms
+  1048576 B: base64   1398104 B (1.33x) in   0.605 ms | File.binread   0.078 ms | first 64 KB  0.004 ms | File.size 0.0010 ms
+ 10485760 B: base64  13981016 B (1.33x) in   6.870 ms | File.binread   4.613 ms | first 64 KB  0.007 ms | File.size 0.0010 ms
