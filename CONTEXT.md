@@ -210,6 +210,21 @@ its chips would show, so it never counts a line opening the Console wouldn't sho
 Unfolding clears it. A reload opening on a folded Console starts it at zero once the
 load-on-open history has arrived: history is not news.
 
+**REPL** — the Reader's prompt for running Ruby in the Host app, in a drawer under the *Console*
+and the *Activity table*. It drives a `bin/rails console` the Reader spawns from the Rails root,
+never the running server, so what it evaluates lands in that process's own `console` *Run*. One
+per Reader, shared by every tab, started the first time the drawer is open, and restarted only
+by hand. The REPL is not the *Console*: the Console is the App log stream, and "console" alone
+always means that. See `docs/adr/0014-the-repl-is-a-reader-owned-eval-loop.md`.
+_Avoid_: console (for the REPL), terminal, shell.
+
+**Evaluation** — one input the *REPL* submitted and everything it produced: its result or
+error, and whatever it printed while running. One at a time; the REPL refuses a second while
+one is running.
+
+**Transcript** — the *REPL*'s evaluations so far, in order. It lives as long as the console
+process: a Restart clears it, and a tab that opens later is shown it whole.
+
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
 most valuable thing to see — and is *not a separate state*: because in-flight requests
