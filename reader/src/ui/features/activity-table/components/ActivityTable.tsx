@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react"
+import { Fragment, type ComponentProps, type ReactNode } from "react"
 
 import type { ActivityRow } from "../../../../shared/activity"
 import { MethodText } from "../../../components/MethodText"
@@ -55,18 +55,126 @@ import { useClimbingElapsed } from "../lib/elapsed"
 type Request = Extract<ActivityRow, { kind: "request" }>
 type Run = Extract<ActivityRow, { kind: "run" }>
 
-const COLUMNS = [
-  ["started", "Started"],
-  ["status", "Status"],
-  ["method", "Method"],
-  ["path", "Path"],
-  ["action", "Controller#action"],
-  ["sql", "SQL"],
-  ["log", "Log"],
-  ["db", "DB"],
-  ["view", "View"],
-  ["total", "Total"],
-] as const
+/**
+ * A *Table column*: its header, and what it renders for each row kind. A Run row's cell is
+ * `"description"` where the column is one the run's description spans instead — the columns a
+ * request fills with its method, path and outcome, which a Run has none of. Those columns sit
+ * next to each other, because the description is one cell spanning all of them.
+ */
+type TableColumn = {
+  key: string
+  heading: string
+  request: (row: Request) => ReactNode
+  run: ((row: Run) => ReactNode) | "description"
+}
+
+const TABLE_COLUMNS: readonly TableColumn[] = [
+  {
+    key: "started",
+    heading: "Started",
+    request: (row) => (
+      // A *Partial request* has no start to show, which is exactly where it says so: the
+      // column that would have said when this began says instead that nobody saw it begin.
+      <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
+        {row.partial ? (
+          <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge>
+        ) : (
+          clock(row.startedAtWall)
+        )}
+        {/* A different fact from `partial`, and never in tension with it: the *last row
+            standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
+        <OverBoundMark row={row} />
+      </Cell>
+    ),
+    run: (row) => (
+      <Cell className="text-faint">
+        {clock(row.startedAtWall)}
+        <OverBoundMark row={row} />
+      </Cell>
+    ),
+  },
+  {
+    key: "status",
+    heading: "Status",
+    request: (row) => (
+      <Cell>
+        <Status row={row} />
+      </Cell>
+    ),
+    run: "description",
+  },
+  {
+    key: "method",
+    heading: "Method",
+    request: (row) => (
+      <Cell className="font-bold">
+        {/* Important, because the method's own colour would otherwise outrank the fade. */}
+        <MethodText method={row.method} className="group-data-[state=interrupted]:text-faint!">
+          <Highlight text={row.method ?? ""} />
+        </MethodText>
+      </Cell>
+    ),
+    run: "description",
+  },
+  {
+    key: "path",
+    heading: "Path",
+    request: (row) => (
+      // The path and the action are capped in characters, the unit they are read in.
+      <Cell className="max-w-[40ch] group-data-[state=interrupted]:text-faint" title={row.path ?? undefined}>
+        <Highlight text={row.path ?? ""} />
+      </Cell>
+    ),
+    run: "description",
+  },
+  {
+    key: "action",
+    heading: "Controller#action",
+    request: (row) => (
+      <Cell className="max-w-[28ch] text-muted group-data-[state=interrupted]:text-faint">
+        <Highlight text={controllerAction(row)} />
+      </Cell>
+    ),
+    run: "description",
+  },
+  {
+    key: "sql",
+    heading: "SQL",
+    request: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
+    run: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
+  },
+  {
+    key: "log",
+    heading: "Log",
+    request: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
+    run: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
+  },
+  // A Run has no db, view or total to show: empty cells, so the columns beside a request's
+  // stay the columns they are.
+  {
+    key: "db",
+    heading: "DB",
+    request: (row) => <NumberCell>{ms(row.dbRuntimeMs)}</NumberCell>,
+    run: () => <NumberCell />,
+  },
+  {
+    key: "view",
+    heading: "View",
+    request: (row) => <NumberCell>{ms(row.viewRuntimeMs)}</NumberCell>,
+    run: () => <NumberCell />,
+  },
+  {
+    key: "total",
+    heading: "Total",
+    // What the request said it took, or — where it said nothing — what the Reader can prove
+    // it took. A finish that carried no `duration_ms` at all, the Initializer having never
+    // seen that request start, reads exactly as an in-flight row does, as the distance
+    // between the request's own first and last events, frozen. Never a `0ms` standing in for
+    // a number nobody has.
+    request: (row) => <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>,
+    run: () => <NumberCell total />,
+  },
+]
 
 /** How the Console finds a row to draw to and to scroll to. Written here, because this is what writes it. */
 export function rowSelector(id: string) {
@@ -89,22 +197,23 @@ type ActivityTableProps = {
 }
 
 export function ActivityTable({ rows, selected, pinned, lit, onSelect }: ActivityTableProps) {
+  const columns = TABLE_COLUMNS
   return (
     <table className="w-full border-collapse tabular-nums" role="grid">
       <thead>
         <tr>
-          {COLUMNS.map(([key, heading]) => (
+          {columns.map((column) => (
             // The path is the column given the slack, and — with Controller#action — the one
             // that may be cut when there is none: everything else is a fixed handful of
             // characters wide.
             <th
-              key={key}
+              key={column.key}
               className={cn(
                 "sticky top-0 z-1 border-b border-border bg-background px-2 py-1 text-left text-2xs font-semibold tracking-wider whitespace-nowrap text-faint uppercase",
-                key === "path" && "w-full",
+                column.key === "path" && "w-full",
               )}
             >
-              {heading}
+              {column.heading}
             </th>
           ))}
         </tr>
@@ -114,6 +223,7 @@ export function ActivityTable({ rows, selected, pinned, lit, onSelect }: Activit
           row.kind === "request" ? (
             <RequestRow
               key={row.id}
+              columns={columns}
               row={row}
               selected={row.id === selected}
               pinned={row.id === pinned}
@@ -123,6 +233,7 @@ export function ActivityTable({ rows, selected, pinned, lit, onSelect }: Activit
           ) : (
             <RunRow
               key={row.id}
+              columns={columns}
               row={row}
               selected={row.id === selected}
               pinned={row.id === pinned}
@@ -136,14 +247,21 @@ export function ActivityTable({ rows, selected, pinned, lit, onSelect }: Activit
   )
 }
 
-type RowProps<T> = { row: T; selected: boolean; pinned: boolean; lit: boolean; onSelect: () => void }
+type RowProps<T> = {
+  columns: readonly TableColumn[]
+  row: T
+  selected: boolean
+  pinned: boolean
+  lit: boolean
+  onSelect: () => void
+}
 
 /**
  * An *Interrupted* row is set apart and set back, and deliberately not in the error colour: a
  * request whose Run was reaped did not fail, it stopped being answerable. Its method, path and
  * action fade, and its first cell carries an edge.
  */
-function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>) {
+function RequestRow({ columns, row, selected, pinned, lit, onSelect }: RowProps<Request>) {
   return (
     <Row
       className="not-aria-selected:data-[state=interrupted]:bg-sunken"
@@ -155,44 +273,9 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
       {...rowMarks(selected, pinned, lit)}
       onClick={onSelect}
     >
-      {/* A *Partial request* has no start to show, which is exactly where it says so: the
-          column that would have said when this began says instead that nobody saw it begin. */}
-      <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
-        {row.partial ? (
-          <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge>
-        ) : (
-          clock(row.startedAtWall)
-        )}
-        {/* A different fact from `partial`, and never in tension with it: the *last row
-            standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
-        <OverBoundMark row={row} />
-      </Cell>
-      <Cell>
-        <Status row={row} />
-      </Cell>
-      <Cell className="font-bold">
-        {/* Important, because the method's own colour would otherwise outrank the fade. */}
-        <MethodText method={row.method} className="group-data-[state=interrupted]:text-faint!">
-          <Highlight text={row.method ?? ""} />
-        </MethodText>
-      </Cell>
-      {/* The path and the action are capped in characters, the unit they are read in. */}
-      <Cell className="max-w-[40ch] group-data-[state=interrupted]:text-faint" title={row.path ?? undefined}>
-        <Highlight text={row.path ?? ""} />
-      </Cell>
-      <Cell className="max-w-[28ch] text-muted group-data-[state=interrupted]:text-faint">
-        <Highlight text={controllerAction(row)} />
-      </Cell>
-      <NumberCell>{count(row.sqlCount)}</NumberCell>
-      <NumberCell>{count(row.logCount)}</NumberCell>
-      <NumberCell>{ms(row.dbRuntimeMs)}</NumberCell>
-      <NumberCell>{ms(row.viewRuntimeMs)}</NumberCell>
-      {/* The total: what the request said it took, or — where it said nothing — what the
-          Reader can prove it took. A finish that carried no `duration_ms` at all, the
-          Initializer having never seen that request start, reads exactly as an in-flight row
-          does, as the distance between the request's own first and last events, frozen. Never
-          a `0ms` standing in for a number nobody has. */}
-      <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>
+      {columns.map((column) => (
+        <Fragment key={column.key}>{column.request(row)}</Fragment>
+      ))}
     </Row>
   )
 }
@@ -222,7 +305,8 @@ function RequestRow({ row, selected, pinned, lit, onSelect }: RowProps<Request>)
  * The marker is a rule across the top of the row, at one position and never a band over the
  * rows under it.
  */
-function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
+function RunRow({ columns, row, selected, pinned, lit, onSelect }: RowProps<Run>) {
+  const descriptionColumns = columns.filter((column) => column.run === "description")
   return (
     <Row
       className="not-aria-selected:bg-sunken data-marker:border-t-2 data-marker:border-t-accent"
@@ -232,41 +316,43 @@ function RunRow({ row, selected, pinned, lit, onSelect }: RowProps<Run>) {
       {...rowMarks(selected, pinned, lit)}
       onClick={onSelect}
     >
-      <Cell className="text-faint">
-        {clock(row.startedAtWall)}
-        <OverBoundMark row={row} />
-      </Cell>
-      <Cell className="text-muted" colSpan={4}>
-        {row.marker && (
-          <span className="mr-2 font-ui text-2xs font-bold tracking-wider text-accent uppercase">Run started</span>
-        )}
-        {/* Distinct from the Run marker above, and never drawn beside it: a reopened row has
-            no header of its own for a marker to be drawn from. */}
-        {row.reopened && (
-          <Badge
-            className="mr-2"
-            title="Its earlier row was evicted under the Memory bound — this Run has said something unattributed again"
-          >
-            reopened
-          </Badge>
-        )}
-        {/* The separator is drawn rather than written, so it stays out of the row's text. */}
-        <span>
-          {[runDescription(row).kind, ...runDescription(row).facts].map((said) => (
-            <span key={said} className="not-first:before:text-faint not-first:before:content-['_·_']">
-              <Highlight text={said} />
-            </span>
-          ))}
-        </span>
-      </Cell>
-      <NumberCell>{count(row.sqlCount)}</NumberCell>
-      <NumberCell>{count(row.logCount)}</NumberCell>
-      {/* A Run has no db, view or total to show: three empty cells, so the columns beside a
-          request's stay the columns they are. */}
-      <NumberCell />
-      <NumberCell />
-      <NumberCell total />
+      {columns.map((column) => {
+        if (column.run !== "description") return <Fragment key={column.key}>{column.run(row)}</Fragment>
+        // The description takes the place of the first column it covers and spans them all.
+        return column === descriptionColumns[0] ? (
+          <RunDescriptionCell key={column.key} row={row} colSpan={descriptionColumns.length} />
+        ) : null
+      })}
     </Row>
+  )
+}
+
+/** Whether the Run started here or was reopened, and then what kind of process it is and what it said. */
+function RunDescriptionCell({ row, colSpan }: { row: Run; colSpan: number }) {
+  return (
+    <Cell className="text-muted" colSpan={colSpan}>
+      {row.marker && (
+        <span className="mr-2 font-ui text-2xs font-bold tracking-wider text-accent uppercase">Run started</span>
+      )}
+      {/* Distinct from the Run marker above, and never drawn beside it: a reopened row has
+          no header of its own for a marker to be drawn from. */}
+      {row.reopened && (
+        <Badge
+          className="mr-2"
+          title="Its earlier row was evicted under the Memory bound — this Run has said something unattributed again"
+        >
+          reopened
+        </Badge>
+      )}
+      {/* The separator is drawn rather than written, so it stays out of the row's text. */}
+      <span>
+        {[runDescription(row).kind, ...runDescription(row).facts].map((said) => (
+          <span key={said} className="not-first:before:text-faint not-first:before:content-['_·_']">
+            <Highlight text={said} />
+          </span>
+        ))}
+      </span>
+    </Cell>
   )
 }
 
