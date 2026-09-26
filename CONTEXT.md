@@ -446,6 +446,31 @@ wire-truncated backtrace records: collapsing describes what the Reader chooses t
 what it holds, cutting describes what the wire sent, and neither reads the other. See
 `docs/adr/0011-a-backtrace-collapses-gem-frames-into-inline-markers-by-default.md` (#90).
 
+**Value viewer** — the Reader's one collapsible, highlighted view of a structured value: a
+request's params first, and later JSON and XML response bodies and possibly REPL results. A
+tree, with the top level open and every nested hash or array folded to a summary of what it
+holds (`{…} 7 keys`, `[…] 3 items`). It may lay a structure out, because a tree is not an edit,
+and it may colour each value by the type it actually has: a form's `"48"` is a string and is
+coloured as one, and only a JSON body carries real numbers, booleans and `null`. A `[FILTERED]`
+value, already filtered by the app's own `filter_parameters`, reads as a marker rather than as
+a string. It never reorders, drops or coerces what it shows. `controller`, `action` and
+`format` stay in params even though the header already says them, because hiding them would
+be a derivation. Text is the exception: it may be pretty-printed only with the raw text one
+toggle away. A long string is cut to one line with a count of what's left, one click from
+whole. Copy hands over the whole value as JSON, or on hover one node's value or its key path
+(`params[:comment][:tags][0]`).
+_Avoid_: JSON viewer, inspector, tree view.
+
+**Detail tab** — one of the tabs in the bar under the *Detail column*'s header: **Timeline**,
+**Params**, and later **Response**. The bar sticks with the header, so a request's params are one
+click away however far down the timeline the column is. That matters because a Selection opens
+at the bottom. Each tab keeps its own scroll position: Params opens at its top, and Timeline
+comes back where it was left. The chosen tab survives a change of *Selection*, so clicking
+through requests on Params compares their params. A row with no such tab, like a *Run row* or a
+request that never reached a controller, shows Timeline. *Search* never hides: a match inside a
+tab that is not showing is counted on that tab.
+_Avoid_: pane, panel, section.
+
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed
 one, which selects its *Run row*. If a tab filter hides the row being selected, the click
