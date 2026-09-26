@@ -629,7 +629,9 @@ _Avoid_: link, editor link, file link.
    teammate who never uses the Reader notices nothing — which means, precisely: no
    middleware inserted, no subscribers registered, no `BroadcastLogger` sink attached, no
    file opened. Those four are promises the Example app tests; request overhead is not.
-3. **Strictly local.** No remote, staging, or production log reading.
+3. **Strictly local.** No remote, staging, or production log reading. Served only to the
+   machine it runs on, except read-only views on hosts a developer explicitly allows. See
+   `docs/adr/0013-the-reader-answers-only-its-own-page.md`.
 4. **Rails 7.1+**, refused below. `BroadcastLogger#broadcast_to` is both the only
    capture mechanism that keeps constraint 1 and the one thing Rails 7.0 lacks. Rails 8
    is what gets tested; 7.1 and 7.2 are accepted, with their absent `sql.active_record`
