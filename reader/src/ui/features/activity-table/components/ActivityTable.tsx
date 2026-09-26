@@ -15,6 +15,7 @@ import {
   statusCategory,
 } from "../../../lib/format"
 import { useClimbingElapsed } from "../lib/elapsed"
+import { Badge } from "./Badge"
 
 /**
  * The Activity table: one dense, fixed-height row per thing that owns events — a *Request
@@ -66,14 +67,17 @@ type TableColumn = {
   heading: string
   /** What the column measures, in one plain-language line: the header's tooltip. */
   description: string
+  /** Never hidden: its checkbox is always checked. */
+  fixed?: true
   request: (row: Request) => ReactNode
   run: ((row: Run) => ReactNode) | "description"
 }
 
-const TABLE_COLUMNS: readonly TableColumn[] = [
+export const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "started",
     heading: "Started",
+    fixed: true,
     description: "When it started",
     request: (row) => (
       // A *Partial request* has no start to show, which is exactly where it says so: the
@@ -99,6 +103,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "status",
     heading: "Status",
+    fixed: true,
     description: "The HTTP status of the response",
     request: (row) => (
       <Cell>
@@ -177,6 +182,7 @@ const TABLE_COLUMNS: readonly TableColumn[] = [
   {
     key: "total",
     heading: "Total",
+    fixed: true,
     description: `The whole request, middleware included, so a bit longer than Rails' "Completed in" time`,
     // What the request said it took, or — where it said nothing — what the Reader can prove
     // it took. A finish that carried no `duration_ms` at all, the Initializer having never
@@ -206,10 +212,12 @@ type ActivityTableProps = {
   pinned: string | null
   lit: string | null
   onSelect: (id: string) => void
+  /** The `key`s of the table columns the developer hid, which neither the header nor any row renders. */
+  hidden: ReadonlySet<string>
 }
 
-export function ActivityTable({ rows, selected, pinned, lit, onSelect }: ActivityTableProps) {
-  const columns = TABLE_COLUMNS
+export function ActivityTable({ rows, selected, pinned, lit, onSelect, hidden }: ActivityTableProps) {
+  const columns = TABLE_COLUMNS.filter((column) => !hidden.has(column.key))
   return (
     <table className="w-full border-collapse tabular-nums" role="grid">
       <thead>
@@ -430,20 +438,6 @@ function Cell({ className, ...props }: ComponentProps<"td">) {
 /** A count or a duration, which read down a column as numbers do — and the total, set above the durations it sums. */
 function NumberCell({ total = false, children }: { total?: boolean; children?: ReactNode }) {
   return <Cell className={cn("text-right text-muted", total && "font-semibold text-foreground")}>{children}</Cell>
-}
-
-/**
- * The quiet badge for a fact that is never an alarm: a *Partial request*, a reopened Run row,
- * the *last row standing*. Unlike the *Run marker*'s bold accent line, which is a boundary
- * rather than an absence or an overage.
- */
-function Badge({ className, ...props }: ComponentProps<"span">) {
-  return (
-    <span
-      className={cn("rounded-chip border border-border px-1 font-ui text-2xs tracking-wider text-faint uppercase", className)}
-      {...props}
-    />
-  )
 }
 
 /** What a row wears of *Selection* and of *Hover grouping*, which are never the same mark. */
