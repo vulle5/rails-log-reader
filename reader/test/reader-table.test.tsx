@@ -80,7 +80,7 @@ describe("the Activity table", () => {
     expect(header("Method")).toHaveAccessibleDescription("The HTTP method")
     expect(header("Path")).toHaveAccessibleDescription("The URL that was requested")
     expect(header("Controller#action")).toHaveAccessibleDescription("The controller action that handled it")
-    expect(header("SQL")).toHaveAccessibleDescription("How many database queries it ran")
+    expect(header("SQL")).toHaveAccessibleDescription("How many database queries it ran, including cached ones")
     expect(header("Log")).toHaveAccessibleDescription("How many log lines it wrote")
     expect(header("DB")).toHaveAccessibleDescription("Time spent in the database")
     expect(header("View")).toHaveAccessibleDescription("Time spent rendering views")
