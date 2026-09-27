@@ -136,7 +136,7 @@ describe("the Params tab", () => {
     expectLines(treeItemsOf(tree), [
       'cart_id: "77213"',
       "order: {…} 5 keys",
-      'payment_token: "[FILTERED]"',
+      "payment_token: FILTERED",
       'format: "json"',
       'controller: "api/v1/orders"',
       'action: "create"',
@@ -245,5 +245,112 @@ describe("the Params tab", () => {
     await showDetailTab(user, "Params")
 
     expect(detailPanel("Params")).toHaveTextContent(/^\{\}$/)
+  })
+})
+
+describe("the Value viewer's leaves", () => {
+  const LONG_STRING = 80
+
+  async function showOrder() {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, AWKWARD_PARAMS.path)
+    await showDetailTab(user, "Params")
+    const tree = valueTree("Params")
+    const order = treeItem(tree, "order")
+    await user.click(order)
+    return { user, tree, order }
+  }
+
+  test("marks each leaf with the type it has on the wire, so a form's numeric string is a string", async () => {
+    const { user, tree, order } = await showOrder()
+    const items = treeItem(order, "line_items")
+    await user.click(items)
+    await user.click(treeItem(items, "0"))
+    await user.click(treeItem(items, "1"))
+
+    expect(within(treeItem(tree, "cart_id")).getByText('"77213"')).toHaveAttribute("data-token", "string")
+    expect(within(treeItem(items, "0")).getByText('"2"')).toHaveAttribute("data-token", "string")
+    expect(within(treeItem(items, "1")).getByText("1")).toHaveAttribute("data-token", "number")
+    expect(within(treeItem(items, "1")).getByText("true")).toHaveAttribute("data-token", "keyword")
+  })
+
+  test("sets null apart from the string \"null\"", async () => {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "PATCH", "/posts/12"),
+      run.route("req-1", "PostsController", "update", { absent: null, spelled: "null" }),
+    ])
+    await select(user, "/posts/12")
+    await showDetailTab(user, "Params")
+    const tree = valueTree("Params")
+
+    expect(within(treeItem(tree, "absent")).getByText("null")).toHaveAttribute("data-token", "null")
+    expect(within(treeItem(tree, "spelled")).getByText('"null"')).toHaveAttribute("data-token", "string")
+  })
+
+  test("draws a filtered value as a FILTERED marker, not as a string", async () => {
+    const { tree } = await showOrder()
+    const token = treeItem(tree, "payment_token")
+
+    expect(token).toHaveAccessibleName("payment_token: FILTERED")
+    expect(within(token).getByText("FILTERED")).toHaveAttribute("data-filtered")
+  })
+
+  test("cuts a string over 80 characters to its first 80 and says how many more there are", async () => {
+    const { order } = await showOrder()
+    const note = AWKWARD_PARAMS.params.order.gift_note
+    const more = note.length - LONG_STRING
+
+    const item = treeItem(order, "gift_note")
+
+    expect(item).toHaveAccessibleName(`gift_note: "${note.slice(0, LONG_STRING)} …${more} more chars`)
+    expect(within(item).getByText(`"${note.slice(0, LONG_STRING)}`)).toHaveAttribute("data-cut")
+  })
+
+  test("counts an escape as the one character it stands for, and never cuts one in half", async () => {
+    const run = aRun(SERVER_RUN)
+    const body = `${"a".repeat(79)}\n"quoted" and on 🎉`
+    const { user } = openTheReader([
+      run.start("req-1", "POST", "/notes"),
+      run.route("req-1", "NotesController", "create", { body }),
+    ])
+    await select(user, "/notes")
+    await showDetailTab(user, "Params")
+    const characters = Array.from(body)
+    const shown = JSON.stringify(characters.slice(0, LONG_STRING).join("")).slice(0, -1)
+
+    expect(treeItem(valueTree("Params"), "body")).toHaveAccessibleName(
+      `body: ${shown} …${characters.length - LONG_STRING} more chars`,
+    )
+  })
+
+  test("leaves a string of exactly 80 characters whole", async () => {
+    const run = aRun(SERVER_RUN)
+    const exact = "x".repeat(LONG_STRING)
+    const { user } = openTheReader([
+      run.start("req-1", "POST", "/notes"),
+      run.route("req-1", "NotesController", "create", { body: exact }),
+    ])
+    await select(user, "/notes")
+    await showDetailTab(user, "Params")
+
+    expect(treeItem(valueTree("Params"), "body")).toHaveAccessibleName(`body: "${exact}"`)
+  })
+
+  test("opens a cut string on a click of its count, and keeps it whole", async () => {
+    const { user, tree, order } = await showOrder()
+    const note = AWKWARD_PARAMS.params.order.gift_note
+
+    await user.click(within(treeItem(order, "gift_note")).getByRole("button", { name: `…${note.length - LONG_STRING} more chars` }))
+
+    expect(order).toHaveAttribute("aria-expanded", "true")
+    expect(treeItem(order, "gift_note")).toHaveAccessibleName(`gift_note: ${JSON.stringify(note)}`)
+
+    await user.click(order)
+    await user.click(order)
+
+    const reopened = treeItem(treeItem(tree, "order"), "gift_note")
+    expect(reopened).toHaveAccessibleName(`gift_note: ${JSON.stringify(note)}`)
+    expect(within(reopened).queryByRole("button")).not.toBeInTheDocument()
   })
 })
