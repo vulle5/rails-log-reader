@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
+import { type RequestRoutePayload, WIRE_VERSION } from "../src/shared/wire"
 import { aRun } from "./sidecar.fixtures"
 import { AWKWARD_PARAMS, DENSE_TRAFFIC, NEVER_ROUTED, SERVER_RUN } from "./traffic.fixtures"
 import {
@@ -352,5 +353,54 @@ describe("the Value viewer's leaves", () => {
     const reopened = treeItem(treeItem(tree, "order"), "gift_note")
     expect(reopened).toHaveAccessibleName(`gift_note: ${JSON.stringify(note)}`)
     expect(within(reopened).queryByRole("button")).not.toBeInTheDocument()
+  })
+})
+
+describe("the Params tab's key order", () => {
+  async function showParams(params: RequestRoutePayload["params"], v = WIRE_VERSION) {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "POST", "/orders"),
+      { ...run.route("req-1", "OrdersController", "create", params), v },
+    ])
+    await select(user, "/orders")
+    await showDetailTab(user, "Params")
+    return { user, tree: valueTree("Params") }
+  }
+
+  test("keeps integer-like keys in the order the app had them", async () => {
+    const { user, tree } = await showParams({
+      pairs: [["quantities", { pairs: [["42", "1"], ["7", "2"]] }]],
+    })
+    const quantities = treeItem(tree, "quantities")
+    await user.click(quantities)
+
+    expectLines(treeItemsOf(quantities), ['42: "1"', '7: "2"'])
+  })
+
+  test("keeps a word key ahead of an integer-like one when it came first", async () => {
+    const { tree } = await showParams({ pairs: [["name", "Ada"], ["5", "five"]] })
+
+    expectLines(treeItemsOf(tree), ['name: "Ada"', '5: "five"'])
+  })
+
+  test("draws an array of two-element arrays as arrays, not as a hash", async () => {
+    const { user, tree } = await showParams({ pairs: [["a", [["x", "y"]]]] })
+    const a = treeItem(tree, "a")
+    await user.click(a)
+    const first = treeItem(a, "0")
+    await user.click(first)
+
+    expect(a).toHaveAccessibleName(/^a: /)
+    expectLines(treeItemsOf(first), ['0: "x"', '1: "y"'])
+  })
+
+  test("still draws a v3 envelope's params, a plain object", async () => {
+    const { user, tree } = await showParams({ id: "12", post: { title: "Hello" } }, 3)
+    const post = treeItem(tree, "post")
+    await user.click(post)
+
+    expectLines(treeItemsOf(tree), ['id: "12"', /^post: /])
+    expectLines(treeItemsOf(post), ['title: "Hello"'])
   })
 })

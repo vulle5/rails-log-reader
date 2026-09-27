@@ -1,7 +1,7 @@
 import { memo, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
-import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
+import type { AppLogEvent, BindValue, RequestException, RequestRoutePayload, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
@@ -198,7 +198,7 @@ function RunDetail({
 }
 
 /** A request's params in the *Value viewer*: everything params-specific is in `paramsTree`. */
-function Params({ params }: { params: Record<string, unknown> }) {
+function Params({ params }: { params: RequestRoutePayload["params"] }) {
   const tree = useMemo(() => paramsTree(params), [params])
   return (
     <div className="px-3 py-2">

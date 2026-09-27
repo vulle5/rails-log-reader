@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SIDECAR_NAME } from "../src/server/sidecar"
-import type { AppLogPayload, Envelope, RequestFinishPayload, SqlPayload } from "../src/shared/wire"
+import type { AppLogPayload, Envelope, RequestFinishPayload, RequestRoutePayload, SqlPayload } from "../src/shared/wire"
 
 /**
  * Seam 1's whole apparatus: a real `log/` directory with a real Sidecar in it, and an
@@ -116,7 +116,7 @@ export function aRun(runId: string, epoch = EPOCH) {
     end: () => envelope("run_end", null, {}),
     start: (requestId: string, method = "GET", path = "/posts/12", at_wall?: number) =>
       envelope("request_start", requestId, { method, path }, at_wall),
-    route: (requestId: string, controller = "PostsController", action = "show", params: Record<string, unknown> = {}) =>
+    route: (requestId: string, controller = "PostsController", action = "show", params: RequestRoutePayload["params"] = { pairs: [] }) =>
       envelope("request_route", requestId, { controller, action, format: "html", params }),
     finish: (requestId: string, finished: Partial<RequestFinishPayload> = {}) =>
       // No view or db runtime unless a test asks for them: a request that died before

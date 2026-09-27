@@ -1,4 +1,4 @@
-import type { BindValue, Envelope, EventType, Severity } from "../src/shared/wire"
+import type { BindValue, Envelope, EventType, ParamsHash, ParamValue, RequestRoutePayload, Severity } from "../src/shared/wire"
 import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
 
 /**
@@ -68,7 +68,7 @@ function route(
   controller: string,
   action: string,
   format = "html",
-  params: Record<string, unknown> = {},
+  params: RequestRoutePayload["params"] = { pairs: [] },
 ) {
   emit({
     at,
@@ -77,6 +77,20 @@ function route(
     type: "request_route",
     payload: { controller, action, format, params },
   })
+}
+
+/**
+ * A plain object as the Initializer writes a Hash: tagged pairs at every level. Its order is
+ * `Object.entries`', so an integer-like key would already have moved first.
+ */
+function tagged(hash: Record<string, unknown>): ParamsHash {
+  return { pairs: Object.entries(hash).map(([key, value]) => [key, taggedValue(value)]) }
+}
+
+function taggedValue(value: unknown): ParamValue {
+  if (Array.isArray(value)) return value.map(taggedValue)
+  if (value !== null && typeof value === "object") return tagged(value as Record<string, unknown>)
+  return value as ParamValue
 }
 
 function finish(
@@ -289,7 +303,7 @@ const ORDER_PARAMS = {
 }
 
 start(5000, E, "POST", "/api/v1/orders")
-route(5010, E, "Api::V1::OrdersController", "create", "json", ORDER_PARAMS)
+route(5010, E, "Api::V1::OrdersController", "create", "json", tagged(ORDER_PARAMS))
 sql(5060, E, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."id" = ? LIMIT ?  [["id", 4021], ["LIMIT", 1]]', 0.4)
 log(5100, E, "info", "OrdersController#create for cart 77213")
 sql(5150, E, "Cart Load", 'SELECT "carts".* FROM "carts" WHERE "carts"."id" = ? LIMIT ?  [["id", 77213], ["LIMIT", 1]]', 0.6)
@@ -513,7 +527,7 @@ export const CLOCK_STEPPED_BACK = { requestId: I, path: "/api/v1/search?q=rails+
 /** The request that never reached a controller. */
 export const NEVER_ROUTED = { requestId: MISTYPED, path: "/api/v1/notifcations" }
 
-/** The request carrying the awkward params hash, and that hash as the wire carried it. */
+/** The request carrying the awkward params hash, and that hash before the wire tagged it. */
 export const AWKWARD_PARAMS = { requestId: E, path: "/api/v1/orders", params: ORDER_PARAMS }
 
 /** The request that starts, emits, and never finishes. */

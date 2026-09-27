@@ -13,7 +13,7 @@ import {
   type Sidecar,
 } from "../src/server/sidecar"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
-import type { Envelope } from "../src/shared/wire"
+import type { Envelope, RequestRoutePayload } from "../src/shared/wire"
 import {
   aLogDirectory,
   aLogDirectoryThatDoesNotExistYet,
@@ -210,6 +210,33 @@ describe("a line the Reader cannot use", () => {
     expect(delivered.payload.message.length).toBeLessThan(MAX_LINE_BYTES)
     expect(delivered.payload.message.startsWith("xxxx")).toBe(true)
     expect(delivered.truncated).toEqual({ message: 300_000 })
+    expect(Buffer.byteLength(JSON.stringify(delivered))).toBeLessThanOrEqual(MAX_LINE_BYTES)
+  })
+
+  test("keeps every pair of an oversized params hash, in order, and shrinks their values instead", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const params = {
+      pairs: [
+        ["42", "x".repeat(200_000)],
+        ["7", { pairs: [["note", "y".repeat(200_000)]] }],
+        ["name", "Ada"],
+      ],
+    } satisfies RequestRoutePayload["params"]
+    await appendToSidecar(log, run.route("req-1", "OrdersController", "create", params))
+
+    const reader = await theReaderReads(log)
+
+    const delivered = reader.delivered[0]
+    if (delivered?.type !== "request_route") throw new Error("the route event did not arrive")
+    expect(delivered.payload.params).toEqual({
+      pairs: [
+        ["42", expect.stringMatching(/^x+$/)],
+        ["7", { pairs: [["note", expect.stringMatching(/^y+$/)]] }],
+        ["name", "Ada"],
+      ],
+    })
+    expect(delivered.truncated).toEqual({ params: 400_014 })
     expect(Buffer.byteLength(JSON.stringify(delivered))).toBeLessThanOrEqual(MAX_LINE_BYTES)
   })
 })

@@ -1,5 +1,5 @@
 import { LOAD_ON_OPEN_EVENTS } from "./bounds"
-import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RunKind, type SqlEvent } from "./wire"
+import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RequestRoutePayload, type RunKind, type SqlEvent } from "./wire"
 
 /** The fold: Sidecar envelopes in append order become Activity table rows. */
 
@@ -73,10 +73,11 @@ export type RequestRow = {
   action: string | null
   /**
    * `request_route`'s `params`, exactly as the wire parsed them: already filtered by the app's
-   * own `filter_parameters`, keys in the order they arrived. `null` exactly when `controller`
-   * is, and read the same way.
+   * own `filter_parameters`. Tagged pairs keep the order the keys arrived in; a plain object,
+   * from an envelope before v4, has its integer-like keys first. `null` exactly when
+   * `controller` is, and read the same way.
    */
-  params: Record<string, unknown> | null
+  params: RequestRoutePayload["params"] | null
   status: number | null
   /**
    * What the request itself said it took. `null` while it is still in flight, and `null` for

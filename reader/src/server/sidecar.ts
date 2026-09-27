@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
 import type { Earlier } from "../shared/earlier"
-import { EVENT_TYPES, type Envelope } from "../shared/wire"
+import { EVENT_TYPES, isParamsHash, type Envelope } from "../shared/wire"
 
 /**
  * The Sidecar, read as a stream of envelopes.
@@ -443,12 +443,22 @@ function shrinkLargestField(envelope: Envelope, lineBytes: number) {
  * A String is cut from its end — a shortened string still says what it says. An Array sheds
  * elements from its tail, which for a backtrace is the framework frames farthest from where
  * it broke. An Object never loses a key, since a `params` missing one would be a lie about
- * what the request carried, so its values are shrunk evenly instead.
+ * what the request carried, so its values are shrunk evenly instead. A tagged Hash is shrunk
+ * the same way, never as the Array its pairs sit in: each pair keeps its key and its place,
+ * and its value gets an even share of the budget, less the key's own bytes.
  */
 function shrinkToFit(value: unknown, budget: number): unknown {
   if (byteSize(value) <= budget) return value
 
   if (typeof value === "string") return cutToBytes(value, budget)
+
+  if (isParamsHash(value)) {
+    if (value.pairs.length === 0) return value
+    const perPair = Math.floor(budget / value.pairs.length)
+    return {
+      pairs: value.pairs.map(([key, nested]) => [key, shrinkToFit(nested, perPair - byteSize(key))]),
+    }
+  }
 
   if (Array.isArray(value)) {
     const kept: unknown[] = []
