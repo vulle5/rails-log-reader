@@ -236,6 +236,24 @@ one is running.
 **Transcript** — the *REPL*'s evaluations so far, in order. It lives as long as the console
 process: a Restart clears it, and a tab that opens later is shown it whole.
 
+**Input history** — the inputs the *REPL* has submitted, kept apart from the *Transcript*
+because it outlives the console process: it survives a Restart and the Reader restarting. It is
+kept in the browser's `localStorage`, keyed by the Host app's Rails root so two apps taking
+turns on one port never share it. It is capped at the latest 200 distinct inputs, with a repeat
+kept once at its latest. That cap is a guess, and too many entries would bury the useful ones as
+surely as too few would starve the *History suggestion*. ↑ on the input's first line opens it as
+a list over the Transcript, newest nearest the prompt, filtered by what is typed while it is
+open. Picking an entry puts it in the input and never runs it. It is read once when the page
+loads and written only on submit, so a keystroke never touches storage.
+_Avoid_: history (alone), which already means the load-on-open Events; command history.
+
+**History suggestion** — the grey text after the caret offering the newest *Input history*
+entry that starts with what has been typed; → takes it. It is computed from a deferred copy of
+the input, and drawn only while it still matches, so typing never waits on it. While the
+completion popover is open, the grey text previews the selected candidate instead: it belongs to
+whichever is showing, and never means both at once. It can be turned off in *Settings*.
+_Avoid_: autosuggestion, ghost text.
+
 **Unseen result** — the mark on a folded *REPL* drawer: an *Evaluation* finished since this tab
 folded it. A mark, not a count, because a folded drawer takes no input and so rarely owes more
 than one; another tab sharing the session is the only way to owe several. It reads as an error
