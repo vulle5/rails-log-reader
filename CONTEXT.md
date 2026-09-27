@@ -45,6 +45,17 @@ it, which always wins. See
   controller ever says about itself. Which one it is, is read from `caller_locations` —
   a frame inside a gem is not the developer — and never from the message's shape.
 
+V2 adds a fourth:
+- **Response event** — what a request sent back: every response header, and the body when it
+  is JSON or XML, whole in memory, not encoded and not empty. Anything else (HTML, a PDF, a
+  streamed or gzipped body, a 204) carries the reason it has no body instead, so the
+  *Response* tab never shows an unexplained blank. A body is cut at the same 64 KB every
+  wire field is, with its original size kept, so a cut body says so where it is read. It
+  comes after its request's finish by construction, because the response is only complete
+  once the client has it, and it is filed under its request as that request's response,
+  never as a *Trailing event*. A hijacked response, such as a WebSocket upgrade, has none.
+  See `docs/adr/0015-response-bodies-ride-inline-in-the-sidecar.md`.
+
 **Callsite** — the file and line an SQL or App log event's own code ran at, captured as a
 `caller_locations` frame and carried on the wire in the same raw `"path:line:in `method'"`
 shape a backtrace frame already uses (`Thread::Backtrace::Location#to_s`) — one shape, one
@@ -301,6 +312,12 @@ scroll, no silent fetch. A live request reset mid-Run by boot-time truncation ge
 signal; it surfaces as an ordinary *Partial request*, which already reads honestly on its
 own.
 
+Counting events rather than bytes stays true once *Response events* carry bodies. It becomes
+visible there, because a body can weigh as much as two hundred log lines. The bound is still
+a bound: no field is over 64 KB, so the worst case is the figure times that cap, about 80 MB
+for an API-only session where every response is full. A byte-counting bound would be the
+second number this bound exists to refuse, so a heavier fold is accepted by name.
+
 The *Console* is bounded by this too, and by nothing of its own — see that entry. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md` and
 `docs/adr/0005-the-memory-bounds-exemptions-and-the-consoles-retention.md`.
@@ -314,7 +331,8 @@ no time limit and no buffering: the row accepts trailing events for as long as t
 still holds it, and once the row is evicted under the *Memory bound* the event is simply
 *unattributed*. Positional, never temporal — "late" would imply a clock, and `at_wall` is
 never sorted on. Structurally rare: the request boundary is the Initializer's own middleware,
-so almost nothing can outlive it. See
+so almost nothing can outlive it. A *Response event* is not one, though it always follows the
+finish: arriving there is what it is, not a surprise. See
 `docs/adr/0002-the-event-envelope-and-ordering-key.md`.
 _Avoid_: late arrival, straggler, orphan.
 
