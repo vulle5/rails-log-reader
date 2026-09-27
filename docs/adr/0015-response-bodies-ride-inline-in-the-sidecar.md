@@ -27,6 +27,12 @@ and a Reader fold that holds more bytes for the same *Memory bound*. Settled in
   existed. (Amended in [#151](https://github.com/vulle5/rails-log-reader/issues/151). The
   first version gave a hijacked response no event, which left the *Response* tab unable to
   tell a WebSocket upgrade from an old recording.)
+- **The body is text, and the headers are pairs.** The body travels as a string holding the
+  text the app sent, never as an embedded JSON object. That is what makes the exact text one
+  toggle away and a cut body readable. The Reader parses it only when it is shown, with a
+  parser that keeps key order, one body at a time. Headers travel as `[[name, value], …]` in
+  the order the app set them. (Amended in
+  [#189](https://github.com/vulle5/rails-log-reader/issues/189). See ADR-0016.)
 - **Its own Event, after `request_finish`.** A wrapper closes after the finish, so the
   Response event always follows it. `request_finish` keeps its meaning and its moment, and a
   request stops being in flight at the same moment as before. The Reader files the Response event under
