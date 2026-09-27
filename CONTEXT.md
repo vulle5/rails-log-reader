@@ -236,6 +236,14 @@ one is running.
 **Transcript** — the *REPL*'s evaluations so far, in order. It lives as long as the console
 process: a Restart clears it, and a tab that opens later is shown it whole.
 
+**Unseen result** — the mark on a folded *REPL* drawer: an *Evaluation* finished since this tab
+folded it. A mark, not a count, because a folded drawer takes no input and so rarely owes more
+than one; another tab sharing the session is the only way to owe several. It reads as an error
+when the latest of them raised or ended without a result because the console process died.
+Opening the drawer clears it. A reload opening on a folded drawer never marks the *Transcript*
+it replays: history is not news.
+_Avoid_: unread, new count.
+
 **In-flight** — a Request event that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
 most valuable thing to see — and is *not a separate state*: because in-flight requests
