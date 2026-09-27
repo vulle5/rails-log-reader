@@ -87,12 +87,12 @@ against the same endpoint. A Scenario is a *shape of traffic*, never a feature o
 Reader — the Reader detects nothing and is never told which Scenario is running.
 _Avoid_: test, demo, case.
 
-**Attribution** — binding an SQL or App log event to the Request event it occurred
-within, via `request_id`. The core problem: with parallel requests, an unattributed log
-is unreadable.
+**Attribution** — binding an SQL or App log event to the Request event or *Evaluation* it
+occurred within, via `request_id`, which names whichever of the two owns it. The core problem:
+with parallel requests, an unattributed log is unreadable.
 
-**Unattributed** — an event with no owning request (boot lines, background jobs, rake
-tasks). Not dropped, and no longer homeless: its *Run* owns it, so it appears in that
+**Unattributed** — an event with no owning request or *Evaluation* (boot lines, background
+jobs, rake tasks, a thread an evaluation started). Not dropped, and no longer homeless: its *Run* owns it, so it appears in that
 Run's *Run row*, and — if it is an App log event — in the *Console* as well.
 
 **Run** — one boot-to-shutdown lifetime of the Rails process. Every Event belongs to
@@ -125,6 +125,11 @@ was reaped, restarted or killed while the request was still in flight. Concluded
 evidence — a `run_end`, or a `run_header` bearing a new `run_id` — never from a timer, since
 in-flight requests are given no timeout, ever. The mirror of a *Partial request*: that one
 missed a start, this one will never get a finish.
+
+An *Evaluation* is Interrupted the same way. It has one more source of evidence, because the
+Reader is the console process's parent: that process exiting ends its Run even when it was
+killed too hard to write a `run_end`. Stopping an evaluation with Ctrl-C does not interrupt it
+in this sense. The evaluation raises `Interrupt` and finishes.
 
 Only a header of kind `server` concludes it, and only for the *other* Runs: `rails s` and
 puma-dev each run one process in development, so a second server booting is a restart —
@@ -236,8 +241,22 @@ _Avoid_: console (for the REPL), terminal, shell.
 error, and whatever it printed while running. One at a time; the REPL refuses a second while
 one is running.
 
+Its queries and log lines are its own, the way a request's are: it owns an *Evaluation row*,
+and the same *Trailing event* rule applies. A thread it starts is not it, so what that thread
+emits is *unattributed*. Its input is recorded in the *Sidecar* along with its start and its
+end, so its row can still say what ran after the *Transcript* is gone. Its result and printed
+output are not recorded there. It ends `ok` or `raised`, and Ctrl-C is a `raised Interrupt` like any other
+exception. Only the console process dying makes it *Interrupted*.
+
 **Transcript** — the *REPL*'s evaluations so far, in order. It lives as long as the console
-process: a Restart clears it, and a tab that opens later is shown it whole.
+process: a Restart clears it, and a tab that opens later is shown it whole. It keeps only the
+latest so many, dropping the oldest first, so an *Evaluation row* can outlive its entry.
+
+An entry's printed output and its result, as first drawn, are each cut to a fixed number of
+lines, with what's left counted under the cut. When the entry has an *Evaluation row*, the cut
+offers to open that row on its *Result* tab; when it has none, it shows the rest in place. The
+cut is the Reader's own fold, so *Search* opens it for a match inside it, and it never cuts what
+the developer opened by hand.
 
 **Input history** — the inputs the *REPL* has submitted, kept apart from the *Transcript*
 because it outlives the console process: it survives a Restart and the Reader restarting. It is
@@ -265,7 +284,7 @@ Opening the drawer clears it. A reload opening on a folded drawer never marks th
 it replays: history is not news.
 _Avoid_: unread, new count.
 
-**In-flight** — a Request event that has started but not finished. Must be visible and
+**In-flight** — a Request event, or an *Evaluation*, that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
 most valuable thing to see — and is *not a separate state*: because in-flight requests
 are given no timeout, ever, the Reader has no threshold to declare a hang. A climbing
@@ -352,7 +371,7 @@ The *Console* is bounded by this too, and by nothing of its own — see that ent
 `docs/adr/0005-the-memory-bounds-exemptions-and-the-consoles-retention.md`.
 
 **Trailing event** — an SQL or App log event whose `seq` places it *after* its request's
-`request_finish`. Attribution is not in doubt — the `request_id` is right there — only the
+`request_finish`, or after its *Evaluation*'s end. Attribution is not in doubt — the `request_id` is right there — only the
 position is. The Reader appends it to a visibly separate **trailing section** at the end of
 the request row, never silently inside the timeline, because a log line arriving after its
 request finished is genuinely surprising and hiding it would read as a Reader bug. There is
@@ -377,12 +396,12 @@ rather than buffered away.
 _Avoid_: arrival order, wire order (the wire has no order of its own).
 
 **Activity table** — the middle of the Reader's three columns, one row per thing that
-owns events: a *Request row* or a *Run row*. A row sits at the append position of the
+owns events: a *Request row*, an *Evaluation row* or a *Run row*. A row sits at the append position of the
 earliest Event the Reader observed for it, so a new row is always an append at the bottom
 and never an insert — including a *Partial request*, which has no start to be positioned
 by. Rows mutate in place and never move. Tabs filter by **row kind only** — Requests,
-Runs, All, each carrying a count — never by method, status or controller, which v1 rules
-out; a tab that grows one of those is that exclusion returning and must be decided, not
+Runs, All, each carrying a count, with Evaluation rows under All alone because the *Transcript*
+already lists them — never by method, status or controller, which v1 rules out; a tab that grows one of those is that exclusion returning and must be decided, not
 drifted into.
 _Avoid_: request table (it holds more than requests), trace (promises spans and sampling
 that are not shipped), feed.
@@ -412,6 +431,19 @@ in the table are rendered and lit in the *Detail column* too.
 _Avoid_: column (alone), field (a wire field is something else).
 
 **Request row** — an *Activity table* row for one Request event.
+
+**Evaluation row** — an *Activity table* row for one *Evaluation*, so a query the *REPL* ran is
+one click from the input that ran it. It reads as a `REPL` tag where a request's method goes
+(plus `sandbox` when the console is sandboxed, because its writes were rolled back) and the
+input's first line where its path goes. Its Status is its state, where a faint `ok` means it
+finished without raising. Its DB time is what Rails itself counted, and Total climbs while it
+runs. Two runs of the same input are told apart by when they started, never by a number. What
+the console process emits outside any evaluation stays in its *Run row*.
+Each *Transcript* entry links to its row with its counts (`3 queries · 1 log`), which opens
+Timeline. The row's *Detail column* header shows the whole input, highlighted as Ruby the way
+the Transcript's inputs are, and the class and message when it raised. The header links back to
+the entry for as long as the Transcript still holds it. An entry whose row the *Memory bound*
+took says so rather than linking to nothing.
 
 **Run row** — an *Activity table* row holding everything a *Run* emitted with no owning
 request. One per Run, always, anchored at that Run's marker — a `rake` burst and a worker
@@ -554,7 +586,8 @@ text rather than JSON, which cannot say what a symbol or a BigDecimal is, and a 
 the `[…]` suffix that reaches it from the result.
 
 **Detail tab** — one of the tabs in the bar under the *Detail column*'s header: **Timeline**,
-**Params**, **Headers** and **Response**. The bar sticks with the header, so a request's params are one
+**Params**, **Headers** and **Response** for a request, and **Timeline** and **Result** for an
+*Evaluation row*. The bar sticks with the header, so a request's params are one
 click away however far down the timeline the column is. That matters because a Selection opens
 at the bottom. Each tab keeps its own scroll position: Params opens at its top, and Timeline
 comes back where it was left. The chosen tab survives a change of *Selection*, so clicking
@@ -575,6 +608,14 @@ unexplained blank. A cut body says how big the whole was and how much is shown, 
 as raw text, because a cut body cannot be laid out. A request still in flight has a disabled
 Headers tab and a Response tab waiting for it, while a request that never reached a controller
 still has both, because its response exists.
+
+**Result** is an *Evaluation*'s *Transcript* entry with more room: what it printed, then its
+result in the *Value viewer* or its error as a backtrace, drawn exactly as the drawer draws them.
+It is a second view of that entry, never a copy of it, and its folds and text toggle are its own.
+Its label says what came back before it is opened, the result's class or `raised`. While the
+evaluation runs, the tab is waiting for it. Once the Transcript no longer holds the entry, after
+a Restart, when the Transcript has dropped it as one of its oldest, or for an earlier console's row, the tab says which
+in plain words rather than going blank or disappearing.
 
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed
