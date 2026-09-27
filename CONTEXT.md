@@ -53,7 +53,10 @@ V2 adds a fourth:
   wire field is, with its original size kept, so a cut body says so where it is read. It
   comes after its request's finish by construction, because the response is only complete
   once the client has it, and it is filed under its request as that request's response,
-  never as a *Trailing event*. A hijacked response, such as a WebSocket upgrade, has none.
+  never as a *Trailing event*. A hijacked response, such as a WebSocket upgrade, gets one
+  too, saying only that the connection was handed over: the app wrote whatever followed
+  itself, so there are no headers to read. So a finished request with no Response event
+  was recorded before there were any, and the *Response* tab can say exactly that.
   See `docs/adr/0015-response-bodies-ride-inline-in-the-sidecar.md`.
 
 **Callsite** — the file and line an SQL or App log event's own code ran at, captured as a
@@ -506,7 +509,7 @@ what it holds, cutting describes what the wire sent, and neither reads the other
 `docs/adr/0011-a-backtrace-collapses-gem-frames-into-inline-markers-by-default.md` (#90).
 
 **Value viewer** — the Reader's one collapsible, highlighted view of a structured value: a
-request's params first, and later JSON and XML response bodies and an *Evaluation*'s result. A
+request's params, a JSON or XML response body, and an *Evaluation*'s result. A
 tree, with the top level open and every nested hash or array folded to a summary of what it
 holds (`{…} 7 keys`, `[…] 3 items`). It may lay a structure out, because a tree is not an edit,
 and it may colour each value by the type it actually has: a form's `"48"` is a string and is
@@ -529,6 +532,14 @@ while the term matches there. Change the term and it folds back, and what the de
 stays open. Folding a node Search is holding open is the developer's fold, and it wins until
 the term changes, with the folded summary lit and counting the matches inside.
 
+A response body is text the app sent, so it is laid out as a tree by default with the text
+exactly as sent one toggle away. XML is the same tree as JSON rather than a view of its own: an
+element is a node named by its tag, with its attributes beside it, an element holding only text
+is a leaf with that text as its string value, and an element with children folds to a summary of
+them. Copy hands over what is showing, laid-out text while laid out and the exact text while raw.
+A node's path is what reaches it in a Rails test, `response.parsed_body["posts"][0]`, or its
+XPath in XML.
+
 An *Evaluation*'s result is a Ruby value, not a wire value, so its tree is a **snapshot** taken
 when the evaluation finished, never a live object read again on expanding, and every key and
 leaf is drawn as its own `inspect` and coloured by its Ruby type: `:a` and `"a"` are two keys,
@@ -543,7 +554,7 @@ text rather than JSON, which cannot say what a symbol or a BigDecimal is, and a 
 the `[…]` suffix that reaches it from the result.
 
 **Detail tab** — one of the tabs in the bar under the *Detail column*'s header: **Timeline**,
-**Params**, and later **Response**. The bar sticks with the header, so a request's params are one
+**Params**, **Headers** and **Response**. The bar sticks with the header, so a request's params are one
 click away however far down the timeline the column is. That matters because a Selection opens
 at the bottom. Each tab keeps its own scroll position: Params opens at its top, and Timeline
 comes back where it was left. The chosen tab survives a change of *Selection*, so clicking
@@ -551,6 +562,19 @@ through requests on Params compares their params. A row with no such tab, like a
 request that never reached a controller, shows Timeline. *Search* never hides: a match inside a
 tab that is not showing is counted on that tab.
 _Avoid_: pane, panel, section.
+
+Headers and Response both read the request's *Response event*, and Headers comes first, in the
+order an HTTP response reads. **Headers** holds the response's headers only, in the order the app
+set them, and says "Response headers" at its top, because a tab named Headers is otherwise easily
+taken for the request's. **Response** is the body: a strip with the status, the content type and
+the size the app sent, then the body in the *Value viewer*. The tab's label says whether there is
+a body to look at before it is opened: `json` or `xml` when there is one, and otherwise a faint
+word for why not (`html`, `304`, `gzip`). When there is no body, the tab says why in plain words
+("This response is an HTML page (18 KB)", "This is a redirect to …"), so it is never an
+unexplained blank. A cut body says how big the whole was and how much is shown, and is shown only
+as raw text, because a cut body cannot be laid out. A request still in flight has a disabled
+Headers tab and a Response tab waiting for it, while a request that never reached a controller
+still has both, because its response exists.
 
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed

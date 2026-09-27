@@ -16,11 +16,17 @@ and a Reader fold that holds more bytes for the same *Memory bound*. Settled in
   emits when the body closes, which is after the client has the bytes. It sees every response
   through the stack, including exception pages, routing 404s and mounted Rack apps, and adds no
   middleware.
-- **Every response gets one, and hijacked responses get none.** All headers are read from the
+- **Every response gets one, a hijacked one included.** All headers are read from the
   shared Hash at close, without filtering. A body is kept only when it is JSON (`+json`) or XML
   (`+xml`), already in memory, not `content-encoding`-encoded, and not empty. Otherwise the
   event says why there is no body: another type, streamed, encoded or empty. Nothing is teed
-  from a stream, and no binary byte or `send_file` path is recorded.
+  from a stream, and no binary byte or `send_file` path is recorded. A hijacked response, such
+  as a WebSocket upgrade, gets an event that says only that the connection was handed over,
+  with no headers and no body, because the app wrote whatever followed itself. So a finished
+  request with no Response event means one thing: it was recorded before Response events
+  existed. (Amended in [#151](https://github.com/vulle5/rails-log-reader/issues/151). The
+  first version gave a hijacked response no event, which left the *Response* tab unable to
+  tell a WebSocket upgrade from an old recording.)
 - **Its own Event, after `request_finish`.** A wrapper closes after the finish, so the
   Response event always follows it. `request_finish` keeps its meaning and its moment, and a
   request stops being in flight at the same moment as before. The Reader files the Response event under
