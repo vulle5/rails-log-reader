@@ -488,7 +488,7 @@ what it holds, cutting describes what the wire sent, and neither reads the other
 `docs/adr/0011-a-backtrace-collapses-gem-frames-into-inline-markers-by-default.md` (#90).
 
 **Value viewer** — the Reader's one collapsible, highlighted view of a structured value: a
-request's params first, and later JSON and XML response bodies and possibly REPL results. A
+request's params first, and later JSON and XML response bodies and an *Evaluation*'s result. A
 tree, with the top level open and every nested hash or array folded to a summary of what it
 holds (`{…} 7 keys`, `[…] 3 items`). It may lay a structure out, because a tree is not an edit,
 and it may colour each value by the type it actually has: a form's `"48"` is a string and is
@@ -510,6 +510,19 @@ path down to the match opens and its matchless siblings stay folded. That openin
 while the term matches there. Change the term and it folds back, and what the developer opened
 stays open. Folding a node Search is holding open is the developer's fold, and it wins until
 the term changes, with the folded summary lit and counting the matches inside.
+
+An *Evaluation*'s result is a Ruby value, not a wire value, so its tree is a **snapshot** taken
+when the evaluation finished, never a live object read again on expanding, and every key and
+leaf is drawn as its own `inspect` and coloured by its Ruby type: `:a` and `"a"` are two keys,
+and `1`, `1.0` and a BigDecimal are three kinds of number. A hash, array, set, struct, a record's
+attributes, a relation's first ten records and a plain object's instance variables are laid out,
+each node labelled with what it is (`Comment {…} 6 attributes`). An object that writes its own
+`inspect` is a leaf showing that text, because its author chose how it reads, and a cycle is a
+leaf marked as one. A record's filtered attribute is the same marker as a filtered param. The
+result's `inspect` text is always one toggle away, and it is the only view of a value with no
+structure. A result too big to carry whole says where it was cut. Copy hands over `inspect`
+text rather than JSON, which cannot say what a symbol or a BigDecimal is, and a node's path is
+the `[…]` suffix that reaches it from the result.
 
 **Detail tab** — one of the tabs in the bar under the *Detail column*'s header: **Timeline**,
 **Params**, and later **Response**. The bar sticks with the header, so a request's params are one
@@ -624,8 +637,9 @@ trigger.
 _Avoid_: header, toolbar, top bar.
 
 **Search** — one global, case-insensitive substring, typed once and lit wherever the Reader
-renders log text: *Console* lines, SQL, paths, `Controller#action`, and the rest of what the
-*Detail column* reads out of an Event. It **highlights and never hides**: v1 filters the
+renders log text: *Console* lines, SQL, paths, `Controller#action`, the rest of what the
+*Detail column* reads out of an Event, and the *REPL*'s *Transcript*, which a folded drawer
+counts on its header without unfolding. It **highlights and never hides**: v1 filters the
 *Activity table* by row kind and nothing else, and a text box that thinned rows or lines would
 be that exclusion returning through the one control nobody would think to check it against.
 So it is not a filter, it reaches no *Auto-scroll*, and it has neither a regex — a query
