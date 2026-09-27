@@ -500,7 +500,16 @@ be a derivation. Text is the exception: it may be pretty-printed only with the r
 toggle away. A long string is cut to one line with a count of what's left, one click from
 whole. Copy hands over the whole value as JSON, or on hover one node's value or its key path
 (`params[:comment][:tags][0]`).
-_Avoid_: JSON viewer, inspector, tree view.
+
+*Search* matches each key and each value on its own, as drawn, so a string keeps its quotes
+and escapes, and `FILTERED` is the word on its chip. A match never spans a key and its value,
+and the viewer's own labels (array indices, summaries, the count of what's left) are not the
+value and are never matched. Every fold the viewer makes, a nested node or a long string's cut,
+is the Reader's own, so like a backtrace's gem-frame marker it opens for a match inside it: the
+path down to the match opens and its matchless siblings stay folded. That opening holds only
+while the term matches there. Change the term and it folds back, and what the developer opened
+stays open. Folding a node Search is holding open is the developer's fold, and it wins until
+the term changes, with the folded summary lit and counting the matches inside.
 
 **Detail tab** — one of the tabs in the bar under the *Detail column*'s header: **Timeline**,
 **Params**, and later **Response**. The bar sticks with the header, so a request's params are one
@@ -621,7 +630,9 @@ renders log text: *Console* lines, SQL, paths, `Controller#action`, and the rest
 be that exclusion returning through the one control nobody would think to check it against.
 So it is not a filter, it reaches no *Auto-scroll*, and it has neither a regex — a query
 language — nor next/prev — navigation. A match is found on the text as rendered, so SQL is
-matched whole and lit across the highlighter's own tokens, and never edited to do it.
+matched whole and lit across the highlighter's own tokens, and never edited to do it. Typing
+never waits on the lighting: when there is a lot to light, the matches trail the term, and
+every column catches up together, because one term is never shown two ways at once.
 _Avoid_: filter, find (implies stepping through matches).
 
 **Empty state** — what an *Activity table* with no rows says about why, told apart by reads of
