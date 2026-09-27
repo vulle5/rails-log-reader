@@ -19,6 +19,7 @@ import {
 import { CollapseConsoleButton, CollapsedConsole, useUnseenCount } from "./features/console/components/ConsoleFold"
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
+import type { DetailTabId } from "./features/detail-column/components/DetailTabs"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { HoverGrouping } from "./HoverGrouping"
@@ -128,6 +129,8 @@ export function Reader({
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
   const { filter: detailFilter, toggleSchema } = useDetailFilter()
+  // Above Selection, so clicking through requests on Params compares their params.
+  const [detailTab, setDetailTab] = useState<DetailTabId>("timeline")
   const tableColumns = useHiddenTableColumns()
 
   // The search is here for the reason the filters are, and is the one thing here that is not
@@ -378,9 +381,17 @@ export function Reader({
                 place="detail"
                 name="Detail column"
                 scroll={detailScroll}
+                bodyScrolls={false}
                 controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
               >
-                <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
+                <DetailColumn
+                  row={showing}
+                  filter={detailFilter}
+                  railsRoot={railsRoot}
+                  tab={detailTab}
+                  onTab={setDetailTab}
+                  scroll={detailScroll}
+                />
               </Column>
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's
                   gutter and lands on a row in the table beside it. `layoutKey` is everything that

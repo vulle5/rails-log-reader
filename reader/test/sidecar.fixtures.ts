@@ -116,8 +116,8 @@ export function aRun(runId: string, epoch = EPOCH) {
     end: () => envelope("run_end", null, {}),
     start: (requestId: string, method = "GET", path = "/posts/12", at_wall?: number) =>
       envelope("request_start", requestId, { method, path }, at_wall),
-    route: (requestId: string, controller = "PostsController", action = "show") =>
-      envelope("request_route", requestId, { controller, action, format: "html", params: {} }),
+    route: (requestId: string, controller = "PostsController", action = "show", params: Record<string, unknown> = {}) =>
+      envelope("request_route", requestId, { controller, action, format: "html", params }),
     finish: (requestId: string, finished: Partial<RequestFinishPayload> = {}) =>
       // No view or db runtime unless a test asks for them: a request that died before
       // reaching a controller has neither, and Rails 7.1 and 7.2 carry neither ever.

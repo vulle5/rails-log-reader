@@ -62,13 +62,20 @@ function start(at: number, requestId: string, method: string, path: string, wall
 }
 
 /** Emitted only when a controller is entered, so leaving it out is how a 404 is written. */
-function route(at: number, requestId: string, controller: string, action: string, format = "html") {
+function route(
+  at: number,
+  requestId: string,
+  controller: string,
+  action: string,
+  format = "html",
+  params: Record<string, unknown> = {},
+) {
   emit({
     at,
     runId: SERVER_RUN,
     requestId,
     type: "request_route",
-    payload: { controller, action, format, params: {} },
+    payload: { controller, action, format, params },
   })
 }
 
@@ -247,8 +254,42 @@ log(4560, null, "info", "[ActiveJob] [DeliverWebhookJob] [9f2c1a] Performed Deli
 
 // --- a 500 with a backtrace --------------------------------------------------
 const E = "e5510b77"
+
+/**
+ * The awkward params hash, on the request a developer would open Params on first: nested four
+ * deep, an array of hashes, a value `filter_parameters` already replaced, a gift note long
+ * enough to need cutting, and form-shaped strings that look like numbers beside the one real
+ * number a JSON body can carry. `controller`, `action` and `format` come last, where Rails
+ * merges the route's own into the body's.
+ */
+const ORDER_PARAMS = {
+  cart_id: "77213",
+  order: {
+    currency: "EUR",
+    shipping: {
+      address: {
+        line1: "Mannerheimintie 12 B 34",
+        postal_code: "00100",
+        geo: { lat: "60.1699", lng: "24.9384" },
+      },
+      method: "express",
+    },
+    line_items: [
+      { sku: "TEE-BLK-M", quantity: "2", price_cents: "2500" },
+      { sku: "MUG-01", quantity: 1, price_cents: "1200", gift_wrap: true },
+    ],
+    gift_note:
+      "Happy birthday! I saw this and thought of the time we spent a whole weekend debugging that N+1 in the feed endpoint — hope the mug makes the next one shorter.",
+    coupon_code: null,
+  },
+  payment_token: "[FILTERED]",
+  format: "json",
+  controller: "api/v1/orders",
+  action: "create",
+}
+
 start(5000, E, "POST", "/api/v1/orders")
-route(5010, E, "Api::V1::OrdersController", "create", "json")
+route(5010, E, "Api::V1::OrdersController", "create", "json", ORDER_PARAMS)
 sql(5060, E, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."id" = ? LIMIT ?  [["id", 4021], ["LIMIT", 1]]', 0.4)
 log(5100, E, "info", "OrdersController#create for cart 77213")
 sql(5150, E, "Cart Load", 'SELECT "carts".* FROM "carts" WHERE "carts"."id" = ? LIMIT ?  [["id", 77213], ["LIMIT", 1]]', 0.6)
@@ -471,6 +512,9 @@ export const CLOCK_STEPPED_BACK = { requestId: I, path: "/api/v1/search?q=rails+
 
 /** The request that never reached a controller. */
 export const NEVER_ROUTED = { requestId: MISTYPED, path: "/api/v1/notifcations" }
+
+/** The request carrying the awkward params hash, and that hash as the wire carried it. */
+export const AWKWARD_PARAMS = { requestId: E, path: "/api/v1/orders", params: ORDER_PARAMS }
 
 /** The request that starts, emits, and never finishes. */
 export const HANGS = { requestId: H, path: "/admin/reports/monthly.csv" }

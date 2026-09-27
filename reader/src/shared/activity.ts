@@ -71,6 +71,12 @@ export type RequestRow = {
   /** `null` while a request has not entered a controller: `request_route`'s absence is the signal. */
   controller: string | null
   action: string | null
+  /**
+   * `request_route`'s `params`, exactly as the wire parsed them: already filtered by the app's
+   * own `filter_parameters`, keys in the order they arrived. `null` exactly when `controller`
+   * is, and read the same way.
+   */
+  params: Record<string, unknown> | null
   status: number | null
   /**
    * What the request itself said it took. `null` while it is still in flight, and `null` for
@@ -342,6 +348,7 @@ export function activityTable(): ActivityTable {
         path: null,
         controller: null,
         action: null,
+        params: null,
         status: null,
         durationMs: null,
         dbRuntimeMs: null,
@@ -653,6 +660,7 @@ export function activityTable(): ActivityTable {
       case "request_route":
         row.controller = envelope.payload.controller
         row.action = envelope.payload.action
+        row.params = envelope.payload.params
         break
       case "request_finish":
         row.status = envelope.payload.status

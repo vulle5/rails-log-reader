@@ -195,6 +195,40 @@ describe("folding a request", () => {
     expect(theOnlyRequest(rows)).toMatchObject({ method: "GET", path: "/pots/12", status: 404 })
     expect(theOnlyRequest(rows).controller).toBeNull()
     expect(theOnlyRequest(rows).action).toBeNull()
+    expect(theOnlyRequest(rows).params).toBeNull()
+  })
+
+  test("carries a routed request's params as they arrived, beside its controller and action", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const params = {
+      comment: { body: "Nice post", tags: ["ruby", "rails"] },
+      token: "[FILTERED]",
+      id: "12",
+      controller: "comments",
+      action: "create",
+    }
+    await appendToSidecar(
+      log,
+      run.start("req-1", "POST", "/posts/12/comments"),
+      run.route("req-1", "CommentsController", "create", params),
+      run.finish("req-1", { status: 201 }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({ controller: "CommentsController", params })
+    expect(Object.keys(theOnlyRequest(rows).params ?? {})).toEqual(["comment", "token", "id", "controller", "action"])
+  })
+
+  test("holds no params while a request has not reached a controller", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1", "GET", "/reports/monthly"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).params).toBeNull()
   })
 
   test("attaches SQL and App log events to their request and drives its counts", async () => {
