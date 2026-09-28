@@ -15,12 +15,15 @@ export type PageSocket = { path: string; protocols: string[]; upstream?: WebSock
  * socket without calling any handler of the Reader's, so a bundle on the Reader's own port
  * would answer every `Host`. Browsers cannot open a unix socket.
  *
- * `fetch` passes a request on as it came, minus the `Host` and `Origin` the gate has already
- * judged, which Bun's development server would otherwise judge again by its own rules.
- * `websocket` does the same for the HMR socket, which exists only in development.
+ * `fetch` passes a GET or HEAD on as it came, minus the `Host` and `Origin` the gate has
+ * already judged, which Bun's development server would otherwise judge again by its own rules.
+ * `websocket` does the same for the HMR socket, which exists only in development. Anything
+ * else is refused here, because what reaches `fetch` is what no route declared, and it was
+ * gated as a view: a write or a socket of the Reader's own is an act, and needs its route.
  */
 export function servePage(development: Development) {
   const socket = pageSocket(development)
+  const hmr = development !== false && development !== undefined
   const forwarded = { host: "localhost", origin: "http://localhost" }
 
   function fetch(request: Request, server: Bun.Server<PageSocket>) {
@@ -28,6 +31,7 @@ export function servePage(development: Development) {
     const path = url.pathname + url.search
 
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+      if (!hmr || url.pathname !== "/_bun/hmr") return new Response(null, { status: 404 })
       const protocols = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((each) => each.trim()).filter(Boolean)
       const data = { path, protocols, queued: [] }
       const upgraded =
@@ -35,6 +39,10 @@ export function servePage(development: Development) {
           ? server.upgrade(request, { data })
           : server.upgrade(request, { data, headers: new Headers({ "sec-websocket-protocol": protocols[0] }) })
       return upgraded ? undefined : new Response(null, { status: 400 })
+    }
+
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } })
     }
 
     const headers = new Headers(request.headers)

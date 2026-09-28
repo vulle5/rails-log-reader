@@ -515,6 +515,37 @@ describe("who the Reader answers", () => {
     expect((await requestAs(url, "/initializer-status", { host, origin: `http://${host}` })).status).toBe(200)
   })
 
+  test("answers anything no route declares only as the page, read with GET or HEAD", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+    const origin = `http://${host}`
+
+    for (const [method, path] of [["POST", "/nowhere"], ["PUT", "/"], ["DELETE", "/initializer-repair"]] as const) {
+      expect((await requestAs(url, path, { method, host, origin })).status).toBe(405)
+    }
+    expect((await requestAs(url, "/nowhere", { method: "HEAD", host })).status).toBe(200)
+  })
+
+  test("opens no socket that no route declares, the development page's own aside", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+
+    const upgrade = (path: string) =>
+      Bun.fetch(new URL(path, url), {
+        headers: {
+          host,
+          origin: `http://${host}`,
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+        },
+      })
+
+    expect((await upgrade("/repl")).status).toBe(404)
+    expect((await upgrade("/_bun/hmr")).status).toBe(101)
+  })
+
   test("never says Access-Control-Allow-Origin, whether it serves or refuses", async () => {
     const url = await readerUrl(run(await railsRoot()))
     const host = new URL(url).host
