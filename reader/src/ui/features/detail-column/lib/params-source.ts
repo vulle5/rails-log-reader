@@ -1,4 +1,5 @@
 import type { PathStep, ValueNode, ValueSource } from "../../value-viewer/lib/value-tree"
+import { FILTERED, jsonText, rubyString } from "./json-text"
 import { isParamsHash, type RequestRoutePayload } from "../../../../shared/wire"
 
 /**
@@ -16,7 +17,7 @@ import { isParamsHash, type RequestRoutePayload } from "../../../../shared/wire"
  * `params[:comment][:tags][0]`.
  */
 export function paramsSource(params: RequestRoutePayload["params"]): ValueSource {
-  return { tree: nodeOf(params), copyText: (node) => jsonOf(node, ""), pathText }
+  return { tree: nodeOf(params), copyText: (node) => jsonText(node), pathText }
 }
 
 function nodeOf(value: unknown): ValueNode {
@@ -49,24 +50,6 @@ function nodeOf(value: unknown): ValueNode {
   return { type: "leaf", text: "null", token: "null" }
 }
 
-const FILTERED = "[FILTERED]"
-
-/** `node` as JSON laid out two spaces a level, the way `JSON.stringify(value, null, 2)` lays it out. A leaf's text already is its JSON. */
-function jsonOf(node: ValueNode, indent: string): string {
-  if (node.type === "filtered") return JSON.stringify(FILTERED)
-  if (node.type === "cycle") return JSON.stringify(node.text)
-  if (node.type === "leaf") return node.text
-
-  const [open, close] = node.kind === "hash" ? ["{", "}"] : ["[", "]"]
-  if (node.children.length === 0) return `${open}${close}`
-  const inner = `${indent}  `
-  const members = node.children.map(({ key, node: child }) => {
-    const name = node.kind === "hash" ? `${JSON.stringify(key)}: ` : ""
-    return `${inner}${name}${jsonOf(child, inner)}`
-  })
-  return `${open}\n${members.join(",\n")}\n${indent}${close}`
-}
-
 function pathText(path: readonly PathStep[]) {
   return `params${path.map((step) => `[${step.in === "list" ? step.key : symbol(step.key)}]`).join("")}`
 }
@@ -74,6 +57,5 @@ function pathText(path: readonly PathStep[]) {
 /** A Hash key as a Ruby symbol: bare where Ruby reads it bare, quoted otherwise, as in `:"42"`. */
 function symbol(key: string) {
   if (/^[A-Za-z_][A-Za-z0-9_]*[?!]?$/.test(key)) return `:${key}`
-  // Escaped as JSON, which Ruby's double quotes read alike, but for `#{`, `#$` and `#@`.
-  return `:${JSON.stringify(key).replace(/#(?=[{$@])/g, "\\#")}`
+  return `:${rubyString(key)}`
 }

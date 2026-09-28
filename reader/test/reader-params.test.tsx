@@ -31,15 +31,16 @@ function expectLines(items: readonly HTMLElement[], lines: readonly (string | Re
 }
 
 describe("the Detail tab bar", () => {
-  test("sits under a request's header as Timeline | Params | Headers, with Timeline showing", async () => {
+  test("sits under a request's header as Timeline | Params | Headers | Response, with Timeline showing", async () => {
     const { user } = openTheReader(DENSE_TRAFFIC)
     await select(user, AWKWARD_PARAMS.path)
 
     const tabs = within(detailTabBar()).getAllByRole("tab")
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
     expect(tabs[0]).toHaveTextContent(/^Timeline$/)
     expect(tabs[1]).toHaveTextContent(/^Params$/)
     expect(tabs[2]).toHaveTextContent(/^Headers$/)
+    expect(tabs[3]).toHaveTextContent(/^Response$/)
     expect(detailTab("Timeline")).toHaveAttribute("aria-selected", "true")
     expect(detailTab("Params")).toHaveAttribute("aria-selected", "false")
     expect(detailPanel("Timeline")).toContainElement(timeline())

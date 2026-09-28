@@ -10,7 +10,7 @@ import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
 import { CopyButton, LineCopy } from "../../../components/CopyButton"
-import { bytes } from "../lib/format"
+import { bytes, size, statusLine } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
 import { OpenModifierHeld, useOpenModifierHeld } from "../hooks/open-modifier"
@@ -19,6 +19,7 @@ import { withOpenModifier } from "../../../lib/platform"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
+import { jsonSource } from "../lib/json-source"
 import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import { countMatches } from "../../value-viewer/lib/value-matches"
@@ -123,6 +124,8 @@ function RequestDetail({
   const params = useMemo(() => (row.params === null ? null : paramsSource(row.params)), [row.params])
   const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
   const headersMatches = useMemo(() => headerMatches(search, row.response), [search, row.response])
+  const body = useMemo(() => responseBody(row.response), [row.response])
+  const bodyMatches = useMemo(() => responseBodyMatches(search, body), [search, body])
 
   return (
     <Detail
@@ -174,6 +177,16 @@ function RequestDetail({
             subject: row.id,
             matches: headersMatches,
             panel: <ResponseHeaders response={row.response} />,
+          },
+          {
+            id: "response",
+            label: "Response",
+            // Waiting while in flight, but an interrupted request's response never comes.
+            disabled: row.state === "interrupted",
+            hint: body === null ? undefined : { text: body.format, tone: "strong" },
+            subject: row.id,
+            matches: bodyMatches,
+            panel: <Response state={row.state} response={row.response} body={body} />,
           },
         ]}
       />
@@ -296,6 +309,68 @@ function headerMatches(search: Search, response: RowResponse | null) {
   return response.payload.headers.reduce(
     (count, [name, value]) => count + search.find(name).length + search.find(value).length,
     0,
+  )
+}
+
+/** A kept body: its format, the text the app sent, and the tree to draw it as when it has one. */
+type ResponseBody = { format: "json" | "xml"; text: string; source: ValueSource | null }
+
+/**
+ * A response's kept body, parsed only here, for the one request selected. A JSON body the wire
+ * cut, or one that is not valid JSON, has no tree.
+ */
+function responseBody(response: RowResponse | null): ResponseBody | null {
+  if (response === null || !("body" in response.payload)) return null
+  const { format, body: text } = response.payload
+  const source = format === "json" && response.bodyCutFrom === null ? jsonSource(text) : null
+  return { format, text, source }
+}
+
+/** How many matches of the current term lie in a response's body, the same ones `Response` lights. */
+function responseBodyMatches(search: Search, body: ResponseBody | null) {
+  if (body === null) return 0
+  return body.source === null ? search.find(body.text).length : countMatches(search, body.source.tree)
+}
+
+/**
+ * The Response tab: a strip saying the status, the content type and the size the app sent, then
+ * the body in the *Value viewer*, or as the text the app sent when it has no tree.
+ */
+function Response({
+  state,
+  response,
+  body,
+}: {
+  state: RequestRow["state"]
+  response: RowResponse | null
+  body: ResponseBody | null
+}) {
+  if (response === null) {
+    return (
+      <p className="px-3 py-2 text-faint">
+        {state === "in-flight" ? "Waiting for the response…" : "No response for this request."}
+      </p>
+    )
+  }
+
+  const { status, content_type: contentType, size: sent } = response.payload
+  const strip = [
+    statusLine(status),
+    // The media type alone: its parameters, such as the charset, are on the Headers tab.
+    ...(contentType === null ? [] : [contentType.split(";")[0]?.trim() ?? contentType]),
+    ...(sent === undefined ? [] : [size(sent)]),
+  ]
+  return (
+    <div className="px-3 py-2">
+      <p className="pb-3 font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
+      {body === null ? null : body.source === null ? (
+        <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
+          <Highlight text={body.text} />
+        </pre>
+      ) : (
+        <ValueViewer label="Response body" source={body.source} />
+      )}
+    </div>
   )
 }
 

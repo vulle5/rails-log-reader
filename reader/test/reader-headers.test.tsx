@@ -31,7 +31,7 @@ function expectHeaders(panel: HTMLElement, lines: readonly string[]) {
 }
 
 describe("the Headers tab", () => {
-  test("joins a finished request's bar as Timeline | Params | Headers", async () => {
+  test("joins a finished request's bar as Timeline | Params | Headers | Response", async () => {
     const run = aRun(SERVER_RUN)
     const { user } = openTheReader([
       run.start("req-1", "GET", "/posts/12"),
@@ -42,10 +42,11 @@ describe("the Headers tab", () => {
     await select(user, "/posts/12")
 
     const tabs = within(detailTabBar()).getAllByRole("tab")
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
     expect(tabs[0]).toHaveTextContent(/^Timeline$/)
     expect(tabs[1]).toHaveTextContent(/^Params$/)
     expect(tabs[2]).toHaveTextContent(/^Headers$/)
+    expect(tabs[3]).toHaveTextContent(/^Response json$/)
     expect(detailTab("Headers")).toBeEnabled()
   })
 
