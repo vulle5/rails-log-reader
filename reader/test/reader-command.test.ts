@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { networkInterfaces, tmpdir } from "node:os"
 import { join } from "node:path"
-
-import { networkInterfaces } from "node:os"
 
 import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "../src/server/allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "../src/server/app-name"
@@ -325,6 +323,16 @@ describe("starting the Reader", () => {
 /** The Reader's own master copy, read the same way `initializerFileStatus` reads it. */
 const MASTER_INITIALIZER = join(import.meta.dir, "..", "rails", "rails_log_reader.rb")
 
+const STALE_INITIALIZER = "# a stale copy of the Initializer\n"
+
+/** A Host app with a copy of the Initializer that has drifted from the master. */
+async function staleRoot() {
+  const root = await railsRoot()
+  await mkdir(join(root, "config", "initializers"), { recursive: true })
+  await writeFile(join(root, INITIALIZER_RELATIVE_PATH), STALE_INITIALIZER)
+  return root
+}
+
 /** What `GET /initializer-status` answers, with the Marker file absent unless a test says otherwise. */
 function answer(said: { installed: boolean; current: boolean; enabled?: boolean }) {
   return { enabled: false, masterPath: MASTER_INITIALIZER, ...said }
@@ -350,9 +358,7 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
   })
 
   test("GET /initializer-status says not current when the copy has drifted", async () => {
-    const root = await railsRoot()
-    await mkdir(join(root, "config", "initializers"), { recursive: true })
-    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+    const root = await staleRoot()
     const url = await readerUrl(run(root))
 
     const response = await Bun.fetch(new URL("initializer-status", url))
@@ -371,9 +377,7 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
   })
 
   test("POST /initializer-repair overwrites the copy in place and touches nothing else", async () => {
-    const root = await railsRoot()
-    await mkdir(join(root, "config", "initializers"), { recursive: true })
-    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+    const root = await staleRoot()
     const url = await readerUrl(run(root))
 
     const repaired = await Bun.fetch(new URL("initializer-repair", url), {
@@ -407,16 +411,8 @@ async function requestAs(
   return await Bun.fetch(new URL(path, url), { method, headers })
 }
 
-/** A Host app with a stale Initializer, so a repair that went through would show. */
-async function staleRoot() {
-  const root = await railsRoot()
-  await mkdir(join(root, "config", "initializers"), { recursive: true })
-  await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
-  return root
-}
-
 async function repaired(root: string) {
-  return (await readFile(join(root, INITIALIZER_RELATIVE_PATH), "utf8")) !== "# a stale copy of the Initializer\n"
+  return (await readFile(join(root, INITIALIZER_RELATIVE_PATH), "utf8")) !== STALE_INITIALIZER
 }
 
 describe("who the Reader answers", () => {

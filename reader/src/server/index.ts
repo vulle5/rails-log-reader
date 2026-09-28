@@ -34,15 +34,18 @@ if (port === null) {
   process.exit(1)
 }
 
-const allowedHosts = readAllowedHosts(process.env[ALLOWED_HOSTS_VARIABLE])
+const readHosts = readAllowedHosts(process.env[ALLOWED_HOSTS_VARIABLE])
 
-if (allowedHosts === null) {
+if (readHosts === null) {
   console.error(
     `rails-log-reader: ${ALLOWED_HOSTS_VARIABLE} is set to "${process.env[ALLOWED_HOSTS_VARIABLE]}". ` +
       `It takes comma-separated hostnames with no port or scheme, like "tunnel.example,.ngrok.example".`,
   )
   process.exit(1)
 }
+
+// Narrowed the way `railsRoot` is, for the closures below.
+const allowedHosts: string[] = readHosts
 
 const logDirectory = join(railsRoot, "log")
 
@@ -182,9 +185,9 @@ type Handler = (request: Request, server: Bun.Server<PageSocket>) => Response | 
  * and the Reader prints the `Host` or `Origin` it refused, which is how a developer finds the
  * name to add to `RAILS_LOG_READER_ALLOWED_HOSTS`.
  */
-function gated<H extends Handler>(kind: RouteKind, handler: H) {
+function gated(kind: RouteKind, handler: Handler) {
   return (request: Request, server: Bun.Server<PageSocket>) => {
-    const refused = refusal(request, kind, allowedHosts ?? [])
+    const refused = refusal(request, kind, allowedHosts)
     if (refused === null) return handler(request, server)
 
     console.log(`rails-log-reader: refused ${request.method} ${new URL(request.url).pathname} for ${refused}`)
@@ -192,8 +195,8 @@ function gated<H extends Handler>(kind: RouteKind, handler: H) {
   }
 }
 
-const view = <H extends Handler>(handler: H) => gated("view", handler)
-const act = <H extends Handler>(handler: H) => gated("act", handler)
+const view = (handler: Handler) => gated("view", handler)
+const act = (handler: Handler) => gated("act", handler)
 
 const page = servePage(process.env.NODE_ENV === "production" ? false : { hmr: true, console: true })
 
@@ -201,7 +204,7 @@ const server = serveOrSaySo(port)
 
 // The port it actually bound, which with an ephemeral one is the only place that is written
 // down. Printed before anything else, because it is the line a developer came for. Named
-// `localhost` though it binds `127.0.0.1`, because that is the address the README gives.
+// `localhost` though it binds `127.0.0.1`.
 console.log(`Rails log reader  http://localhost:${server.port}/`)
 console.log(`Rails root        ${railsRoot}`)
 
@@ -215,8 +218,6 @@ function serveOrSaySo(port: number) {
   try {
     return Bun.serve<PageSocket>({
       port,
-      // Never the wildcard, which is every interface on the network, and never `localhost`,
-      // which may be `::1` alone and so out of reach of a Windows browser under WSL.
       hostname: "127.0.0.1",
       // Every route is a view or an act, and passes the gate before it runs. The page, its
       // assets and anything else unmatched is the `fetch` below, a view too.

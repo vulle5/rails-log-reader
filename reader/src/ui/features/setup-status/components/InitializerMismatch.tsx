@@ -131,7 +131,7 @@ function RepairControl({
   place: "banner" | "screen"
 }) {
   if (actsOnlyFrom !== null) {
-    return <p className={place === "screen" ? "text-muted" : undefined}>Repairing needs {actsOnlyFrom}</p>
+    return <p className={cn(place === "screen" && "text-muted")}>Repairing needs {actsOnlyFrom}</p>
   }
 
   switch (state.phase) {
