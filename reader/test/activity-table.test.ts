@@ -19,6 +19,7 @@ import {
   HANGS,
   NEVER_ROUTED,
   RAKE_RUN,
+  RESPONSES,
   SERVER_RUN,
 } from "./traffic.fixtures"
 import {
@@ -371,8 +372,18 @@ describe("a busy dev app's Sidecar", () => {
   test("gives every request in the file exactly one row", async () => {
     const { rows } = await theReaderReadsTheSeed()
 
-    expect(requests(rows)).toHaveLength(56)
-    expect(new Set(requests(rows).map((candidate) => candidate.requestId)).size).toBe(56)
+    expect(requests(rows)).toHaveLength(57)
+    expect(new Set(requests(rows).map((candidate) => candidate.requestId)).size).toBe(57)
+  })
+
+  test("files a JSON body, an XML body and an HTML page's reason for none on their own requests", async () => {
+    const { rows } = await theReaderReadsTheSeed()
+    const responseOf = (requestId: string) => requests(rows).find((candidate) => candidate.requestId === requestId)?.response
+
+    expect(responseOf(RESPONSES.json)?.payload).toMatchObject({ format: "json", status: 200 })
+    expect(responseOf(RESPONSES.xml)?.payload).toMatchObject({ format: "xml", status: 200 })
+    expect(responseOf(RESPONSES.html)?.payload).toMatchObject({ status: 404, no_body: { reason: "type" } })
+    expect(requests(rows).flatMap((request) => request.trailing)).toEqual([])
   })
 
   test("appends rows in the order the file did, across all three Runs", async () => {
@@ -1123,6 +1134,118 @@ describe("Run rows", () => {
 
     expect(runs(reader.rows)).toHaveLength(1)
     expect(runRow(reader.rows, "srv-1").logCount).toBe(2)
+  })
+})
+
+describe("a request's response", () => {
+  test("lands on its request's row, whole, and never in the trailing section", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const response = run.response("req-1", {
+      headers: [
+        ["content-type", "application/json; charset=utf-8"],
+        ["x-request-id", "req-1"],
+      ],
+      body: '{"id":12,"title":"Hello"}',
+    })
+    await appendToSidecar(log, run.start("req-1"), run.route("req-1"), run.finish("req-1"), response)
+
+    const { rows } = await theReaderReads(log)
+
+    expect(requests(rows)).toHaveLength(1)
+    expect(theOnlyRequest(rows).response).toEqual({ payload: response.payload, bodyCutFrom: null })
+    expect(theOnlyRequest(rows).trailing).toEqual([])
+    expect(theOnlyRequest(rows).timeline).toEqual([])
+  })
+
+  test("carries the size a cut body had before the wire cut it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(
+      log,
+      run.start("req-1"),
+      run.finish("req-1"),
+      run.response("req-1", { size: 90_000, body: "[1,2,3" }, { body: 90_000 }),
+    )
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).response?.bodyCutFrom).toBe(90_000)
+  })
+
+  test("holds no body when the response had none to keep, and says why", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const html = {
+      status: 200,
+      headers: [["content-type", "text/html; charset=utf-8"]] as [string, string][],
+      content_type: "text/html; charset=utf-8",
+      size: 18_204,
+      no_body: { reason: "type" as const, content_type: "text/html; charset=utf-8" },
+    }
+    await appendToSidecar(log, run.start("req-1"), run.finish("req-1"), run.response("req-1", html))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows).response?.payload).toEqual(html)
+  })
+
+  test("is null on a finished request that has no Response event", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1"), run.finish("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({ state: "finished", response: null })
+  })
+
+  test("is null while the request is in flight", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-1"))
+
+    const { rows } = await theReaderReads(log)
+
+    expect(theOnlyRequest(rows)).toMatchObject({ state: "in-flight", response: null })
+  })
+
+  test("counts toward the Memory bound like any event", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+
+    // Attached under the bound first, so the burst is evicted by the ring rather than trimmed
+    // by the load-on-open scan.
+    await appendToSidecar(log, run.start("req-attach"), run.finish("req-attach"))
+    await reader.caughtUp()
+
+    // Three events to a row. At two, all of these would fit under the bound.
+    const answered = Array.from({ length: LOAD_ON_OPEN_EVENTS / 2 }, (_, index) => [
+      run.start(`req-${index}`, "GET", `/posts/${index}`),
+      run.finish(`req-${index}`),
+      run.response(`req-${index}`),
+    ]).flat()
+    await appendToSidecar(log, ...answered)
+    await reader.caughtUp()
+
+    expect(reader.rows).toHaveLength(Math.floor(LOAD_ON_OPEN_EVENTS / 3))
+  })
+
+  test("is dropped for a request the bound has evicted, rather than opening a row for it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+    await appendToSidecar(log, run.header(), run.start("req-1"), run.finish("req-1"))
+    await reader.caughtUp()
+
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2, 100))
+    await reader.caughtUp()
+    await appendToSidecar(log, run.response("req-1"))
+    await reader.caughtUp()
+
+    expect(requests(reader.rows).map((request) => request.requestId)).not.toContain("req-1")
+    expect(requests(reader.rows).every((request) => request.response === null)).toBe(true)
   })
 })
 

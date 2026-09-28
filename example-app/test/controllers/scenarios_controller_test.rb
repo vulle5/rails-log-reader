@@ -22,6 +22,9 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
     assert_select "button[data-scenario=?]", scenario_flood_path
     assert_select "button[data-scenario=?]", scenario_partial_request_path
     assert_select "button[data-scenario=?]", scenario_trailing_event_path
+    assert_select "button[data-scenario=?]", scenario_json_path
+    assert_select "button[data-scenario=?]", scenario_xml_path
+    assert_select "button[data-scenario=?]", scenario_big_json_path
   end
 
   # 8, 10 (twice) 12 and 14 get no button — none of them is a path a browser can fetch — so
@@ -111,5 +114,29 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
     get scenario_trailing_event_path
 
     assert_response :success
+  end
+
+  test "scenario 15: json — a JSON body" do
+    get scenario_json_path
+
+    assert_response :success
+    assert_equal "application/json", response.media_type
+    assert_kind_of Array, response.parsed_body["posts"]
+  end
+
+  test "scenario 16: xml — an XML body" do
+    get scenario_xml_path
+
+    assert_response :success
+    assert_equal "application/xml", response.media_type
+    assert_match(/\A<\?xml version="1.0" encoding="UTF-8"\?>\n<posts>/, response.body)
+  end
+
+  test "scenario 17: big_json — a JSON body over 64 KB" do
+    get scenario_big_json_path
+
+    assert_response :success
+    assert_equal "application/json", response.media_type
+    assert_operator response.body.bytesize, :>, 64 * 1024
   end
 end

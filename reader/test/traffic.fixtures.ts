@@ -1,4 +1,4 @@
-import type { BindValue, Envelope, EventType, ParamsHash, ParamValue, RequestRoutePayload, Severity } from "../src/shared/wire"
+import type { BindValue, Envelope, EventType, ParamsHash, ParamValue, RequestRoutePayload, ResponsePayload, Severity } from "../src/shared/wire"
 import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
 
 /**
@@ -115,6 +115,23 @@ function finish(
       ...(exception === undefined ? {} : { exception }),
     },
   })
+}
+
+/** Emitted when the body closes, so it always sits after its request's finish. */
+function response(at: number, requestId: string, payload: ResponsePayload) {
+  emit({ at, runId: SERVER_RUN, requestId, type: "response", payload })
+}
+
+/** The headers Rails sends with every response, after the ones the response itself set. */
+function railsHeaders(requestId: string, contentType: string, etag: string): [string, string][] {
+  return [
+    ["content-type", contentType],
+    ["etag", `W/"${etag}"`],
+    ["cache-control", "max-age=0, private, must-revalidate"],
+    ["x-request-id", requestId],
+    ["x-runtime", "0.004812"],
+    ["server-timing", "sql.active_record;dur=1.6, process_action.action_controller;dur=3.9"],
+  ]
 }
 
 function sql(
@@ -239,6 +256,14 @@ sql(2400, C, "Profile Load", 'SELECT "profiles".* FROM "profiles" WHERE "profile
 sql(2430, D, "AnalyticsEvent Create", 'INSERT INTO "analytics_events" ("name", "user_id", "payload", "created_at") VALUES (?, ?, ?, ?)', 1.2)
 sql(2470, C, "Subscription Load", 'SELECT "subscriptions".* FROM "subscriptions" WHERE "subscriptions"."user_id" = ? AND "subscriptions"."active" = ? LIMIT ?  [["user_id", 4021], ["active", 1], ["LIMIT", 1]]', 0.7)
 finish(2560, C, 200, 470, 1.1, 1.6)
+response(2565, C, {
+  status: 200,
+  headers: railsHeaders(C, "application/json; charset=utf-8", "4be1e3f0a6c52d8a"),
+  content_type: "application/json; charset=utf-8",
+  size: 149,
+  format: "json",
+  body: '{"id":4021,"name":"Ada Lovelace","email":"ada@example.com","profile":{"bio":"Analyst","avatar_url":null},"subscription":{"plan":"pro","active":true}}',
+})
 sql(2600, D, "AnalyticsEvent Create", 'INSERT INTO "analytics_events" ("name", "user_id", "payload", "created_at") VALUES (?, ?, ?, ?)', 0.9)
 finish(2680, B, 200, 640, 12.4, 2.3)
 finish(2760, D, 201, 610, 0.4, 8.8)
@@ -349,6 +374,18 @@ log(11800, H, "warn", "ReportBuilder: still aggregating (41,209 orders, 0 rows w
 const MISTYPED = "9c1e04ab"
 start(6400, MISTYPED, "GET", "/api/v1/notifcations")
 finish(6470, MISTYPED, 404, 7.2, 0, 0)
+response(6475, MISTYPED, {
+  status: 404,
+  headers: [
+    ["content-type", "text/html; charset=utf-8"],
+    ["content-length", "18204"],
+    ["x-request-id", MISTYPED],
+    ["x-runtime", "0.007211"],
+  ],
+  content_type: "text/html; charset=utf-8",
+  size: 18_204,
+  no_body: { reason: "type", content_type: "text/html; charset=utf-8" },
+})
 
 // --- some late traffic so the hang is visible above live rows ---------------
 const F = "1b4d77aa"
@@ -365,6 +402,24 @@ route(9010, G, "Api::V1::SessionsController", "destroy", "json")
 sql(9060, G, "Session Destroy", 'DELETE FROM "sessions" WHERE "sessions"."id" = ?  [["id", 90211]]', 0.9)
 log(9110, G, "info", "Signed out user 4021")
 finish(9180, G, 204, 180, 0.0, 0.9)
+
+const SITEMAP = "5a0e3c7d"
+const SITEMAP_XML =
+  '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+  "<url><loc>https://example.com/posts/12</loc><lastmod>2026-07-01</lastmod></url>" +
+  "<url><loc>https://example.com/posts/13</loc><lastmod>2026-07-02</lastmod></url></urlset>"
+start(9400, SITEMAP, "GET", "/sitemap.xml")
+route(9410, SITEMAP, "SitemapsController", "show", "xml")
+sql(9450, SITEMAP, "Post Load", 'SELECT "posts"."id", "posts"."updated_at" FROM "posts" WHERE "posts"."published" = ?  [["published", 1]]', 1.2)
+finish(9490, SITEMAP, 200, 90, 3.1, 1.2)
+response(9495, SITEMAP, {
+  status: 200,
+  headers: railsHeaders(SITEMAP, "application/xml; charset=utf-8", "9d27c0b1e4f8a365"),
+  content_type: "application/xml; charset=utf-8",
+  size: new TextEncoder().encode(SITEMAP_XML).length,
+  format: "xml",
+  body: SITEMAP_XML,
+})
 
 // The one place `at_wall` disagrees with append order: the machine's clock is stepped back
 // two seconds by NTP while this request is being served. Nothing may reorder because of it.
@@ -529,6 +584,9 @@ export const NEVER_ROUTED = { requestId: MISTYPED, path: "/api/v1/notifcations" 
 
 /** The request carrying the awkward params hash, and that hash before the wire tagged it. */
 export const AWKWARD_PARAMS = { requestId: E, path: "/api/v1/orders", params: ORDER_PARAMS }
+
+/** The requests whose Response events carry a JSON body, an XML body, and an HTML page's reason for none. */
+export const RESPONSES = { json: C, xml: SITEMAP, html: MISTYPED }
 
 /** The request that starts, emits, and never finishes. */
 export const HANGS = { requestId: H, path: "/admin/reports/monthly.csv" }

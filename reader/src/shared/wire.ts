@@ -17,6 +17,7 @@ export const EVENT_TYPES = [
   "request_finish",
   "sql",
   "app_log",
+  "response",
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -189,6 +190,35 @@ export type AppLogPayload = {
   callsite?: string
 }
 
+/** Why a response has no body on the wire. */
+export type NoBody = {
+  reason: "type"
+  /** The response's own `content-type`, `null` when it sent none. */
+  content_type: string | null
+}
+
+/**
+ * What a request sent back, emitted when its body closes, which is after its `request_finish`.
+ * It carries a body only when the response was JSON or XML, whole in memory, not encoded and
+ * not empty. Otherwise `no_body` says why.
+ */
+export type ResponsePayload = {
+  /** The Rack-final status, which can differ from `request_finish`'s. */
+  status: number
+  /** Every header, unfiltered, in the order the app set them. A repeated header is repeated here. */
+  headers: [string, string][]
+  content_type: string | null
+  /** The bytes the app sent. Absent when that is not known without reading a stream. */
+  size?: number
+} & (
+  | {
+      format: "json" | "xml"
+      /** The text the app sent, never parsed on the wire. Cut at 64 KB, with the original size under `truncated.body`. */
+      body: string
+    }
+  | { no_body: NoBody }
+)
+
 export type RunHeaderEvent = EventEnvelope<"run_header", RunHeaderPayload>
 export type RunEndEvent = EventEnvelope<"run_end", RunEndPayload>
 export type RequestStartEvent = EventEnvelope<"request_start", RequestStartPayload>
@@ -196,6 +226,7 @@ export type RequestRouteEvent = EventEnvelope<"request_route", RequestRoutePaylo
 export type RequestFinishEvent = EventEnvelope<"request_finish", RequestFinishPayload>
 export type SqlEvent = EventEnvelope<"sql", SqlPayload>
 export type AppLogEvent = EventEnvelope<"app_log", AppLogPayload>
+export type ResponseEvent = EventEnvelope<"response", ResponsePayload>
 
 /**
  * What identifies one Event: the Run it came from and its `seq` within that Run. `seq`
@@ -216,3 +247,4 @@ export type Envelope =
   | RequestFinishEvent
   | SqlEvent
   | AppLogEvent
+  | ResponseEvent

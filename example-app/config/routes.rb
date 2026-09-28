@@ -22,6 +22,9 @@ Rails.application.routes.draw do
     get "flood"
     get "partial_request"
     get "trailing_event"
+    get "json"
+    get "xml"
+    get "big_json"
   end
 
   root "posts#index"

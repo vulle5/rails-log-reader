@@ -114,6 +114,15 @@ curl -s http://localhost:3000/scenarios/raw_sql
 # the queue in milliseconds, so the Activity table still sees it as a burst. For a wider one,
 # `WEB_CONCURRENCY=2 bin/dev` first.
 for i in $(seq 20); do curl -s http://localhost:3000/scenarios/flood & done; wait
+
+# 15 — A JSON response: a body the Reader keeps.
+curl -s http://localhost:3000/scenarios/json
+
+# 16 — An XML response: the same posts, with attributes and nested elements.
+curl -s http://localhost:3000/scenarios/xml
+
+# 17 — A JSON body over the 64 KB cap, which the wire cuts and records the original size of.
+curl -s http://localhost:3000/scenarios/big_json
 ```
 
 ## Process lifecycle Scenarios

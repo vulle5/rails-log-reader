@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SIDECAR_NAME } from "../src/server/sidecar"
-import type { AppLogPayload, Envelope, RequestFinishPayload, RequestRoutePayload, SqlPayload } from "../src/shared/wire"
+import type { AppLogPayload, Envelope, RequestFinishPayload, RequestRoutePayload, ResponsePayload, SqlPayload } from "../src/shared/wire"
 
 /**
  * Seam 1's whole apparatus: a real `log/` directory with a real Sidecar in it, and an
@@ -141,6 +141,20 @@ export function aRun(runId: string, epoch = EPOCH) {
         binds: [12],
         ...query,
       }),
+    // A kept JSON body unless a test says otherwise. A `no_body` replaces the body rather than
+    // sitting beside it, and `truncated` is how a test writes a body the wire cut.
+    response: (requestId: string, response: Partial<ResponsePayload> = {}, truncated?: Record<string, number>) => {
+      const kept = { format: "json", body: '{"id":12}' }
+      const payload = {
+        status: 200,
+        headers: [["content-type", "application/json; charset=utf-8"]],
+        content_type: "application/json; charset=utf-8",
+        size: 9,
+        ...("no_body" in response ? {} : kept),
+        ...response,
+      } as ResponsePayload
+      return { ...envelope("response", requestId, payload), ...(truncated === undefined ? {} : { truncated }) }
+    },
     log: (
       requestId: string | null,
       message = "Rendering posts/show.html.erb",

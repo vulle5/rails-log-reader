@@ -5,7 +5,7 @@
 # controller's own traffic from the Sidecar: an exclusion option would be a product feature
 # invented to tidy a test double, and the Initializer does not know a Scenario exists.
 #
-# Numbered 1–7, 9, 11 and 13. Scenario 8 (a rake-task burst) and Scenario 14 (a long-lived
+# Numbered 1–7, 9, 11, 13 and 15–17. Scenario 8 (a rake-task burst) and Scenario 14 (a long-lived
 # rake task) are `rake` tasks — see lib/tasks/scenarios.rake — and Scenario 10 (an
 # Interrupted request, twice) and Scenario 12 (clustered Puma) are signal- and env-var-driven
 # rather than a path of their own. None of those four gets a button — there is no path, or
@@ -81,7 +81,13 @@ class ScenariosController < ApplicationController
           "replace the Sidecar mid-flight and turn this into a genuine Partial request."),
       Scenario.new(path: scenario_trailing_event_path, count: 1, label: "13 — Trailing event",
         description: "A middleware outside Rails::Rack::Logger logs a line and runs a " \
-          "query in its Rack::BodyProxy close block, after the request has already finished.")
+          "query in its Rack::BodyProxy close block, after the request has already finished."),
+      Scenario.new(path: scenario_json_path, count: 1, label: "15 — JSON response",
+        description: "A few published posts as JSON: a body the Reader keeps."),
+      Scenario.new(path: scenario_xml_path, count: 1, label: "16 — XML response",
+        description: "The same posts as XML, with attributes and nested elements."),
+      Scenario.new(path: scenario_big_json_path, count: 1, label: "17 — JSON over 64 KB",
+        description: "A JSON body larger than the 64 KB every wire field is cut at.")
     ]
 
     @scenario_commands = [
@@ -222,4 +228,37 @@ class ScenariosController < ApplicationController
   def trailing_event
     render plain: "ok"
   end
+
+  # Scenario 15 — a JSON response, the kind of body the Reader keeps whole.
+  def json
+    render json: { posts: published_posts.map { |post| post_summary(post) } }
+  end
+
+  # Scenario 16 — an XML response: the same posts, with an attribute on each element and text
+  # nested inside it.
+  def xml
+    posts = published_posts.map do |post|
+      summary = post_summary(post)
+      %(<post id="#{summary[:id]}"><title>#{ERB::Util.h(summary[:title])}</title>) +
+        %(<author>#{ERB::Util.h(summary[:author])}</author><comments>#{summary[:comments]}</comments></post>)
+    end
+
+    render xml: %(<?xml version="1.0" encoding="UTF-8"?>\n<posts>#{posts.join}</posts>)
+  end
+
+  # Scenario 17 — a JSON body over the 64 KB cap, whatever the seed data holds.
+  def big_json
+    rows = Array.new(1_500) do |index|
+      { id: index, note: "Row #{index} of a body larger than the 64 KB every wire field is cut at." }
+    end
+
+    render json: { rows: }
+  end
+
+  private
+    def published_posts = Post.published.includes(:author).limit(3)
+
+    def post_summary(post)
+      { id: post.id, title: post.title, author: post.author.name, comments: post.comments_count }
+    end
 end

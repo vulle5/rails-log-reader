@@ -102,6 +102,10 @@ module RailsLogReader
   # structurally impossible, because nothing downstream of here can run before this does.
   # 404s and every other non-controller response still pass through `call`, so they get a
   # request_start (and, eventually, a request_finish) the same as any routed request.
+  #
+  # The body it returns is the app's own, wrapped in a ResponseBody, which records the
+  # response when the server closes it. A disabled Initializer, or a wrap that raises, hands
+  # the body back as it came.
   class Middleware
     def initialize(app) = @app = app
 
@@ -111,7 +115,7 @@ module RailsLogReader
       status, headers, body = @app.call(env)
       RailsLogReader.guard { Current.status = status }
 
-      [status, headers, body]
+      [status, headers, wrap(env, status, headers, body)]
     end
 
     private
@@ -121,6 +125,134 @@ module RailsLogReader
         Current.started_at_mono = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
         RailsLogReader.emit("request_start", { method: request.request_method, path: request.path },
           request_id: Current.request_id)
+      end
+
+      # The request id is taken from `env` here, because `Current` is reset by the time the
+      # body closes.
+      def wrap(env, status, headers, body)
+        return body if RailsLogReader.disabled?
+
+        RailsLogReader.guard do
+          ResponseBody.new(body, request_id: ActionDispatch::Request.new(env).request_id, status:, headers:)
+        end || body
+      end
+  end
+
+  # A response body, passed to the server untouched and recorded as a `response` event when
+  # it closes: after the server has written it, or, for a body the server reads whole through
+  # `to_ary`, as `to_ary` returns. Either way that is after the `request_finish` the inner
+  # body's own close emits.
+  #
+  # Everything goes through to the inner body, and `respond_to?` answers as the inner body
+  # does, so the server writes the same bytes by the same path. `close` is the exception: it
+  # always answers, because it is where the event is written.
+  #
+  # A body is in memory when it answers `to_ary`. Only then are its chunks kept, by reference,
+  # as the server reads them. Nothing is read a second time, and nothing is teed from a
+  # stream. The headers are read at close from the Hash the server writes, so those set by
+  # middleware above this one are there too.
+  class ResponseBody
+    def initialize(body, request_id:, status:, headers:)
+      @body = body
+      @request_id = request_id
+      @status = status
+      @headers = headers
+      @chunks = nil
+      @closed = false
+    end
+
+    # `each` and `to_ary` are defined below, so they would otherwise always answer.
+    def respond_to?(name, include_all = false)
+      %i[each to_ary].include?(name.to_sym) ? @body.respond_to?(name, include_all) : super
+    end
+
+    def respond_to_missing?(name, include_all = false) = @body.respond_to?(name, include_all)
+
+    def method_missing(name, ...) = @body.respond_to?(name) ? @body.__send__(name, ...) : super
+
+    def each(&block)
+      return @body.each(&block) unless block && @body.respond_to?(:to_ary)
+
+      @chunks = []
+      @body.each do |chunk|
+        @chunks << chunk
+        yield chunk
+      end
+    end
+
+    # Rack requires a body that answers both `to_ary` and `close` to close itself in `to_ary`.
+    def to_ary
+      @chunks = @body.to_ary
+    ensure
+      close
+    end
+
+    # Once, however many times the server or `to_ary` calls it.
+    def close
+      return if @closed
+
+      @closed = true
+      begin
+        @body.close if @body.respond_to?(:close)
+      ensure
+        RailsLogReader.guard { RailsLogReader.emit("response", payload, request_id: @request_id) }
+      end
+    end
+
+    private
+      def payload
+        content_type = header("content-type")
+        fields = { status: @status, headers: header_pairs, content_type: }
+        size = body_size
+        fields[:size] = size if size
+
+        format = format_of(content_type)
+        text = kept_text if format
+        if text
+          fields.merge(format:, body: text)
+        else
+          fields.merge(no_body: { reason: "type", content_type: })
+        end
+      end
+
+      def format_of(content_type)
+        media_type = content_type.to_s.split(";").first.to_s.strip.downcase
+        if media_type == "application/json" || media_type.end_with?("+json")
+          "json"
+        elsif %w[application/xml text/xml].include?(media_type) || media_type.end_with?("+xml")
+          "xml"
+        end
+      end
+
+      # BINARY, so chunks of different encodings join. `emit`'s scrub tags valid UTF-8 back.
+      def kept_text
+        return if @chunks.nil? || header("content-encoding")
+
+        text = @chunks.map { |chunk| chunk.to_s.b }.join
+        text unless text.empty?
+      end
+
+      # A body read from memory is measured. Anything else has only its `content-length`.
+      def body_size
+        return @chunks.sum { |chunk| chunk.to_s.bytesize } if @chunks
+
+        length = header("content-length")
+        Integer(length.to_s, exception: false) if length
+      end
+
+      # Rack 2 header names are not always lowercase.
+      def header(name)
+        @headers.each { |key, value| return value if key.to_s.casecmp?(name) }
+        nil
+      end
+
+      # One pair per header line, as a server writes them: each element of a Rack 3 Array
+      # value, and each line of a Rack 2 value joined by newlines.
+      def header_pairs
+        @headers.flat_map do |name, value|
+          values = value.is_a?(Array) ? value : (value.to_s.split("\n").presence || [""])
+          values.map { |line| [name.to_s, line.to_s] }
+        end
       end
   end
 
@@ -545,6 +677,8 @@ module RailsLogReader
       # touch. So a failed write disables emission for the rest of the Run and says nothing.
       @disabled = true
     end
+
+    def disabled? = @disabled
 
     # The blanket rescue the Middleware and every subscriber below wrap themselves in: a bug
     # in our own instrumentation code — not the write itself, `emit` already guards that —

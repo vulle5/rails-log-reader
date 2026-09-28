@@ -9,6 +9,7 @@ const SPEC_EVENT_TYPES = [
   "request_finish",
   "request_route",
   "request_start",
+  "response",
   "run_end",
   "run_header",
   "sql",
