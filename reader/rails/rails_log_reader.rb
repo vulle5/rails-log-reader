@@ -106,11 +106,17 @@ module RailsLogReader
   # The body it returns is the app's own, wrapped in a ResponseBody, which records the
   # response when the server closes it. A disabled Initializer, or a wrap that raises, hands
   # the body back as it came.
+  #
+  # The server's `rack.hijack` is wrapped too, so that an app taking the connection marks
+  # `env` as it does.
   class Middleware
+    HIJACKED = "rails_log_reader.hijacked"
+
     def initialize(app) = @app = app
 
     def call(env)
       RailsLogReader.guard { start_request(env) }
+      RailsLogReader.guard { notice_hijack(env) }
 
       status, headers, body = @app.call(env)
       RailsLogReader.guard { Current.status = status }
@@ -127,13 +133,24 @@ module RailsLogReader
           request_id: Current.request_id)
       end
 
+      def notice_hijack(env)
+        hijack = env["rack.hijack"]
+        return if RailsLogReader.disabled? || !hijack.respond_to?(:call)
+
+        env["rack.hijack"] = proc do |*args|
+          env[HIJACKED] = true
+          hijack.call(*args)
+        end
+      end
+
       # The request id is taken from `env` here, because `Current` is reset by the time the
       # body closes.
       def wrap(env, status, headers, body)
         return body if RailsLogReader.disabled?
 
         RailsLogReader.guard do
-          ResponseBody.new(body, request_id: ActionDispatch::Request.new(env).request_id, status:, headers:)
+          ResponseBody.new(body, request_id: ActionDispatch::Request.new(env).request_id, status:, headers:,
+            head: env["REQUEST_METHOD"] == "HEAD", hijacked: env[HIJACKED] == true)
         end || body
       end
   end
@@ -151,12 +168,25 @@ module RailsLogReader
   # as the server reads them. Nothing is read a second time, and nothing is teed from a
   # stream. The headers are read at close from the Hash the server writes, so those set by
   # middleware above this one are there too.
+  #
+  # A response without a kept body says why, the first of these that holds:
+  #
+  # - `hijacked`: the app took the connection, by `rack.hijack` or a `rack.hijack` header, and
+  #   wrote whatever followed itself, so no headers are recorded either.
+  # - `empty`: a HEAD request, a status that never has a body (1xx, 204, 304), a redirect, or
+  #   a body of no bytes.
+  # - `encoded`: a `content-encoding` other than `identity`.
+  # - `streamed`: a body that was never whole in memory, save a file that is not JSON or XML,
+  #   which would not have been kept either way.
+  # - `type`: anything but JSON or XML.
   class ResponseBody
-    def initialize(body, request_id:, status:, headers:)
+    def initialize(body, request_id:, status:, headers:, head:, hijacked:)
       @body = body
       @request_id = request_id
       @status = status
       @headers = headers
+      @head = head
+      @hijacked = hijacked
       @chunks = nil
       @closed = false
     end
@@ -201,17 +231,32 @@ module RailsLogReader
 
     private
       def payload
+        if @hijacked || header("rack.hijack")
+          return { status: @status, headers: [], content_type: nil, no_body: { reason: "hijacked" } }
+        end
+
         content_type = header("content-type")
         fields = { status: @status, headers: header_pairs, content_type: }
         size = body_size
         fields[:size] = size if size
 
         format = format_of(content_type)
-        text = kept_text if format
-        if text
-          fields.merge(format:, body: text)
-        else
-          fields.merge(no_body: { reason: "type", content_type: })
+        no_body = no_body_for(format, content_type, size)
+        no_body ? fields.merge(no_body:) : fields.merge(format:, body: kept_text)
+      end
+
+      def no_body_for(format, content_type, size)
+        encoding = header("content-encoding")
+        in_memory = !@chunks.nil?
+
+        if @head || never_has_body? || redirect? || size == 0
+          { reason: "empty" }
+        elsif encoding && !encoding.to_s.casecmp?("identity")
+          { reason: "encoded", content_encoding: encoding.to_s }
+        elsif !in_memory && (format || !@body.respond_to?(:to_path))
+          { reason: "streamed" }
+        elsif !format
+          { reason: "type", content_type: }
         end
       end
 
@@ -224,20 +269,22 @@ module RailsLogReader
         end
       end
 
+      def never_has_body? = @status.to_i < 200 || [204, 304].include?(@status.to_i)
+
+      def redirect? = (300..399).cover?(@status.to_i) && header("location")
+
       # BINARY, so chunks of different encodings join. `emit`'s scrub tags valid UTF-8 back.
-      def kept_text
-        return if @chunks.nil? || header("content-encoding")
+      def kept_text = @chunks.map { |chunk| chunk.to_s.b }.join
 
-        text = @chunks.map { |chunk| chunk.to_s.b }.join
-        text unless text.empty?
-      end
-
-      # A body read from memory is measured. Anything else has only its `content-length`.
+      # A body read from memory is measured, and a file's size is read off the disk. Anything
+      # else has only its `content-length`.
       def body_size
         return @chunks.sum { |chunk| chunk.to_s.bytesize } if @chunks
 
         length = header("content-length")
-        Integer(length.to_s, exception: false) if length
+        return Integer(length.to_s, exception: false) if length
+
+        File.size?(@body.to_path.to_s) if @body.respond_to?(:to_path)
       end
 
       # Rack 2 header names are not always lowercase.

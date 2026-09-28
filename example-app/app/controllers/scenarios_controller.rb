@@ -5,7 +5,7 @@
 # controller's own traffic from the Sidecar: an exclusion option would be a product feature
 # invented to tidy a test double, and the Initializer does not know a Scenario exists.
 #
-# Numbered 1–7, 9, 11, 13 and 15–17. Scenario 8 (a rake-task burst) and Scenario 14 (a long-lived
+# Numbered 1–7, 9, 11, 13 and 15–24. Scenario 8 (a rake-task burst) and Scenario 14 (a long-lived
 # rake task) are `rake` tasks — see lib/tasks/scenarios.rake — and Scenario 10 (an
 # Interrupted request, twice) and Scenario 12 (clustered Puma) are signal- and env-var-driven
 # rather than a path of their own. None of those four gets a button — there is no path, or
@@ -17,7 +17,10 @@
 class ScenariosController < ApplicationController
   # One row per button on the index page. `count` is how many times the page's own JS fires
   # `path` at once — 1 for everything but the two Scenarios that are about concurrency itself.
-  Scenario = Data.define(:path, :label, :description, :count)
+  # `headers` go with every one of those requests.
+  Scenario = Data.define(:path, :label, :description, :count, :headers) do
+    def initialize(headers: {}, **) = super
+  end
 
   # One row per non-HTTP Scenario: `command` is a shell snippet to copy, never wired to
   # anything on the page — this is the "no launcher" rule (#15) drawn precisely: showing a
@@ -87,7 +90,23 @@ class ScenariosController < ApplicationController
       Scenario.new(path: scenario_xml_path, count: 1, label: "16 — XML response",
         description: "The same posts as XML, with attributes and nested elements."),
       Scenario.new(path: scenario_big_json_path, count: 1, label: "17 — JSON over 64 KB",
-        description: "A JSON body larger than the 64 KB every wire field is cut at.")
+        description: "A JSON body larger than the 64 KB every wire field is cut at."),
+      Scenario.new(path: scenario_streamed_csv_path, count: 1, label: "18 — Streamed CSV",
+        description: "A CSV sent in pieces as it is written, never whole in memory."),
+      Scenario.new(path: scenario_gzip_json_path, count: 1, label: "19 — Gzipped JSON",
+        description: "A JSON body the app compresses with gzip before sending it."),
+      Scenario.new(path: scenario_pdf_path, count: 1, label: "20 — PDF with send_file",
+        description: "A PDF sent from disk, which the server reads from its path."),
+      Scenario.new(path: scenario_no_content_path, count: 1, label: "21 — 204 No Content",
+        description: "A request that worked, with nothing to send back."),
+      Scenario.new(path: scenario_conditional_get_path, count: 1, label: "22 — 304 Not Modified",
+        description: "A conditional GET, sent with an If-Modified-Since the page has not changed since.",
+        headers: { "If-Modified-Since" => UNCHANGED_SINCE.httpdate }),
+      Scenario.new(path: scenario_redirect_path, count: 1, label: "23 — Redirect",
+        description: "A 302 to Scenario 15, which the button follows."),
+      Scenario.new(path: scenario_hijack_path, count: 1, label: "24 — Hijacked connection",
+        description: "The app takes the socket from the server and writes its own reply, " \
+          "as Action Cable does for a WebSocket.")
     ]
 
     @scenario_commands = [
@@ -253,6 +272,71 @@ class ScenariosController < ApplicationController
     end
 
     render json: { rows: }
+  end
+
+  # Scenario 18 — a CSV streamed in pieces. An Enumerator body is never whole in memory: the
+  # server writes each line as it is yielded.
+  def streamed_csv
+    lines = published_posts.map { |post| post_summary(post) }.map do |summary|
+      %(#{summary[:id]},"#{summary[:title].gsub('"', '""')}",#{summary[:comments]}\n)
+    end
+
+    headers["content-type"] = "text/csv"
+    headers["cache-control"] = "no-cache"
+    self.response_body = Enumerator.new do |body|
+      body << "id,title,comments\n"
+      lines.each { |line| body << line }
+    end
+  end
+
+  # Scenario 19 — a JSON body the app gzips itself, whatever the client asked for. `curl
+  # --compressed` reads it.
+  def gzip_json
+    json = { posts: published_posts.map { |post| post_summary(post) } }.to_json
+
+    headers["content-encoding"] = "gzip"
+    render body: ActiveSupport::Gzip.compress(json), content_type: "application/json"
+  end
+
+  REPORT_PDF = Rails.root.join("lib/scenarios/report.pdf")
+
+  # Scenario 20 — a PDF sent from disk with `send_file`: the body is the file's path, which the
+  # server reads.
+  def pdf
+    send_file REPORT_PDF, type: "application/pdf", disposition: "inline"
+  end
+
+  # Scenario 21 — a 204.
+  def no_content
+    head :no_content
+  end
+
+  UNCHANGED_SINCE = Time.utc(2026, 1, 1)
+
+  # Scenario 22 — a conditional GET. Sent with `If-Modified-Since: Thu, 01 Jan 2026 00:00:00
+  # GMT` it answers 304, and without it a 200.
+  def conditional_get
+    render plain: "unchanged since #{UNCHANGED_SINCE.httpdate}" if stale?(last_modified: UNCHANGED_SINCE)
+  end
+
+  # Scenario 23 — a redirect, to Scenario 15.
+  def redirect
+    redirect_to scenario_json_path
+  end
+
+  HIJACKED_REPLY = "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 9\r\n" \
+    "connection: close\r\n\r\nhijacked\n"
+
+  # Scenario 24 — a hijacked connection, the way Action Cable takes one for a WebSocket: the
+  # app takes the socket from the server, writes its own reply to it, and closes it. The
+  # server ignores the response returned after that, which is `-1`, as Action Cable's is.
+  def hijack
+    socket = request.env["rack.hijack"].call
+    socket.write(HIJACKED_REPLY)
+    socket.close
+
+    self.status = -1
+    self.response_body = []
   end
 
   private

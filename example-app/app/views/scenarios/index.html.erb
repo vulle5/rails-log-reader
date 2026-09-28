@@ -14,7 +14,8 @@
 <ul class="scenarios">
   <% @scenarios.each do |scenario| %>
     <li>
-      <button type="button" data-scenario="<%= scenario.path %>" data-count="<%= scenario.count %>">
+      <button type="button" data-scenario="<%= scenario.path %>" data-count="<%= scenario.count %>"
+        data-headers="<%= scenario.headers.to_json %>">
         <%= scenario.label %>
       </button>
       <p class="meta"><%= scenario.description %></p>
