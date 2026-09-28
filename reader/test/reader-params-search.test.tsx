@@ -4,7 +4,7 @@ import { within } from "@testing-library/react"
 import type { RequestRoutePayload } from "../src/shared/wire"
 import { aRun } from "./sidecar.fixtures"
 import { AWKWARD_PARAMS, DENSE_TRAFFIC, SERVER_RUN } from "./traffic.fixtures"
-import { lit, openTheReader, search, select, showDetailTab, treeItem, valueTree, wholeText } from "./reader.harness"
+import { detailTab, lit, openTheReader, search, select, showDetailTab, treeItem, valueTree, wholeText } from "./reader.harness"
 
 /**
  * *Search* inside the *Value viewer*, driven the way a developer drives it: a term typed into
@@ -181,5 +181,72 @@ describe("Search in the Value viewer", () => {
     expect(treeItem(tree, "order")).toHaveAttribute("aria-expanded", "false")
     await user.click(treeItem(tree, "order"))
     expect(treeItem(treeItem(tree, "order"), "shipping")).toHaveAttribute("aria-expanded", "true")
+  })
+})
+
+describe("the Params tab's count of Search matches", () => {
+  async function onTimeline(params: RequestRoutePayload["params"]) {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([run.start("req-1", "POST", "/notes"), run.route("req-1", "NotesController", "create", params)])
+    await select(user, "/notes")
+    return { user }
+  }
+
+  test("counts exactly the matches the Value viewer lights on opening Params", async () => {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, AWKWARD_PARAMS.path)
+    await search(user, "00")
+
+    await showDetailTab(user, "Params")
+    const lighted = lit(valueTree("Params")).length
+    await showDetailTab(user, "Timeline")
+
+    expect(lighted).toBeGreaterThan(1)
+    expect(detailTab("Params")).toHaveAccessibleName("Params")
+    expect(detailTab("Params")).toHaveAccessibleDescription(`${lighted} matches`)
+  })
+
+  test("counts a key and a value each on its own, and says one match as one", async () => {
+    const { user } = await onTimeline({ pairs: [["title", "a title"]] })
+
+    await search(user, "title")
+    expect(detailTab("Params")).toHaveAccessibleDescription("2 matches")
+
+    await search(user, "a t")
+    expect(detailTab("Params")).toHaveAccessibleDescription("1 match")
+  })
+
+  test("never counts what the viewer draws of its own: an index, a summary", async () => {
+    const { user } = await onTimeline({ pairs: [["tags", ["a", "b", "c"]]] })
+
+    await search(user, "0")
+    expect(detailTab("Params")).not.toHaveAccessibleDescription()
+
+    await search(user, "3 items")
+    expect(detailTab("Params")).not.toHaveAccessibleDescription()
+  })
+
+  test("is absent with no term, and with a term matching nothing in the params", async () => {
+    const { user } = await onTimeline({ pairs: [["title", "a title"]] })
+
+    expect(detailTab("Params")).not.toHaveAccessibleDescription()
+
+    await search(user, "notes")
+    expect(detailTab("Params")).not.toHaveAccessibleDescription()
+
+    await search(user, "title")
+    await search(user, "")
+    expect(detailTab("Params")).not.toHaveAccessibleDescription()
+  })
+
+  test("is absent while Params is the tab showing, and back on Timeline", async () => {
+    const { user } = await onTimeline({ pairs: [["title", "a title"]] })
+    await search(user, "title")
+
+    await showDetailTab(user, "Params")
+    expect(detailTab("Params")).not.toHaveAccessibleDescription()
+
+    await showDetailTab(user, "Timeline")
+    expect(detailTab("Params")).toHaveAccessibleDescription("2 matches")
   })
 })

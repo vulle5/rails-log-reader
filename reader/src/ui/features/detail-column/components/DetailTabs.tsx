@@ -19,8 +19,11 @@ export type DetailTab = {
   label: string
   /** Drawn faint after the label, saying what the tab holds before it is opened. */
   hint?: ReactNode
-  /** Drawn at the tab's far end: what Search found in a tab that is not showing. */
-  badge?: ReactNode
+  /**
+   * How many matches of the current *Search* term lie in the panel, counted by whatever lights
+   * them there. Drawn as a badge while the tab is not showing, and never when there are none.
+   */
+  matches?: number
   /** A tab this row cannot show, drawn and never chosen: its panel is not drawn at all. */
   disabled?: boolean
   /**
@@ -57,6 +60,7 @@ export function DetailTabs({
   const showing = showingTab(tabs, chosen)
   const tabId = (tab: DetailTab) => `${id}-tab-${tab.id}`
   const panelId = (tab: DetailTab) => `${id}-panel-${tab.id}`
+  const badgeId = (tab: DetailTab) => `${id}-matches-${tab.id}`
 
   /** Arrows move along the bar, skipping a disabled tab, and choose what they land on. */
   function onKeyDown(event: KeyboardEvent) {
@@ -87,24 +91,28 @@ export function DetailTabs({
         aria-label="Detail tabs"
         onKeyDown={onKeyDown}
       >
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            id={tabId(tab)}
-            type="button"
-            role="tab"
-            aria-selected={tab === showing}
-            aria-controls={tab.disabled === true ? undefined : panelId(tab)}
-            tabIndex={tab === showing ? 0 : -1}
-            disabled={tab.disabled}
-            className="inline-flex cursor-pointer items-baseline gap-1.25 rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted not-aria-selected:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint aria-selected:border-border aria-selected:bg-selected aria-selected:text-foreground"
-            onClick={() => onChoose(tab.id)}
-          >
-            {tab.label}
-            {tab.hint !== undefined && <span className="text-faint">{tab.hint}</span>}
-            {tab.badge}
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const found = tab === showing ? 0 : (tab.matches ?? 0)
+          return (
+            <button
+              key={tab.id}
+              id={tabId(tab)}
+              type="button"
+              role="tab"
+              aria-selected={tab === showing}
+              aria-controls={tab.disabled === true ? undefined : panelId(tab)}
+              aria-describedby={found > 0 ? badgeId(tab) : undefined}
+              tabIndex={tab === showing ? 0 : -1}
+              disabled={tab.disabled}
+              className="inline-flex cursor-pointer items-baseline gap-1.25 rounded border border-transparent bg-transparent px-2 py-0.5 text-xs text-muted not-aria-selected:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint aria-selected:border-border aria-selected:bg-selected aria-selected:text-foreground"
+              onClick={() => onChoose(tab.id)}
+            >
+              {tab.label}
+              {tab.hint !== undefined && <span className="text-faint">{tab.hint}</span>}
+              {found > 0 && <MatchesBadge id={badgeId(tab)} count={found} />}
+            </button>
+          )
+        })}
       </div>
       {/* One grid cell holding every panel, so each is sized to the space under the bar and
           the one showing is simply the one not made invisible. */}
@@ -129,6 +137,15 @@ export function DetailTabs({
         )}
       </div>
     </>
+  )
+}
+
+/** What Search found behind a tab, lit the way a match is: the tab's description, never its name. */
+function MatchesBadge({ id, count }: { id: string; count: number }) {
+  return (
+    <span id={id} className="rounded-xs bg-match px-1 text-2xs text-foreground tabular-nums" aria-hidden="true">
+      {count === 1 ? "1 match" : `${count} matches`}
+    </span>
   )
 }
 

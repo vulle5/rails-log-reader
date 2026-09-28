@@ -1,7 +1,7 @@
 import { memo, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
 import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
-import type { AppLogEvent, BindValue, RequestException, RequestRoutePayload, SqlEvent } from "../../../../shared/wire"
+import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
@@ -21,6 +21,8 @@ import { tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
 import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
+import { countMatches } from "../../value-viewer/lib/value-matches"
+import type { ValueSource } from "../../value-viewer/lib/value-tree"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines
@@ -117,6 +119,9 @@ function RequestDetail({
   // once for whether the section exists at all, once for what it holds — and a second pass
   // over the same array for the same filter would say nothing a first pass had not already.
   const trailing = eventsShown(row.trailing, filter)
+  const search = useContext(SearchContext)
+  const params = useMemo(() => (row.params === null ? null : paramsSource(row.params)), [row.params])
+  const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
 
   return (
     <Detail
@@ -154,10 +159,11 @@ function RequestDetail({
             id: "params",
             label: "Params",
             // A request that never reached a controller has none: `null` is that reading.
-            disabled: row.params === null,
+            disabled: params === null,
             // Another Selection's params open at their top, and folded.
             subject: row.id,
-            panel: row.params !== null && <Params params={row.params} />,
+            matches: paramsMatches,
+            panel: params !== null && <Params source={params} />,
           },
         ]}
       />
@@ -198,8 +204,7 @@ function RunDetail({
 }
 
 /** A request's params in the *Value viewer*: everything params-specific is in `paramsSource`. */
-function Params({ params }: { params: RequestRoutePayload["params"] }) {
-  const source = useMemo(() => paramsSource(params), [params])
+function Params({ source }: { source: ValueSource }) {
   return (
     <div className="px-3 py-2">
       <ValueViewer label="Params" source={source} />
