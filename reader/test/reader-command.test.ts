@@ -472,6 +472,11 @@ describe("who the Reader answers", () => {
     }
     expect((await requestAs(url, "/", { host: "other.tunnel.example" })).status).toBe(403)
 
+    // A tunnel serves the page over https and passes it on as http, so the browser's Origin
+    // names the scheme the page was loaded on, not the one the Reader was reached on.
+    expect((await requestAs(url, "/initializer-status", { host: "tunnel.example", origin: "https://tunnel.example" })).status).toBe(200)
+    expect((await requestAs(url, "/initializer-status", { host: "tunnel.example", origin: "https://elsewhere.example" })).status).toBe(403)
+
     const act = await requestAs(url, "/initializer-repair", {
       method: "POST",
       host: "tunnel.example",
@@ -488,7 +493,7 @@ describe("who the Reader answers", () => {
     const url = await readerUrl(reader)
     const host = new URL(url).host
 
-    for (const origin of ["http://attacker.example", "http://localhost:3000", "null", undefined]) {
+    for (const origin of ["http://attacker.example", "http://localhost:3000", `https://${host}`, "null", undefined]) {
       const refused = await requestAs(url, "/initializer-repair", { method: "POST", host, origin })
       expect(refused.status).toBe(403)
     }

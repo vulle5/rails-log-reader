@@ -11,8 +11,9 @@ export type RouteKind = "view" | "act"
 /**
  * Why `request` may not be served, as the words the Reader prints about it, or `null` when it
  * may. The `Host` must be loopback or listed, on any port. An act's `Origin` must be exactly
- * `http://` + that `Host`, so a missing or `null` one is refused. A view's must be too when it
- * has one, and a same-origin GET has none.
+ * `http://` + that `Host`, so a missing or `null` one is refused. A view's may also be
+ * `https://` + that `Host`, the page of a tunnel that serves https and passes it on as http. A
+ * view needs no `Origin`, and a same-origin GET has none.
  */
 export function refusal(request: Request, kind: RouteKind, allowedHosts: readonly string[]): string | null {
   const host = request.headers.get("host")
@@ -28,7 +29,8 @@ export function refusal(request: Request, kind: RouteKind, allowedHosts: readonl
 
   const origin = request.headers.get("origin")
   if (origin === null) return kind === "act" ? `a request to act on Host ${host} with no Origin` : null
-  if (origin !== `http://${host}`) return `Origin ${origin} on Host ${host}`
+  const own = kind === "act" ? [`http://${host}`] : [`http://${host}`, `https://${host}`]
+  if (!own.includes(origin)) return `Origin ${origin} on Host ${host}`
 
   return null
 }
