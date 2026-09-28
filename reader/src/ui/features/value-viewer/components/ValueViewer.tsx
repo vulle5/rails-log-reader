@@ -33,8 +33,11 @@ import type {
  *
  * One control copies the whole value, and each node, on hover or focus, offers a copy of its
  * value and of its path. Every text copied is the source's: the viewer only asks for it.
+ *
+ * A `caption` is drawn over the tree, and the copy control sits on its line rather than the
+ * tree's first, so the control is in the same place whatever the viewer is placed under.
  */
-export function ValueViewer({ label, source }: { label: string; source: ValueSource }) {
+export function ValueViewer({ label, source, caption }: { label: string; source: ValueSource; caption?: ReactNode }) {
   const value = source.tree
   const search = useContext(SearchContext)
   const inside = useMemo(() => matchesInside(search, value), [search, value])
@@ -62,14 +65,20 @@ export function ValueViewer({ label, source }: { label: string; source: ValueSou
   const wholeText = useMemo(() => source.copyText(value), [source, value])
 
   if (value.type === "container" && value.children.length === 0 && value.cut === undefined) {
-    return <p className="font-mono text-sm text-muted">{DRAWN[value.kind].empty}</p>
+    return (
+      <>
+        {caption}
+        <p className="font-mono text-sm text-muted">{DRAWN[value.kind].empty}</p>
+      </>
+    )
   }
 
   return (
     // The right padding keeps the top lines clear of the copy button, which is anchored here.
     <div className="relative pr-15">
-      {/* Centred on the tree's first line, which starts at the block's top edge. */}
+      {/* Centred on the first line, the caption's or the tree's, which starts at the block's top edge. */}
       <CopyButton className="-top-0.5 right-0" text={wholeText} label={`Copy ${label.toLowerCase()}`} />
+      {caption}
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (
           <Children node={value} path={[]} {...view} />

@@ -248,24 +248,28 @@ function ResponseHeaders({ response }: { response: RowResponse | null }) {
   const { status } = response.payload
   const headers = byName(response.payload.headers)
   return (
-    <div className="relative px-3 py-2 pr-15">
-      {headers.length > 0 && (
-        <CopyButton className="top-1.5 right-0" text={headersText(headers)} label="Copy all headers" />
-      )}
-      <div className="flex items-baseline gap-2 pb-3">
-        <Caption>Response headers</Caption>
-        <span className="font-mono text-xs text-muted tabular-nums">{status}</span>
+    <div className="px-3 py-2">
+      {/* The right padding keeps the caption clear of the copy button, which is anchored here and
+          placed as the Value viewer places its own. */}
+      <div className="relative pr-15">
+        {headers.length > 0 && (
+          <CopyButton className="-top-0.5 right-0" text={headersText(headers)} label="Copy all headers" />
+        )}
+        <div className="flex items-baseline gap-2 pb-3">
+          <Caption>Response headers</Caption>
+          <span className="font-mono text-xs text-muted tabular-nums">{status}</span>
+        </div>
+        {headers.length === 0 ? (
+          <p className="text-faint">The response set no headers.</p>
+        ) : (
+          <ul className="font-mono text-sm leading-sql" aria-label="Response headers">
+            {headers.map(([name, value], at) => (
+              // A header can repeat, so its place is the only identity it has.
+              <ResponseHeader key={at} name={name} value={value} />
+            ))}
+          </ul>
+        )}
       </div>
-      {headers.length === 0 ? (
-        <p className="text-faint">The response set no headers.</p>
-      ) : (
-        <ul className="font-mono text-sm leading-sql" aria-label="Response headers">
-          {headers.map(([name, value], at) => (
-            // A header can repeat, so its place is the only identity it has.
-            <ResponseHeader key={at} name={name} value={value} />
-          ))}
-        </ul>
-      )}
     </div>
   )
 }
@@ -360,15 +364,20 @@ function Response({
     ...(contentType === null ? [] : [contentType.split(";")[0]?.trim() ?? contentType]),
     ...(sent === undefined ? [] : [size(sent)]),
   ]
+  const caption = <p className="pb-3 font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
   return (
     <div className="px-3 py-2">
-      <p className="pb-3 font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
-      {body === null ? null : body.source === null ? (
-        <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
-          <Highlight text={body.text} />
-        </pre>
+      {body !== null && body.source !== null ? (
+        <ValueViewer label="Response body" source={body.source} caption={caption} />
       ) : (
-        <ValueViewer label="Response body" source={body.source} />
+        <>
+          {caption}
+          {body !== null && (
+            <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
+              <Highlight text={body.text} />
+            </pre>
+          )}
+        </>
       )}
     </div>
   )
