@@ -1,7 +1,9 @@
-import { useCallback, useId, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react"
+import { useCallback, useContext, useId, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
 import { CopyButton, useCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
+import { Marked, SearchContext, type Search } from "../../../hooks/search"
+import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
 import type {
   ContainerKind,
   ContainerNode,
@@ -22,21 +24,41 @@ import type {
  * A string longer than `LONG_STRING` characters is cut to its first `LONG_STRING`, and one
  * opened whole stays whole for the instance, the same way.
  *
+ * *Search* reaches in: each hash key and each leaf is lit on its own, and what is open is
+ * worked out on each render, never kept. A node is open if the developer opened it, and
+ * otherwise if a match lies under it and the developer has not folded it since the term began.
+ * A fold made over a match holds until the term changes, and its summary is lit, counting the
+ * matches inside. So what Search opened folds back when the term changes, and what the
+ * developer opened stays. A string matched past its cut is drawn whole while the term matches there.
+ *
  * One control copies the whole value, and each node, on hover or focus, offers a copy of its
  * value and of its path. Every text copied is the source's: the viewer only asks for it.
  */
 export function ValueViewer({ label, source }: { label: string; source: ValueSource }) {
   const value = source.tree
+  const search = useContext(SearchContext)
+  const inside = useMemo(() => matchesInside(search, value), [search, value])
   // Only the nodes the developer toggled: absent is folded.
   const [opened, setOpened] = useState<ReadonlyMap<string, boolean>>(() => new Map())
-  const toggle = useCallback((path: string) => {
-    setOpened((previous) => new Map(previous).set(path, previous.get(path) !== true))
-  }, [])
+  // The developer's folds over a match, which hold only under the search they were made in.
+  const [folds, setFolds] = useState<HeldFolds>(() => ({ search, paths: NO_PATHS }))
+  const held = heldUnder(folds, search)
+  const isOpen = (path: string) => opened.get(path) === true || (inside.has(path) && !held.has(path))
+  const toggle = (path: string) => {
+    const open = isOpen(path)
+    setOpened((previous) => new Map(previous).set(path, !open))
+    setFolds((previous) => {
+      const paths = new Set(heldUnder(previous, search))
+      if (open && inside.has(path)) paths.add(path)
+      else paths.delete(path)
+      return { search, paths }
+    })
+  }
   const [whole, setWhole] = useState<ReadonlySet<string>>(() => new Set())
   const openWhole = useCallback((path: string) => {
     setWhole((previous) => new Set(previous).add(path))
   }, [])
-  const view: ViewState = { source, opened, onToggle: toggle, whole, onOpenWhole: openWhole }
+  const view: ViewState = { source, search, inside, isOpen, onToggle: toggle, whole, onOpenWhole: openWhole }
   const wholeText = useMemo(() => source.copyText(value), [source, value])
 
   if (value.type === "container" && value.children.length === 0 && value.cut === undefined) {
@@ -71,16 +93,29 @@ const LONG_STRING = 80
 /** One character of a string as drawn: an escape, or a code point. */
 const CHARACTER = /\\u[0-9a-fA-F]{4}|\\[\s\S]|[\s\S]/gu
 
+/** The developer's folds over a match, and the search they were made under. */
+type HeldFolds = { search: Search; paths: ReadonlySet<string> }
+
+const NO_PATHS: ReadonlySet<string> = new Set()
+
+/** The folds that still hold: only those made under `search`, so a new term lets every one go. */
+function heldUnder(folds: HeldFolds, search: Search) {
+  return folds.search === search ? folds.paths : NO_PATHS
+}
+
 /** How each kind of container is drawn: empty, folded, and what its summary counts. */
 const DRAWN: Record<ContainerKind, { empty: string; folded: string; noun: string }> = {
   hash: { empty: "{}", folded: "{…}", noun: "key" },
   list: { empty: "[]", folded: "[…]", noun: "item" },
 }
 
-/** The source drawn, and what the developer opened in this instance, keyed by `pathKey`. */
+/** The source drawn, what Search found in it, and what is open in this instance, keyed by `pathKey`. */
 type ViewState = {
   source: ValueSource
-  opened: ReadonlyMap<string, boolean>
+  search: Search
+  /** How many matches lie inside each container that has any. */
+  inside: ReadonlyMap<string, number>
+  isOpen: (path: string) => boolean
   onToggle: (path: string) => void
   /** The strings opened whole, by path. */
   whole: ReadonlySet<string>
@@ -91,7 +126,13 @@ function Children({ node, path, ...view }: { node: ContainerNode; path: readonly
   return (
     <>
       {node.children.map((child) => (
-        <Item key={child.key} child={child} path={[...path, { key: child.key, in: node.kind }]} {...view} />
+        <Item
+          key={child.key}
+          child={child}
+          keyed={keysMatch(node)}
+          path={[...path, { key: child.key, in: node.kind }]}
+          {...view}
+        />
       ))}
       {node.cut !== undefined && (
         <li className="pl-4 text-faint italic" role="treeitem">
@@ -102,8 +143,14 @@ function Children({ node, path, ...view }: { node: ContainerNode; path: readonly
   )
 }
 
-function Item({ child, path, ...view }: { child: ValueChild; path: readonly PathStep[] } & ViewState) {
-  const { source, opened, onToggle } = view
+/** `keyed` when the item's key is text Search matches, rather than a list index. */
+function Item({
+  child,
+  keyed,
+  path,
+  ...view
+}: { child: ValueChild; keyed: boolean; path: readonly PathStep[] } & ViewState) {
+  const { source, search, inside, isOpen, onToggle } = view
   const line = useId()
   const { node } = child
 
@@ -111,7 +158,7 @@ function Item({ child, path, ...view }: { child: ValueChild; path: readonly Path
     return (
       <li className="group/line pl-4" role="treeitem" aria-labelledby={line}>
         <span id={line}>
-          <Key text={child.key} />
+          <Key text={child.key} keyed={keyed} search={search} />
           <Leaf leaf={node} path={path} {...view} />
         </span>
         <NodeCopies node={node} path={path} source={source} line={line} />
@@ -120,7 +167,8 @@ function Item({ child, path, ...view }: { child: ValueChild; path: readonly Path
   }
 
   const key = pathKey(path)
-  const open = opened.get(key) === true
+  const open = isOpen(key)
+  const found = inside.get(key)
   // An event from inside an open node's children is theirs to answer, not this node's, and
   // one from a button on its line is the button's.
   const own = (event: MouseEvent | KeyboardEvent) =>
@@ -151,8 +199,16 @@ function Item({ child, path, ...view }: { child: ValueChild; path: readonly Path
           {open ? "▾" : "▸"}
         </span>
         <span id={line}>
-          <Key text={child.key} />
-          <Summary node={node} />
+          <Key text={child.key} keyed={keyed} search={search} />
+          {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
+          {!open && found !== undefined ? (
+            <span className="rounded-xs bg-match" data-lit>
+              <Summary node={node} />
+              {` · ${found} ${found === 1 ? "match" : "matches"}`}
+            </span>
+          ) : (
+            <Summary node={node} />
+          )}
         </span>
         <NodeCopies node={node} path={path} source={source} line={line} />
       </div>
@@ -163,10 +219,6 @@ function Item({ child, path, ...view }: { child: ValueChild; path: readonly Path
       )}
     </li>
   )
-}
-
-function pathKey(path: readonly PathStep[]) {
-  return JSON.stringify(path.map((step) => step.key))
 }
 
 /**
@@ -213,8 +265,14 @@ function NodeCopy({ label, idle, text, line }: { label: string; idle: string; te
   )
 }
 
-function Key({ text }: { text: string }) {
-  return <span className="text-sql-identifier">{`${text}: `}</span>
+/** `keyed` when the key is text Search matches, rather than a list index. */
+function Key({ text, keyed, search }: { text: string; keyed: boolean; search: Search }) {
+  return (
+    <span className="text-sql-identifier">
+      <Marked text={text} matches={keyed ? search.find(text) : []} />
+      {": "}
+    </span>
+  )
 }
 
 /** A folded container, said as its brackets and a count: `{…} 7 keys`, `[…] 3 items`. */
@@ -235,27 +293,47 @@ function noun(node: ContainerNode, count: number) {
 }
 
 /** A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app sent. */
-function Leaf({ leaf, path, whole, onOpenWhole }: { leaf: LeafNode; path: readonly PathStep[] } & ViewState) {
+function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path: readonly PathStep[] } & ViewState) {
+  const matches = search.find(leafText(leaf))
   if (leaf.type === "filtered") {
     return (
       <span
         className="rounded-chip border border-dashed border-faint px-1 text-2xs tracking-wider text-muted"
         data-filtered
       >
-        FILTERED
+        <Marked text="FILTERED" matches={matches} />
       </span>
     )
   }
-  if (leaf.type === "cycle") return <Token>{leaf.text}</Token>
+  if (leaf.type === "cycle") {
+    return (
+      <Token>
+        <Marked text={leaf.text} matches={matches} />
+      </Token>
+    )
+  }
 
   // A string's text is its quotes around what it says, and only what it says is counted.
   const characters = leaf.token === "string" ? (leaf.text.slice(1, -1).match(CHARACTER) ?? []) : []
+  const shown = `${leaf.text[0]}${characters.slice(0, LONG_STRING).join("")}`
   const key = pathKey(path)
-  if (characters.length <= LONG_STRING || whole.has(key)) return <Token token={leaf.token}>{leaf.text}</Token>
+  if (
+    characters.length <= LONG_STRING ||
+    whole.has(key) ||
+    matches.some(([, stop]) => stop > shown.length)
+  ) {
+    return (
+      <Token token={leaf.token}>
+        <Marked text={leaf.text} matches={matches} />
+      </Token>
+    )
+  }
 
   return (
     <>
-      <Token token={leaf.token} cut>{`${leaf.text[0]}${characters.slice(0, LONG_STRING).join("")}`}</Token>
+      <Token token={leaf.token} cut>
+        <Marked text={shown} matches={matches} />
+      </Token>
       <button className="cursor-pointer text-faint italic hover:underline" type="button" onClick={() => onOpenWhole(key)}>
         {`…${characters.length - LONG_STRING} more chars`}
       </button>
@@ -264,7 +342,7 @@ function Leaf({ leaf, path, whole, onOpenWhole }: { leaf: LeafNode; path: readon
 }
 
 /** A leaf's text in the colour of its token class, read off its `data-token`. */
-function Token({ token, cut = false, children }: { token?: TokenClass; cut?: boolean; children: string }) {
+function Token({ token, cut = false, children }: { token?: TokenClass; cut?: boolean; children: ReactNode }) {
   return (
     <span
       className={cn(
