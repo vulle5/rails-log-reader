@@ -1,8 +1,10 @@
 import { join } from "node:path"
 
-import index from "../ui/index.html"
+import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "./allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "./app-name"
+import { refusal, type RouteKind } from "./gate"
 import { initializerFileStatus, repairInitializerFile } from "./initializer-file"
+import { servePage, type PageSocket } from "./page"
 import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
 import { openSidecar, readEarlier, type Sidecar } from "./sidecar"
@@ -28,6 +30,16 @@ const port = readPort(process.env[PORT_VARIABLE])
 if (port === null) {
   console.error(
     `rails-log-reader: ${PORT_VARIABLE} is set to "${process.env[PORT_VARIABLE]}", which is not a port number.`,
+  )
+  process.exit(1)
+}
+
+const allowedHosts = readAllowedHosts(process.env[ALLOWED_HOSTS_VARIABLE])
+
+if (allowedHosts === null) {
+  console.error(
+    `rails-log-reader: ${ALLOWED_HOSTS_VARIABLE} is set to "${process.env[ALLOWED_HOSTS_VARIABLE]}". ` +
+      `It takes comma-separated hostnames with no port or scheme, like "tunnel.example,.ngrok.example".`,
   )
   process.exit(1)
 }
@@ -158,11 +170,39 @@ async function repairInitializer() {
   }
 }
 
+/** The bound port, which the page cannot read off its own address once a tunnel is in front. */
+function readerPort(_request: Request, server: Bun.Server<PageSocket>) {
+  return Response.json({ port: server.port })
+}
+
+type Handler = (request: Request, server: Bun.Server<PageSocket>) => Response | undefined | Promise<Response | undefined>
+
+/**
+ * `handler`, run only for a request `refusal` lets through. A refused one gets a bare `403`,
+ * and the Reader prints the `Host` or `Origin` it refused, which is how a developer finds the
+ * name to add to `RAILS_LOG_READER_ALLOWED_HOSTS`.
+ */
+function gated<H extends Handler>(kind: RouteKind, handler: H) {
+  return (request: Request, server: Bun.Server<PageSocket>) => {
+    const refused = refusal(request, kind, allowedHosts ?? [])
+    if (refused === null) return handler(request, server)
+
+    console.log(`rails-log-reader: refused ${request.method} ${new URL(request.url).pathname} for ${refused}`)
+    return new Response(null, { status: 403 })
+  }
+}
+
+const view = <H extends Handler>(handler: H) => gated("view", handler)
+const act = <H extends Handler>(handler: H) => gated("act", handler)
+
+const page = servePage(process.env.NODE_ENV === "production" ? false : { hmr: true, console: true })
+
 const server = serveOrSaySo(port)
 
 // The port it actually bound, which with an ephemeral one is the only place that is written
-// down. Printed before anything else, because it is the line a developer came for.
-console.log(`Rails log reader  ${server.url}`)
+// down. Printed before anything else, because it is the line a developer came for. Named
+// `localhost` though it binds `127.0.0.1`, because that is the address the README gives.
+console.log(`Rails log reader  http://localhost:${server.port}/`)
 console.log(`Rails root        ${railsRoot}`)
 
 /**
@@ -173,8 +213,13 @@ console.log(`Rails root        ${railsRoot}`)
  */
 function serveOrSaySo(port: number) {
   try {
-    return Bun.serve({
+    return Bun.serve<PageSocket>({
       port,
+      // Never the wildcard, which is every interface on the network, and never `localhost`,
+      // which may be `::1` alone and so out of reach of a Windows browser under WSL.
+      hostname: "127.0.0.1",
+      // Every route is a view or an act, and passes the gate before it runs. The page, its
+      // assets and anything else unmatched is the `fetch` below, a view too.
       routes: {
         // A connection that is quiet whenever the Host app is, which is most of the time — so
         // exempt from `Bun.serve`'s 10 s idle timeout, which would otherwise reap it every
@@ -182,17 +227,18 @@ function serveOrSaySo(port: number) {
         // arriving late. Only this route: nothing else here is meant to be held open.
         // There's no test for this, because Bun's default timeout is 10 s and the test
         // would have to wait that long to fail.
-        "/events": (request, server) => {
+        "/events": view((request, server) => {
           server.timeout(request, 0)
           return envelopeStream()
-        },
-        "/earlier": { GET: earlier },
-        "/app-name-override": { GET: appNameOverrideRoute },
-        "/initializer-status": { GET: initializerStatus },
-        "/initializer-repair": { POST: repairInitializer },
-        "/*": index,
+        }),
+        "/earlier": { GET: view(earlier) },
+        "/app-name-override": { GET: view(appNameOverrideRoute) },
+        "/reader-port": { GET: view(readerPort) },
+        "/initializer-status": { GET: view(initializerStatus) },
+        "/initializer-repair": { POST: act(repairInitializer) },
       },
-      development: process.env.NODE_ENV === "production" ? false : { hmr: true, console: true },
+      fetch: view(page.fetch),
+      websocket: page.websocket,
     })
   } catch (problem) {
     if ((problem as { code?: string }).code !== "EADDRINUSE") throw problem

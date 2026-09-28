@@ -84,6 +84,13 @@ To turn the Reader off again, delete `log/rails_log_reader.enabled` and restart.
   `RAILS_LOG_READER_PORT` for the second one.
 - The tab title and the header both show your app's name, by default it's the value of
   `Rails.application.class.module_parent_name`. Set `RAILS_LOG_READER_APP_NAME` to override it.
+- The Reader only listens on `127.0.0.1` and only answers pages opened on `localhost` or
+  `127.0.0.1`, on any port. To view the log through another name, like a tunnel to another
+  device, list it in `RAILS_LOG_READER_ALLOWED_HOSTS`: comma-separated hostnames with no
+  port, where a leading dot also allows subdomains (`tunnel.example,.ngrok-free.app`). Listed
+  hosts are view-only: anything that acts on your machine, like repairing the Initializer,
+  still needs `localhost:5273`. A refused request gets a bare `403`, and the Reader prints the
+  `Host` or `Origin` it refused.
 
 ## Checks
 

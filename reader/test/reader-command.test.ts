@@ -3,6 +3,9 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { networkInterfaces } from "node:os"
+
+import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "../src/server/allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "../src/server/app-name"
 import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
@@ -68,23 +71,56 @@ function spawnReader(entry: string, cwd: string, env: Record<string, string>) {
 }
 
 /**
+ * Everything a Reader has printed so far, read for as long as it runs. Kept per Reader rather
+ * than read afresh, because a stream stops being readable once one reader lets go of it, and
+ * the Reader goes on printing after the line that says where it is.
+ */
+type Transcript = { said: string; grew: Promise<boolean> }
+
+const transcripts = new WeakMap<Bun.Subprocess, Transcript>()
+
+function transcriptOf(reader: Bun.Subprocess) {
+  const existing = transcripts.get(reader)
+  if (existing !== undefined) return existing
+
+  // `grew` settles each time more arrives, `true`, and once more when stdout closes, `false`.
+  let settle = (_more: boolean) => {}
+  const pending = () => new Promise<boolean>((resolve) => (settle = resolve))
+  const transcript: Transcript = { said: "", grew: pending() }
+
+  void (async () => {
+    const decoder = new TextDecoder()
+    for await (const chunk of reader.stdout as ReadableStream<Uint8Array>) {
+      transcript.said += decoder.decode(chunk, { stream: true })
+      const grown = settle
+      transcript.grew = pending()
+      grown(true)
+    }
+    settle(false)
+  })()
+
+  transcripts.set(reader, transcript)
+  return transcript
+}
+
+/** The first match for `pattern` in what the Reader has printed, once it has printed one. */
+async function printed(reader: Bun.Subprocess, pattern: RegExp) {
+  const transcript = transcriptOf(reader)
+
+  while (true) {
+    const found = transcript.said.match(pattern)
+    if (found !== null) return found
+    if (!(await transcript.grew)) throw new Error(`the Reader never printed ${pattern}, only: ${transcript.said}`)
+  }
+}
+
+/**
  * Where the Reader says it is, read from the line it prints on the way up. That line is
  * written after the socket is bound, so arriving at it is also how these tests know the
  * Reader is up — there is nothing to poll and no port to have guessed.
  */
 async function readerUrl(reader: Bun.Subprocess) {
-  const stream = reader.stdout as ReadableStream<Uint8Array>
-  const decoder = new TextDecoder()
-  let said = ""
-
-  for await (const chunk of stream) {
-    said += decoder.decode(chunk, { stream: true })
-
-    const announced = said.match(/(http:\/\/\S+)/)
-    if (announced?.[1] !== undefined) return announced[1]
-  }
-
-  throw new Error(`the Reader never said where it was, only: ${said}`)
+  return (await printed(reader, /(http:\/\/\S+)/))[1] ?? ""
 }
 
 /** `Bun.fetch` rather than the global, which the shell tests replace with happy-dom's. */
@@ -340,7 +376,10 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
     await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
     const url = await readerUrl(run(root))
 
-    const repaired = await Bun.fetch(new URL("initializer-repair", url), { method: "POST" })
+    const repaired = await Bun.fetch(new URL("initializer-repair", url), {
+      method: "POST",
+      headers: { origin: new URL(url).origin },
+    })
 
     expect(await repaired.json()).toEqual({ ok: true })
     expect(await readFile(join(root, INITIALIZER_RELATIVE_PATH))).toEqual(await readFile(MASTER_INITIALIZER))
@@ -349,6 +388,156 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
 
     const status = await Bun.fetch(new URL("initializer-status", url))
     expect(await status.json()).toEqual(answer({ installed: true, current: true }))
+  })
+})
+
+/**
+ * A request as a browser on some other page would send it: the `Host` it was addressed to and
+ * the `Origin` of the page that sent it, either of which may be absent. Sent to the Reader's
+ * own socket whatever `Host` says, the way a rebound name arrives.
+ */
+async function requestAs(
+  url: string,
+  path: string,
+  { host, origin, method = "GET" }: { host?: string; origin?: string; method?: string },
+) {
+  const headers: Record<string, string> = {}
+  if (host !== undefined) headers.host = host
+  if (origin !== undefined) headers.origin = origin
+  return await Bun.fetch(new URL(path, url), { method, headers })
+}
+
+/** A Host app with a stale Initializer, so a repair that went through would show. */
+async function staleRoot() {
+  const root = await railsRoot()
+  await mkdir(join(root, "config", "initializers"), { recursive: true })
+  await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+  return root
+}
+
+async function repaired(root: string) {
+  return (await readFile(join(root, INITIALIZER_RELATIVE_PATH), "utf8")) !== "# a stale copy of the Initializer\n"
+}
+
+describe("who the Reader answers", () => {
+  test("listens on 127.0.0.1 alone, and says it is on localhost", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const port = new URL(url).port
+
+    expect(url).toBe(`http://localhost:${port}/`)
+    expect((await Bun.fetch(`http://127.0.0.1:${port}/app-name-override`)).status).toBe(200)
+
+    const elsewhere = Object.values(networkInterfaces())
+      .flat()
+      .filter((address) => address !== undefined && !address.internal && address.family === "IPv4")
+      .map((address) => address?.address)
+    for (const address of ["[::1]", ...elsewhere]) {
+      await expect(Bun.fetch(`http://${address}:${port}/app-name-override`)).rejects.toThrow()
+    }
+  })
+
+  test("refuses a view and an act addressed to a Host outside the allowlist, and names the Host", async () => {
+    const root = await staleRoot()
+    const reader = run(root)
+    const url = await readerUrl(reader)
+
+    const view = await requestAs(url, "/", { host: "rebound.example:5273" })
+    const act = await requestAs(url, "/initializer-repair", {
+      method: "POST",
+      host: "elsewhere.example",
+      origin: "http://elsewhere.example",
+    })
+
+    expect(view.status).toBe(403)
+    expect(await view.text()).toBe("")
+    expect(act.status).toBe(403)
+    expect(await act.text()).toBe("")
+    expect(await repaired(root)).toBe(false)
+    await printed(reader, /refused.*Host rebound\.example:5273/)
+    await printed(reader, /refused.*Host elsewhere\.example/)
+  })
+
+  test("serves localhost and 127.0.0.1 on any port, so a remapped forward still works", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    for (const host of ["localhost:8080", "127.0.0.1:5274", "localhost"]) {
+      expect((await requestAs(url, "/", { host })).status).toBe(200)
+    }
+  })
+
+  test("serves views to a host in RAILS_LOG_READER_ALLOWED_HOSTS, a leading dot's subdomains included, and refuses it acts", async () => {
+    const root = await staleRoot()
+    const reader = run(root, { [ALLOWED_HOSTS_VARIABLE]: "tunnel.example, .ngrok.example" })
+    const url = await readerUrl(reader)
+
+    for (const host of ["tunnel.example", "abc.ngrok.example:443", "ngrok.example"]) {
+      expect((await requestAs(url, "/", { host })).status).toBe(200)
+      expect((await requestAs(url, "/initializer-status", { host, origin: `http://${host}` })).status).toBe(200)
+    }
+    expect((await requestAs(url, "/", { host: "other.tunnel.example" })).status).toBe(403)
+
+    const act = await requestAs(url, "/initializer-repair", {
+      method: "POST",
+      host: "tunnel.example",
+      origin: "http://tunnel.example",
+    })
+    expect(act.status).toBe(403)
+    expect(await repaired(root)).toBe(false)
+    await printed(reader, /refused.*Host tunnel\.example/)
+  })
+
+  test("repairs the Initializer only for the Reader's own exact Origin", async () => {
+    const root = await staleRoot()
+    const reader = run(root)
+    const url = await readerUrl(reader)
+    const host = new URL(url).host
+
+    for (const origin of ["http://attacker.example", "http://localhost:3000", "null", undefined]) {
+      const refused = await requestAs(url, "/initializer-repair", { method: "POST", host, origin })
+      expect(refused.status).toBe(403)
+    }
+    expect(await repaired(root)).toBe(false)
+    await printed(reader, /refused.*Origin http:\/\/localhost:3000/)
+
+    const accepted = await requestAs(url, "/initializer-repair", { method: "POST", host, origin: `http://${host}` })
+    expect(accepted.status).toBe(200)
+    expect(await repaired(root)).toBe(true)
+  })
+
+  test("refuses a GET whose Origin is not its own, and serves one with none", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+
+    expect((await requestAs(url, "/initializer-status", { host, origin: "http://localhost:3000" })).status).toBe(403)
+    expect((await requestAs(url, "/", { host, origin: "null" })).status).toBe(403)
+    expect((await requestAs(url, "/initializer-status", { host })).status).toBe(200)
+    expect((await requestAs(url, "/initializer-status", { host, origin: `http://${host}` })).status).toBe(200)
+  })
+
+  test("never says Access-Control-Allow-Origin, whether it serves or refuses", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+
+    const routes = ["/", "/earlier?from=0", "/app-name-override", "/initializer-status", "/reader-port", "/nowhere"]
+    for (const origin of [undefined, `http://${host}`, "http://attacker.example"]) {
+      for (const path of routes) {
+        for (const method of ["GET", "OPTIONS"]) {
+          const response = await requestAs(url, path, { host, origin, method })
+          expect(response.headers.get("access-control-allow-origin")).toBeNull()
+          await response.body?.cancel()
+        }
+      }
+      const repair = await requestAs(url, "/initializer-repair", { method: "POST", host: "attacker.example", origin })
+      expect(repair.headers.get("access-control-allow-origin")).toBeNull()
+    }
+  })
+
+  test("tells the page which port it is on, which a tunnelled page cannot read off its own address", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    const response = await Bun.fetch(new URL("reader-port", url))
+
+    expect(await response.json()).toEqual({ port: Number(new URL(url).port) })
   })
 })
 
@@ -424,5 +613,24 @@ describe("the app-name override", () => {
 
   test("trims surrounding whitespace from an override that is otherwise set", () => {
     expect(readAppNameOverride("  MyApp  ")).toBe("MyApp")
+  })
+})
+
+/** Read once at startup, the way the port and the app name are. */
+describe("the allowed-hosts setting", () => {
+  test("allows nothing beyond loopback unless RAILS_LOG_READER_ALLOWED_HOSTS is set", () => {
+    expect(readAllowedHosts(undefined)).toEqual([])
+    expect(readAllowedHosts("  ")).toEqual([])
+  })
+
+  test("is a comma-separated list of hostnames, lower-cased and trimmed", () => {
+    expect(readAllowedHosts(" Tunnel.Example , .ngrok.example,")).toEqual(["tunnel.example", ".ngrok.example"])
+  })
+
+  test("is refused rather than half-read when an entry is not a bare hostname", () => {
+    expect(readAllowedHosts("tunnel.example:443")).toBeNull()
+    expect(readAllowedHosts("*")).toBeNull()
+    expect(readAllowedHosts("https://tunnel.example")).toBeNull()
+    expect(readAllowedHosts(".")).toBeNull()
   })
 })

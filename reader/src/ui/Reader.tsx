@@ -79,6 +79,12 @@ type ReaderProps = {
   repairState?: RepairState
   onRepair?: () => void
   onDismissRepair?: () => void
+  /**
+   * Where the Reader's acts can be made from, when this page is not there: `localhost:<port>`
+   * on a page opened through a listed host, which the Reader serves views and nothing else.
+   * `null` when this page may act.
+   */
+  actsOnlyFrom?: string | null
   /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
@@ -109,6 +115,7 @@ export function Reader({
   repairState = { phase: "idle" },
   onRepair = () => {},
   onDismissRepair = () => {},
+  actsOnlyFrom = null,
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
   historyLoaded = true,
@@ -260,6 +267,7 @@ export function Reader({
         understoodVersion={WIRE_VERSION}
         repairState={repairState}
         onRepair={onRepair}
+        actsOnlyFrom={actsOnlyFrom}
       />
     )
   }
@@ -274,6 +282,7 @@ export function Reader({
         repairState={repairState}
         onRepair={onRepair}
         onDismiss={onDismissRepair}
+        actsOnlyFrom={actsOnlyFrom}
       />
       {/* Above the three columns rather than in any one of them, because neither belongs to
           one: a term lights every column at once, and a theme paints them. Present from the

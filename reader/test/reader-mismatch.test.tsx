@@ -151,3 +151,19 @@ describe("the wire-version refusal (#29)", () => {
     expect(calls).toBe(1)
   })
 })
+
+describe("repairing from a page that may not act", () => {
+  test("replaces the Repair button with a note naming where repairing is possible", () => {
+    openTheReader([], { mismatch: { kind: "file_stale" }, actsOnlyFrom: "localhost:5273" })
+
+    expect(banner()).toHaveTextContent("Repairing needs localhost:5273")
+    expect(within(banner()).queryByRole("button")).not.toBeInTheDocument()
+  })
+
+  test("says the same on the refusal screen", () => {
+    openTheReader([], { liveWireVersion: WIRE_VERSION + 1, actsOnlyFrom: "localhost:5273" })
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Repairing needs localhost:5273")
+    expect(within(screen.getByRole("alert")).queryByRole("button")).not.toBeInTheDocument()
+  })
+})

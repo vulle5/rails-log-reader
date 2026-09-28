@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client"
 import { resolveAppName } from "../shared/app-name"
 import { detectEmptyState, detectMismatch } from "../shared/initializer-status"
 import { useInitializerFileStatus, useInitializerRepair } from "./features/setup-status/lib/initializer-repair"
+import { useActsOnlyFrom } from "./hooks/acting"
 import { useAppNameOverride } from "./hooks/app-name"
 import { useSidecar } from "./hooks/live"
 import { Reader } from "./Reader"
@@ -25,6 +26,7 @@ function LiveReader() {
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
   const appNameOverride = useAppNameOverride()
+  const actsOnlyFrom = useActsOnlyFrom()
 
   async function onRepair() {
     const copied = await repair()
@@ -45,6 +47,7 @@ function LiveReader() {
       repairState={repairState}
       onRepair={onRepair}
       onDismissRepair={dismiss}
+      actsOnlyFrom={actsOnlyFrom}
       earlier={earlier}
       onLoadEarlier={loadEarlier}
       historyLoaded={historyLoaded}

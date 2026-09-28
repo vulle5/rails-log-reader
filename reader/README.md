@@ -43,6 +43,12 @@ free port, which is what the tests here use. The Reader prints the URL it bound 
 way. Start it on a port something else is holding and it says so and exits, rather than
 throwing.
 
+It binds `127.0.0.1` and gates every request, the page included, on its `Host` and
+`Origin`: see `src/server/gate.ts`. Each route is declared as a view or an act in
+`src/server/index.ts`. The HTML bundle is served on a unix socket of its own and proxied
+through the gate (`src/server/page.ts`), because `Bun.serve` serves a bundle without calling
+any handler.
+
 ## Checks
 
 ```sh
