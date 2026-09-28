@@ -17,7 +17,8 @@ import type {
 
 /**
  * The *Value viewer*: a value tree drawn as an ARIA tree. The top level is open, and every
- * container under it starts folded to its summary until the developer opens it. An open one is
+ * container under it starts folded to its summary until the developer opens it, unless its
+ * source says it starts open. An open one is
  * drawn between its brackets, the opening one on its own line and the closing one under its
  * children. An empty one is drawn as its brackets, `{}` or `[]`, with nothing to open.
  *
@@ -43,14 +44,14 @@ export function ValueViewer({ label, source, caption }: { label: string; source:
   const value = source.tree
   const search = useContext(SearchContext)
   const inside = useMemo(() => matchesInside(search, value), [search, value])
-  // Only the nodes the developer toggled: absent is folded.
+  // Only the nodes the developer toggled: absent is as the source said.
   const [opened, setOpened] = useState<ReadonlyMap<string, boolean>>(() => new Map())
   // The developer's folds over a match, which hold only under the search they were made in.
   const [folds, setFolds] = useState<HeldFolds>(() => ({ search, paths: NO_PATHS }))
   const held = heldUnder(folds, search)
-  const isOpen = (path: string) => opened.get(path) === true || (inside.has(path) && !held.has(path))
-  const toggle = (path: string) => {
-    const open = isOpen(path)
+  const isOpen = (path: string, node: ContainerNode) =>
+    (opened.get(path) ?? node.open === true) || (inside.has(path) && !held.has(path))
+  const toggle = (path: string, open: boolean) => {
     setOpened((previous) => new Map(previous).set(path, !open))
     setFolds((previous) => {
       const paths = new Set(heldUnder(previous, search))
@@ -117,10 +118,11 @@ function heldUnder(folds: HeldFolds, search: Search) {
   return folds.search === search ? folds.paths : NO_PATHS
 }
 
-/** Each kind of container's brackets, and what its summary counts. */
-const DRAWN: Record<ContainerKind, { open: string; close: string; noun: string }> = {
-  hash: { open: "{", close: "}", noun: "key" },
-  list: { open: "[", close: "]", noun: "item" },
+/** Each kind of container's brackets, and what its summary counts, one and many. */
+const DRAWN: Record<ContainerKind, { open: string; close: string; nouns: readonly [string, string] }> = {
+  hash: { open: "{", close: "}", nouns: ["key", "keys"] },
+  list: { open: "[", close: "]", nouns: ["item", "items"] },
+  element: { open: "<", close: ">", nouns: ["child", "children"] },
 }
 
 /** The source drawn, what Search found in it, and what is open in this instance, keyed by `pathKey`. */
@@ -129,8 +131,9 @@ type ViewState = {
   search: Search
   /** How many matches lie inside each container that has any. */
   inside: ReadonlyMap<string, number>
-  isOpen: (path: string) => boolean
-  onToggle: (path: string) => void
+  isOpen: (path: string, node: ContainerNode) => boolean
+  /** Opens or folds the node at `path`, which is `open` now. */
+  onToggle: (path: string, open: boolean) => void
   /** The strings opened whole, by path. */
   whole: ReadonlySet<string>
   onOpenWhole: (path: string) => void
@@ -182,7 +185,7 @@ function Item({
   }
 
   const key = pathKey(path)
-  const open = isOpen(key)
+  const open = isOpen(key, node)
   const found = inside.get(key)
   const closing = useRef<HTMLDivElement>(null)
   // An event from inside an open node's children is theirs to answer, not this node's, and
@@ -199,14 +202,14 @@ function Item({
       tabIndex={0}
       onClick={(event) => {
         // The closing bracket is drawn, not a toggle.
-        if (own(event) && !(closing.current?.contains(event.target as Node) ?? false)) onToggle(key)
+        if (own(event) && !(closing.current?.contains(event.target as Node) ?? false)) onToggle(key, open)
       }}
       onKeyDown={(event) => {
         if (!own(event)) return
         const wanted = event.key === "ArrowRight" ? true : event.key === "ArrowLeft" ? false : null
         if (event.key === "Enter" || event.key === " " || (wanted !== null && wanted !== open)) {
           event.preventDefault()
-          onToggle(key)
+          onToggle(key, open)
         }
       }}
     >
@@ -317,8 +320,8 @@ function Summary({ node }: { node: ContainerNode }) {
 }
 
 function noun(node: ContainerNode, count: number) {
-  const one = DRAWN[node.kind].noun
-  return count === 1 ? one : `${one}s`
+  const [one, many] = DRAWN[node.kind].nouns
+  return count === 1 ? one : many
 }
 
 /** A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app sent. */

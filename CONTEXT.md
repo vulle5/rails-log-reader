@@ -570,7 +570,7 @@ A response body is text the app sent, so it is laid out as a tree by default wit
 exactly as sent one toggle away. XML is the same tree as JSON rather than a view of its own: an
 element is a node named by its tag, with its attributes beside it, an element holding only text
 is a leaf with that text as its string value, and an element with children folds to a summary of
-them. Copy hands over what is showing, laid-out text while laid out and the exact text while raw.
+them. The root element is the top level, so it starts open. Copy hands over what is showing, laid-out text while laid out and the exact text while raw.
 A node's path is what reaches it in a Rails test, `response.parsed_body["posts"][0]`, or its
 XPath in XML.
 

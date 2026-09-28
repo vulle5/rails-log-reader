@@ -2,15 +2,17 @@ import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import { aRun } from "./sidecar.fixtures"
-import { DENSE_TRAFFIC, HANGS, NEVER_ROUTED, SERVER_RUN } from "./traffic.fixtures"
+import { DENSE_TRAFFIC, HANGS, NEVER_ROUTED, SERVER_RUN, SITEMAP_XML } from "./traffic.fixtures"
 import { Reader } from "../src/ui/Reader"
 import {
   detailPanel,
   detailTab,
   detailTabBar,
   folded,
+  lit,
   openTheReader,
   openTheReaderOver,
+  search,
   select,
   showDetailTab,
   treeItem,
@@ -344,5 +346,125 @@ describe("Pretty and Raw", () => {
     expect(
       within(detailPanel("Response")).getByText(wholeText("200 OK · application/json · 200.0 KB")),
     ).toBeInTheDocument()
+  })
+})
+
+/** An XML body, read off the traffic seed's sitemap, in the same *Value viewer* a JSON one is. */
+describe("an XML body", () => {
+  const XMLNS = 'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+
+  async function showSitemap() {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, "/sitemap.xml")
+    await showDetailTab(user, "Response")
+    return user
+  }
+
+  function copyBody() {
+    return within(detailPanel("Response")).getByRole("button", { name: "Copy response body" })
+  }
+
+  test("carries xml on the Response tab's label", async () => {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, "/sitemap.xml")
+
+    expect(detailTab("Response")).toHaveAccessibleName("Response xml")
+  })
+
+  test("draws as a tree, the root element open with its attributes beside its tag", async () => {
+    await showSitemap()
+
+    const tree = valueTree("Response body")
+    const root = treeItem(tree, "urlset")
+    expect(root).toHaveAccessibleName(`urlset: ${XMLNS} <`)
+    expect(root).toHaveAttribute("aria-expanded", "true")
+    expectLines(treeItemsOf(within(root).getByRole("group")), ["url[1]: <…> 2 children", "url[2]: <…> 2 children"])
+  })
+
+  test("draws an element holding only text as a string leaf", async () => {
+    const user = await showSitemap()
+    const tree = valueTree("Response body")
+    const url = treeItem(tree, "url[2]")
+    await user.click(url)
+
+    expectLines(treeItemsOf(within(url).getByRole("group")), [
+      'loc: "https://example.com/posts/13"',
+      'lastmod: "2026-07-02"',
+    ])
+    expect(within(treeItem(url, "loc")).getByText('"https://example.com/posts/13"')).toHaveAttribute("data-token", "string")
+  })
+
+  test("folds the root element when it is clicked", async () => {
+    const user = await showSitemap()
+    const root = treeItem(valueTree("Response body"), "urlset")
+    await user.click(root)
+
+    expect(root).toHaveAttribute("aria-expanded", "false")
+    expect(root).toHaveAccessibleName(`urlset: ${XMLNS} <…> 2 children`)
+  })
+
+  test("copies a node's path as XPath, with a position where siblings share a tag", async () => {
+    const user = await showSitemap()
+    const tree = valueTree("Response body")
+    await user.click(treeItem(tree, "url[2]"))
+
+    await user.click(within(treeItem(tree, "loc")).getByRole("button", { name: "Copy path" }))
+    expect(await navigator.clipboard.readText()).toBe("/urlset/url[2]/loc")
+  })
+
+  test("copies laid-out XML while pretty, and the exact text while raw", async () => {
+    const user = await showSitemap()
+
+    await user.click(copyBody())
+    expect(await navigator.clipboard.readText()).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        `<urlset ${XMLNS}>`,
+        "  <url>",
+        "    <loc>https://example.com/posts/12</loc>",
+        "    <lastmod>2026-07-01</lastmod>",
+        "  </url>",
+        "  <url>",
+        "    <loc>https://example.com/posts/13</loc>",
+        "    <lastmod>2026-07-02</lastmod>",
+        "  </url>",
+        "</urlset>",
+      ].join("\n"),
+    )
+
+    await user.click(within(detailPanel("Response")).getByRole("button", { name: "Raw" }))
+    await user.click(copyBody())
+    expect(await navigator.clipboard.readText()).toBe(SITEMAP_XML)
+  })
+
+  test("opens down to a Search match, and counts the tags it matches as well as the text", async () => {
+    const user = await showSitemap()
+    await search(user, "posts/13")
+
+    const tree = valueTree("Response body")
+    expect(treeItem(tree, "url[1]")).toHaveAttribute("aria-expanded", "false")
+    expect(treeItem(tree, "url[2]")).toHaveAttribute("aria-expanded", "true")
+    expect(lit(treeItem(tree, "loc"))).toEqual(["posts/13"])
+
+    await search(user, "loc")
+    await showDetailTab(user, "Timeline")
+    expect(detailTab("Response")).toHaveAccessibleDescription("2 matches")
+  })
+
+  test("that is malformed shows raw, with Pretty disabled and a note saying why", async () => {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "GET", "/feed.xml"),
+      run.finish("req-1"),
+      run.response("req-1", { format: "xml", content_type: "application/xml", body: "<feed><entry></feed>" }),
+    ])
+    await select(user, "/feed.xml")
+    await showDetailTab(user, "Response")
+
+    const panel = detailPanel("Response")
+    expect(within(panel).getByRole("button", { name: "Pretty" })).toBeDisabled()
+    expect(within(panel).getByRole("button", { name: "Raw" })).toBePressed()
+    expect(within(panel).getByText("This body isn't valid XML, so it can only be shown as raw text.")).toBeInTheDocument()
+    expect(within(panel).getByText("<feed><entry></feed>")).toBeInTheDocument()
   })
 })

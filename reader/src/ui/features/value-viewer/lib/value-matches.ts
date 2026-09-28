@@ -6,6 +6,7 @@ import type { ContainerNode, LeafNode, PathStep, ValueNode } from "./value-tree"
  * the *Value viewer* draws for it, so a match never spans a key and its value, and what is
  * counted here is exactly what the viewer lights. What the viewer draws of its own is never
  * matched: a list's indices, a folded container's summary and label, a cut string's count.
+ * A hash's keys and an XML element's tags are the source's, and matched.
  */
 
 /** The text a leaf is matched on: what it draws, `FILTERED` for the filtered marker. */
@@ -15,7 +16,7 @@ export function leafText(leaf: LeafNode) {
 
 /** Whether a container's keys are text the source gave, and matched, rather than indices the viewer counted. */
 export function keysMatch(node: ContainerNode) {
-  return node.kind === "hash"
+  return node.kind !== "list"
 }
 
 /** How many matches of the current term lie in `value`, the same ones the viewer lights. */

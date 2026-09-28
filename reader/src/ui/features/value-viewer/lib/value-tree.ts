@@ -9,9 +9,9 @@ export type ValueNode = ContainerNode | LeafNode
 
 /**
  * What a container's brackets and summary noun are: a hash-like one reads `{…} N keys`, a
- * list-like one `[…] N items`.
+ * list-like one `[…] N items`, and an XML element `<…> N children`.
  */
-export type ContainerKind = "hash" | "list"
+export type ContainerKind = "hash" | "list" | "element"
 
 export type ContainerNode = {
   type: "container"
@@ -25,6 +25,8 @@ export type ContainerNode = {
    * when it did not say. Absent for a container carried whole.
    */
   cut?: { more: number | null }
+  /** Set when the container starts open under the top level, until the developer folds it. */
+  open?: true
 }
 
 /**

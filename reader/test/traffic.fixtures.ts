@@ -404,7 +404,7 @@ log(9110, G, "info", "Signed out user 4021")
 finish(9180, G, 204, 180, 0.0, 0.9)
 
 const SITEMAP = "5a0e3c7d"
-const SITEMAP_XML =
+export const SITEMAP_XML =
   '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
   "<url><loc>https://example.com/posts/12</loc><lastmod>2026-07-01</lastmod></url>" +
   "<url><loc>https://example.com/posts/13</loc><lastmod>2026-07-02</lastmod></url></urlset>"

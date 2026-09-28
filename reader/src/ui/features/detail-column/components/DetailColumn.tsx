@@ -20,6 +20,7 @@ import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
 import { jsonSource } from "../lib/json-source"
+import { xmlSource } from "../lib/xml-source"
 import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import { countMatches } from "../../value-viewer/lib/value-matches"
@@ -332,14 +333,14 @@ function headerMatches(search: Search, response: RowResponse | null) {
 type ResponseBody = { format: "json" | "xml"; text: string; source: ValueSource | null; cutFrom: number | null }
 
 /**
- * A response's kept body, parsed only here, for the one request selected. A JSON body the wire
- * cut, or one that is not valid JSON, has no tree.
+ * A response's kept body, parsed only here, for the one request selected. A body the wire cut,
+ * or one that does not parse as its format, has no tree.
  */
 function responseBody(response: RowResponse | null): ResponseBody | null {
   if (response === null || !("body" in response.payload)) return null
   const { format, body: text } = response.payload
   const cutFrom = response.bodyCutFrom
-  const source = format === "json" && cutFrom === null ? jsonSource(text) : null
+  const source = cutFrom !== null ? null : format === "json" ? jsonSource(text) : xmlSource(text)
   return { format, text, source, cutFrom }
 }
 
@@ -353,8 +354,8 @@ function responseBodyMatches(search: Search, body: ResponseBody | null) {
  * The Response tab: a strip saying the status, the content type and the size the app sent, and
  * beside it Pretty | Raw, then the body. Pretty draws it in the *Value viewer*, and Raw as the
  * text the app sent. Every body opens pretty, a new Selection's included. A body with no tree,
- * cut or not valid JSON, is raw only, Pretty drawn struck through and disabled, with a line
- * saying why. An XML body is raw alone, with no Pretty. The one Copy hands over what is showing.
+ * cut or not valid JSON or XML, is raw only, Pretty drawn struck through and disabled, with a
+ * line saying why. The one Copy hands over what is showing.
  */
 function Response({
   state,
@@ -385,13 +386,8 @@ function Response({
   ]
   const stripLine = <p className="font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
 
-  if (body === null || (body.format !== "json" && body.cutFrom === null)) {
-    return (
-      <div className="px-3 py-2">
-        <div className="pb-3">{stripLine}</div>
-        {body !== null && <RawBody text={body.text} />}
-      </div>
-    )
+  if (body === null) {
+    return <div className="px-3 py-2">{stripLine}</div>
   }
 
   const hasTree = body.source !== null
@@ -407,7 +403,11 @@ function Response({
           {`This response is ${bytes(body.cutFrom)}, and only the first 64 KB is shown. Because it's cut off, it can only be shown as raw text.`}
         </p>
       ) : (
-        !hasTree && <p className="pb-3 text-faint">This body isn't valid JSON, so it can only be shown as raw text.</p>
+        !hasTree && (
+          <p className="pb-3 text-faint">
+            {`This body isn't valid ${body.format.toUpperCase()}, so it can only be shown as raw text.`}
+          </p>
+        )
       )}
     </>
   )
