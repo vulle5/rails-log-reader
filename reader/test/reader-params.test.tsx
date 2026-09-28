@@ -167,6 +167,22 @@ describe("the Params tab", () => {
     expect(treeItem(order, "line_items")).toHaveAttribute("aria-expanded", "false")
   })
 
+  test("draws an open hash or array between its brackets, the opening one on its own line", async () => {
+    const { user, tree } = await showParams()
+    const order = treeItem(tree, "order")
+
+    await user.click(order)
+
+    expect(order).toHaveAccessibleName("order: {")
+    expect(order).toHaveTextContent(/}$/)
+
+    const items = treeItem(order, "line_items")
+    await user.click(items)
+
+    expect(items).toHaveAccessibleName("line_items: [")
+    expect(items).toHaveTextContent(/]$/)
+  })
+
   test("draws an empty hash or array as its brackets, with nothing to open", async () => {
     const run = aRun(SERVER_RUN)
     const { user } = openTheReader([

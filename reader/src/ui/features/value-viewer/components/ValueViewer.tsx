@@ -17,8 +17,9 @@ import type {
 
 /**
  * The *Value viewer*: a value tree drawn as an ARIA tree. The top level is open, and every
- * container under it starts folded to its summary until the developer opens it. An empty one is
- * drawn as its brackets, `{}` or `[]`, with nothing to open.
+ * container under it starts folded to its summary until the developer opens it. An open one is
+ * drawn between its brackets, the opening one on its own line and the closing one under its
+ * children. An empty one is drawn as its brackets, `{}` or `[]`, with nothing to open.
  *
  * What the developer opened and closed is this instance's own, keyed by each node's path, so
  * closing a node keeps what was opened inside it, and a new instance starts folded again.
@@ -116,10 +117,10 @@ function heldUnder(folds: HeldFolds, search: Search) {
   return folds.search === search ? folds.paths : NO_PATHS
 }
 
-/** How each kind of container is drawn: empty, folded, and what its summary counts. */
-const DRAWN: Record<ContainerKind, { empty: string; folded: string; noun: string }> = {
-  hash: { empty: "{}", folded: "{…}", noun: "key" },
-  list: { empty: "[]", folded: "[…]", noun: "item" },
+/** Each kind of container's brackets, and what its summary counts. */
+const DRAWN: Record<ContainerKind, { open: string; close: string; noun: string }> = {
+  hash: { open: "{", close: "}", noun: "key" },
+  list: { open: "[", close: "]", noun: "item" },
 }
 
 /** The source drawn, what Search found in it, and what is open in this instance, keyed by `pathKey`. */
@@ -215,7 +216,9 @@ function Item({
         <span id={line}>
           <Key text={child.key} keyed={keyed} search={search} />
           {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
-          {!open && found !== undefined ? (
+          {open ? (
+            <Opening node={node} />
+          ) : found !== undefined ? (
             <span className="rounded-xs bg-match" data-lit>
               <Summary node={node} />
               {` · ${found} ${found === 1 ? "match" : "matches"}`}
@@ -227,9 +230,15 @@ function Item({
         <NodeCopies node={node} path={path} source={source} line={line} />
       </div>
       {open && (
-        <ul className="pl-4" role="group">
-          <Children node={node} path={path} {...view} />
-        </ul>
+        <>
+          <ul className="pl-4" role="group">
+            <Children node={node} path={path} {...view} />
+          </ul>
+          {/* Under the opening line's key, past the space the fold marker takes. */}
+          <div className="pl-4" aria-hidden="true">
+            {DRAWN[node.kind].close}
+          </div>
+        </>
       )}
     </li>
   )
@@ -278,8 +287,18 @@ function Empty({ node }: { node: ContainerNode }) {
   return (
     <span className="text-muted">
       {node.label !== undefined && `${node.label} `}
-      {DRAWN[node.kind].empty}
+      {`${DRAWN[node.kind].open}${DRAWN[node.kind].close}`}
     </span>
+  )
+}
+
+/** An open container's first line, said as its opening bracket: `{`, `[`, or `Comment {`. */
+function Opening({ node }: { node: ContainerNode }) {
+  return (
+    <>
+      {node.label !== undefined && `${node.label} `}
+      {DRAWN[node.kind].open}
+    </>
   )
 }
 
@@ -289,7 +308,7 @@ function Summary({ node }: { node: ContainerNode }) {
   return (
     <>
       {node.label !== undefined && `${node.label} `}
-      {DRAWN[node.kind].folded}
+      {`${DRAWN[node.kind].open}…${DRAWN[node.kind].close}`}
       <span className="text-faint">{` ${count}${node.cut?.more === null ? "+" : ""} ${noun(node, count)}`}</span>
     </>
   )

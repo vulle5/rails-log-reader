@@ -543,8 +543,9 @@ what it holds, cutting describes what the wire sent, and neither reads the other
 **Value viewer** — the Reader's one collapsible, highlighted view of a structured value: a
 request's params, a JSON or XML response body, and an *Evaluation*'s result. A
 tree, with the top level open and every nested hash or array folded to a summary of what it
-holds (`{…} 7 keys`, `[…] 3 items`). An empty one is just its brackets, `{}` or `[]`, with
-nothing to open. It may lay a structure out, because a tree is not an edit,
+holds (`{…} 7 keys`, `[…] 3 items`). An open one sits between its brackets, the opening one
+on its key's line and the closing one under its children. An empty one is just its brackets,
+`{}` or `[]`, with nothing to open. It may lay a structure out, because a tree is not an edit,
 and it may colour each value by the type it actually has: a form's `"48"` is a string and is
 coloured as one, and only a JSON body carries real numbers, booleans and `null`. A `[FILTERED]`
 value, already filtered by the app's own `filter_parameters`, reads as a marker rather than as
