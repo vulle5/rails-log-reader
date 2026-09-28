@@ -126,7 +126,16 @@ function RequestDetail({
   const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
   const headersMatches = useMemo(() => headerMatches(search, row.response), [search, row.response])
   const body = useMemo(() => responseBody(row.response), [row.response])
-  const bodyMatches = useMemo(() => responseBodyMatches(search, body), [search, body])
+  // Whether Raw was chosen on the Response tab. Any new Selection, one shown before included,
+  // opens pretty.
+  const [rawChosen, setRawChosen] = useState(false)
+  const [rawFor, setRawFor] = useState(row.id)
+  if (rawFor !== row.id) {
+    setRawFor(row.id)
+    setRawChosen(false)
+  }
+  const raw = body !== null && (rawChosen || body.source === null)
+  const bodyMatches = useMemo(() => responseBodyMatches(search, body, raw), [search, body, raw])
 
   return (
     <Detail
@@ -187,7 +196,9 @@ function RequestDetail({
             hint: body === null ? undefined : { text: body.format, tone: "strong" },
             subject: row.id,
             matches: bodyMatches,
-            panel: <Response state={row.state} response={row.response} body={body} />,
+            panel: (
+              <Response state={row.state} response={row.response} body={body} raw={raw} onRaw={setRawChosen} />
+            ),
           },
         ]}
       />
@@ -344,10 +355,13 @@ function responseBody(response: RowResponse | null): ResponseBody | null {
   return { format, text, source, cutFrom }
 }
 
-/** How many matches of the current term lie in a response's body, the same ones `Response` lights. */
-function responseBodyMatches(search: Search, body: ResponseBody | null) {
+/**
+ * How many matches of the current term lie in a response's body, the same ones `Response` lights,
+ * showing it raw or pretty.
+ */
+function responseBodyMatches(search: Search, body: ResponseBody | null, raw: boolean) {
   if (body === null) return 0
-  return body.source === null ? search.find(body.text).length : countMatches(search, body.source.tree)
+  return raw || body.source === null ? search.find(body.text).length : countMatches(search, body.source.tree)
 }
 
 /**
@@ -361,13 +375,16 @@ function Response({
   state,
   response,
   body,
+  raw,
+  onRaw,
 }: {
   state: RequestRow["state"]
   response: RowResponse | null
   body: ResponseBody | null
+  /** Whether the body shows raw: always, for a body with no tree. */
+  raw: boolean
+  onRaw: (raw: boolean) => void
 }) {
-  const [raw, setRaw] = useState(false)
-
   if (response === null) {
     return (
       <p className="px-3 py-2 text-faint">
@@ -391,12 +408,11 @@ function Response({
   }
 
   const hasTree = body.source !== null
-  const showingRaw = raw || !hasTree
   const caption = (
     <>
       <div className="flex items-baseline gap-3 pb-3">
         {stripLine}
-        <BodyView hasTree={hasTree} raw={showingRaw} onRaw={setRaw} />
+        <BodyView hasTree={hasTree} raw={raw} onRaw={onRaw} />
       </div>
       {body.cutFrom !== null ? (
         <p className="pb-3 text-faint">
@@ -413,7 +429,7 @@ function Response({
   )
   return (
     <div className="px-3 py-2">
-      {body.source !== null && !showingRaw ? (
+      {body.source !== null && !raw ? (
         <ValueViewer label="Response body" source={body.source} caption={caption} />
       ) : (
         <Copyable text={body.text} label="Copy response body">

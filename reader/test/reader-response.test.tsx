@@ -282,6 +282,10 @@ describe("Pretty and Raw", () => {
 
     expect(toggle("Pretty")).toBePressed()
     expect(treeItem(valueTree("Response body"), "id")).toHaveAccessibleName("id: 13")
+
+    await select(user, "/posts")
+
+    expect(toggle("Pretty")).toBePressed()
   })
 
   test("copies indented JSON while pretty, and the exact text while raw", async () => {
