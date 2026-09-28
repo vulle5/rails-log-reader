@@ -34,6 +34,33 @@ export function CopyButton({ text, label, className }: { text: string; label: st
 }
 
 /**
+ * A copy control belonging to one line of a list or tree: a small word, `idle`, drawn only while
+ * its line is hovered or it is focused, and for as long as its confirmation lasts. The line is
+ * the nearest `group/line`. `line` is the id of the line's own text, which describes the control
+ * so a screen reader says which line it copies. The text is asked for on the click, so a copy is
+ * never written until it is wanted.
+ */
+export function LineCopy({ label, idle, text, line }: { label: string; idle: string; text: () => string; line?: string }) {
+  const [copied, copy] = useCopy()
+  return (
+    <button
+      className={cn(
+        "ml-2 cursor-pointer font-ui text-2xs text-faint hover:text-foreground hover:underline",
+        // A confirmation stays drawn for as long as it lasts, hovered or not.
+        "opacity-0 group-hover/line:opacity-100 focus-visible:opacity-100 data-copied:opacity-100",
+      )}
+      type="button"
+      aria-label={label}
+      aria-describedby={line}
+      data-copied={copied || undefined}
+      onClick={() => copy(text())}
+    >
+      {copied ? "Copied" : idle}
+    </button>
+  )
+}
+
+/**
  * Whether a copy just succeeded, and the copy itself. `copied` holds for a moment after the
  * clipboard took the text, and never after a copy that failed.
  */

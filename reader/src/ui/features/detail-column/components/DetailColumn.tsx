@@ -1,6 +1,6 @@
-import { memo, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react"
+import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
-import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
+import type { ActivityRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
@@ -8,8 +8,8 @@ import { MethodText } from "../../../components/MethodText"
 import { Tag } from "../../../components/Tag"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
-import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
-import { CopyButton } from "../../../components/CopyButton"
+import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
+import { CopyButton, LineCopy } from "../../../components/CopyButton"
 import { bytes } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
@@ -122,6 +122,7 @@ function RequestDetail({
   const search = useContext(SearchContext)
   const params = useMemo(() => (row.params === null ? null : paramsSource(row.params)), [row.params])
   const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
+  const headersMatches = useMemo(() => headerMatches(search, row.response), [search, row.response])
 
   return (
     <Detail
@@ -164,6 +165,15 @@ function RequestDetail({
             subject: row.id,
             matches: paramsMatches,
             panel: params !== null && <Params source={params} />,
+          },
+          {
+            id: "headers",
+            label: "Headers",
+            // Enabled on every finished request, one that never reached a controller included.
+            disabled: row.state !== "finished",
+            subject: row.id,
+            matches: headersMatches,
+            panel: <ResponseHeaders response={row.response} />,
           },
         ]}
       />
@@ -209,6 +219,70 @@ function Params({ source }: { source: ValueSource }) {
     <div className="px-3 py-2">
       <ValueViewer label="Params" source={source} />
     </div>
+  )
+}
+
+/**
+ * A request's response headers, as its *Response event* carries them: every one, in the order
+ * the app set them, a repeated header repeated, under a "Response headers" heading and the status.
+ */
+function ResponseHeaders({ response }: { response: RowResponse | null }) {
+  if (response === null) {
+    return <p className="px-3 py-2 text-faint">No response was recorded for this request.</p>
+  }
+
+  const { status, headers } = response.payload
+  return (
+    <div className="relative px-3 py-2 pr-15">
+      {headers.length > 0 && (
+        <CopyButton className="top-1.5 right-0" text={headersText(headers)} label="Copy all headers" />
+      )}
+      <div className="flex items-baseline gap-2 pb-1.5">
+        <Caption>Response headers</Caption>
+        <span className="font-mono text-xs text-muted tabular-nums">{status}</span>
+      </div>
+      {headers.length === 0 ? (
+        <p className="text-faint">The response set no headers.</p>
+      ) : (
+        <ul className="font-mono text-sm leading-sql" aria-label="Response headers">
+          {headers.map(([name, value], at) => (
+            // A header can repeat, so its place is the only identity it has.
+            <ResponseHeader key={at} name={name} value={value} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** One header, named by its own line, `name: value`, which its copy control is described by. */
+function ResponseHeader({ name, value }: { name: string; value: string }) {
+  const line = useId()
+  return (
+    <li className="group/line break-all" aria-labelledby={line}>
+      <span id={line}>
+        <span className="text-sql-identifier">
+          <Highlight text={name} />
+          {": "}
+        </span>
+        <Highlight text={value} />
+      </span>
+      <LineCopy label="Copy value" idle="copy" text={() => value} line={line} />
+    </li>
+  )
+}
+
+/** Every header, one per line, as `Name: value`. */
+function headersText(headers: readonly (readonly [string, string])[]) {
+  return headers.map(([name, value]) => `${name}: ${value}`).join("\n")
+}
+
+/** How many matches of the current term lie in a response's headers, the same ones `ResponseHeaders` lights. */
+function headerMatches(search: Search, response: RowResponse | null) {
+  if (response === null) return 0
+  return response.payload.headers.reduce(
+    (count, [name, value]) => count + search.find(name).length + search.find(value).length,
+    0,
   )
 }
 
@@ -667,10 +741,13 @@ function Openable({
 function Trailing({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
     <section className="mt-3 border-t border-dashed border-border" aria-label="After the request finished">
-      <h3 className="px-3 py-1.5 text-2xs font-semibold tracking-wider text-faint uppercase">
-        After the request finished
-      </h3>
+      <Caption className="px-3 py-1.5">After the request finished</Caption>
       <Timeline events={events} railsRoot={railsRoot} />
     </section>
   )
+}
+
+/** A small heading over one part of a panel. */
+function Caption({ className, children }: { className?: string; children: ReactNode }) {
+  return <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)}>{children}</h3>
 }

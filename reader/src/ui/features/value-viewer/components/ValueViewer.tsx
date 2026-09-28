@@ -1,6 +1,6 @@
 import { useCallback, useContext, useId, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
-import { CopyButton, useCopy } from "../../../components/CopyButton"
+import { CopyButton, LineCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
 import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
@@ -239,30 +239,9 @@ function NodeCopies({
 }) {
   return (
     <>
-      <NodeCopy label="Copy value" idle="value" text={() => source.copyText(node)} line={line} />
-      <NodeCopy label="Copy path" idle="path" text={() => source.pathText(path)} line={line} />
+      <LineCopy label="Copy value" idle="value" text={() => source.copyText(node)} line={line} />
+      <LineCopy label="Copy path" idle="path" text={() => source.pathText(path)} line={line} />
     </>
-  )
-}
-
-/** The text is asked for on the click, so a node's copy is never written until it is wanted. */
-function NodeCopy({ label, idle, text, line }: { label: string; idle: string; text: () => string; line?: string }) {
-  const [copied, copy] = useCopy()
-  return (
-    <button
-      className={cn(
-        "ml-2 cursor-pointer font-ui text-2xs text-faint hover:text-foreground hover:underline",
-        // A confirmation stays drawn for as long as it lasts, hovered or not.
-        "opacity-0 group-hover/line:opacity-100 focus-visible:opacity-100 data-copied:opacity-100",
-      )}
-      type="button"
-      aria-label={label}
-      aria-describedby={line}
-      data-copied={copied || undefined}
-      onClick={() => copy(text())}
-    >
-      {copied ? "Copied" : idle}
-    </button>
   )
 }
 
