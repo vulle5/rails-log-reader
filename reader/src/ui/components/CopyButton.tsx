@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react"
 
+import { cn } from "../lib/cn"
+
 /**
  * A copy-to-clipboard control for a block whose whole point is "paste this somewhere else" —
  * always present, at reduced opacity, so it never competes with the text it copies, and
  * solidifying on hover or focus the way it is reached. A click never copies silently: the
  * label swaps to a brief confirmation, because clicking something and seeing no reaction
- * reads as "did that work?"
+ * reads as "did that work?" Anchored to the top right of the nearest positioned block; a
+ * caller moves it with `className`.
  */
-export function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
   const [copied, copy] = useCopy()
 
   return (
@@ -17,7 +20,10 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
     // looking at".
     <button
       type="button"
-      className="absolute top-1.5 right-2 min-w-13 cursor-pointer rounded border border-border bg-raised px-2 py-0.5 font-ui text-xs text-foreground opacity-70 hover:opacity-100 focus-visible:opacity-100"
+      className={cn(
+        "absolute top-1.5 right-2 min-w-13 cursor-pointer rounded border border-border bg-raised px-2 py-0.5 font-ui text-xs text-foreground opacity-70 hover:opacity-100 focus-visible:opacity-100",
+        className,
+      )}
       title={label}
       aria-label={label}
       onClick={() => copy(text)}

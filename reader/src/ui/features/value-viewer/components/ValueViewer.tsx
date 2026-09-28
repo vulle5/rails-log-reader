@@ -68,7 +68,8 @@ export function ValueViewer({ label, source }: { label: string; source: ValueSou
   return (
     // The right padding keeps the top lines clear of the copy button, which is anchored here.
     <div className="relative pr-15">
-      <CopyButton text={wholeText} label={`Copy ${label.toLowerCase()}`} />
+      {/* Centred on the tree's first line, which starts at the block's top edge. */}
+      <CopyButton className="-top-0.5 right-0" text={wholeText} label={`Copy ${label.toLowerCase()}`} />
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (
           <Children node={value} path={[]} {...view} />
