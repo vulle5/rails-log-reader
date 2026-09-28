@@ -5,9 +5,7 @@ import { jsonText, rubyString } from "./json-text"
  * A JSON response body as the *Value viewer*'s source, or `null` when the body is not whole,
  * valid JSON, such as a body the wire cut.
  *
- * The body is read by a parser of its own rather than `JSON.parse`, which would list an
- * object's integer-like keys first, in ascending order. Here every object keeps the order the
- * body wrote its keys in. A repeated key stays where it first appeared and holds its last value,
+ * Every object keeps the order the body wrote its keys in, integer-like keys included. A repeated key stays where it first appeared and holds its last value,
  * as a parsed body does. A leaf is drawn exactly as the body wrote it, so `1.50` keeps its zero
  * and a string keeps its escapes, and is coloured by its JSON type.
  *

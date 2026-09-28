@@ -4,7 +4,7 @@ export function bytes(howMany: number) {
   return howMany < 1024 ? `${howMany} bytes` : `${Math.round(howMany / 1024)} KB`
 }
 
-/** A size the app sent: bytes below 1 KB, then KB and MB to a tenth, the way browser dev tools size a response. */
+/** A size the app sent: bytes below 1 KB, then KB and MB to a tenth. */
 export function size(howMany: number) {
   if (howMany < 1024) return `${howMany} bytes`
   if (howMany < 1024 * 1024) return `${(howMany / 1024).toFixed(1)} KB`

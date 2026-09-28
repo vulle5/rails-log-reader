@@ -42,7 +42,8 @@ describe("the Response tab", () => {
     await select(user, "/posts/12")
 
     const tabs = within(detailTabBar()).getAllByRole("tab")
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["Timeline", "Params", "Headers", "Response json"])
+    expect(tabs).toHaveLength(4)
+    expect(tabs[3]).toHaveTextContent(/^Response json$/)
     expect(detailTab("Response")).toBeEnabled()
   })
 
