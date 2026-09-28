@@ -30,7 +30,8 @@ export type ContainerNode = {
 }
 
 /**
- * One child of a container, under its key: a hash's key as drawn, or a list item's index.
+ * One child of a container, under its key: a hash's key as drawn, a list item's index, or an
+ * XML child's XPath step, such as `post[2]`.
  * A key is unique among its siblings, so the keys down to a node are its path.
  */
 export type ValueChild = { key: string; node: ValueNode }

@@ -18,9 +18,8 @@ import type {
 /**
  * The *Value viewer*: a value tree drawn as an ARIA tree. The top level is open, and every
  * container under it starts folded to its summary until the developer opens it, unless its
- * source says it starts open. An open one is
- * drawn between its brackets, the opening one on its own line and the closing one under its
- * children. An empty one is drawn as its brackets, `{}` or `[]`, with nothing to open.
+ * source says it starts open. An open one is drawn between its brackets, the opening one on
+ * its own line and the closing one under its children. An empty one is drawn as its brackets, `{}` or `[]`, with nothing to open.
  *
  * What the developer opened and closed is this instance's own, keyed by each node's path, so
  * closing a node keeps what was opened inside it, and a new instance starts folded again.
