@@ -597,9 +597,11 @@ tab that is not showing is counted on that tab.
 _Avoid_: pane, panel, section.
 
 Headers and Response both read the request's *Response event*, and Headers comes first, in the
-order an HTTP response reads. **Headers** holds the response's headers only, in the order the app
-set them, and says "Response headers" at its top, because a tab named Headers is otherwise easily
-taken for the request's. **Response** is the body: a strip with the status, the content type and
+order an HTTP response reads. **Headers** holds the response's headers only, sorted by name the
+way browser dev tools list them, and says "Response headers" at its top, because a tab named
+Headers is otherwise easily taken for the request's. Sorting loses nothing: HTTP gives no meaning
+to the order of differently named headers, and headers sharing a name, like two `set-cookie`s,
+keep the order the app set them in. The wire keeps the app's order all the same. **Response** is the body: a strip with the status, the content type and
 the size the app sent, then the body in the *Value viewer*. The tab's label says whether there is
 a body to look at before it is opened: `json` or `xml` when there is one, and otherwise a faint
 word for why not (`html`, `304`, `gzip`). When there is no body, the tab says why in plain words

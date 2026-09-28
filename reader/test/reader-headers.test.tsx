@@ -49,7 +49,7 @@ describe("the Headers tab", () => {
     expect(detailTab("Headers")).toBeEnabled()
   })
 
-  test("says Response headers and the status, then every header in the order the app set it", async () => {
+  test("says Response headers and the status, then every header sorted by name", async () => {
     const { user } = openTheReader(DENSE_TRAFFIC)
     await select(user, "/api/v1/me")
     await showDetailTab(user, "Headers")
@@ -58,25 +58,26 @@ describe("the Headers tab", () => {
     expect(within(panel).getByRole("heading", { name: "Response headers" })).toBeInTheDocument()
     expect(within(panel).getByText("200")).toBeInTheDocument()
     expectHeaders(panel, [
+      "cache-control: max-age=0, private, must-revalidate",
       "content-type: application/json; charset=utf-8",
       'etag: W/"4be1e3f0a6c52d8a"',
-      "cache-control: max-age=0, private, must-revalidate",
+      "server-timing: sql.active_record;dur=1.6, process_action.action_controller;dur=3.9",
       `x-request-id: ${RESPONSES.json}`,
       "x-runtime: 0.004812",
-      "server-timing: sql.active_record;dur=1.6, process_action.action_controller;dur=3.9",
     ])
   })
 
-  test("keeps a repeated header as many times as the app set it", async () => {
+  test("keeps a repeated header as many times as the app set it, in the order it set them", async () => {
     const run = aRun(SERVER_RUN)
     const { user } = openTheReader([
       run.start("req-1", "GET", "/posts/12"),
       run.finish("req-1"),
       run.response("req-1", {
         headers: [
-          ["set-cookie", "a=1"],
           ["vary", "Accept"],
           ["set-cookie", "b=2"],
+          ["Cache-Control", "no-store"],
+          ["set-cookie", "a=1"],
         ],
       }),
     ])
@@ -84,9 +85,10 @@ describe("the Headers tab", () => {
     await showDetailTab(user, "Headers")
 
     expectHeaders(detailPanel("Headers"), [
+      "Cache-Control: no-store",
+      "set-cookie: b=2",
       "set-cookie: a=1",
       "vary: Accept",
-      "set-cookie: b=2",
     ])
   })
 
@@ -123,8 +125,8 @@ describe("the Headers tab", () => {
 
     expect(within(detailPanel("Headers")).getByText("404")).toBeInTheDocument()
     expectHeaders(detailPanel("Headers"), [
-      "content-type: text/html; charset=utf-8",
       "content-length: 18204",
+      "content-type: text/html; charset=utf-8",
       `x-request-id: ${NEVER_ROUTED.requestId}`,
       "x-runtime: 0.007211",
     ])
@@ -139,12 +141,12 @@ describe("the Headers tab", () => {
 
     expect(detailTab("Headers")).toHaveAttribute("aria-selected", "true")
     expectHeaders(detailPanel("Headers"), [
+      "cache-control: max-age=0, private, must-revalidate",
       "content-type: application/xml; charset=utf-8",
       'etag: W/"9d27c0b1e4f8a365"',
-      "cache-control: max-age=0, private, must-revalidate",
+      "server-timing: sql.active_record;dur=1.6, process_action.action_controller;dur=3.9",
       `x-request-id: ${RESPONSES.xml}`,
       "x-runtime: 0.004812",
-      "server-timing: sql.active_record;dur=1.6, process_action.action_controller;dur=3.9",
     ])
   })
 
@@ -197,6 +199,7 @@ describe("copying headers", () => {
       run.finish("req-1"),
       run.response("req-1", {
         headers: [
+          ["vary", "Accept"],
           ["content-type", "application/json; charset=utf-8"],
           ["set-cookie", "a=1; path=/"],
           ["set-cookie", "b=2; path=/"],
@@ -231,7 +234,7 @@ describe("copying headers", () => {
     await user.click(within(panel).getByRole("button", { name: "Copy all headers" }))
 
     expect(await navigator.clipboard.readText()).toBe(
-      "content-type: application/json; charset=utf-8\nset-cookie: a=1; path=/\nset-cookie: b=2; path=/",
+      "content-type: application/json; charset=utf-8\nset-cookie: a=1; path=/\nset-cookie: b=2; path=/\nvary: Accept",
     )
   })
 })

@@ -223,21 +223,23 @@ function Params({ source }: { source: ValueSource }) {
 }
 
 /**
- * A request's response headers, as its *Response event* carries them: every one, in the order
- * the app set them, a repeated header repeated, under a "Response headers" heading and the status.
+ * A request's response headers, as its *Response event* carries them: every one, sorted by name
+ * whatever its case, a repeated header repeated in the order the app set it, under a "Response
+ * headers" heading and the status. Copy all copies them in that same order.
  */
 function ResponseHeaders({ response }: { response: RowResponse | null }) {
   if (response === null) {
     return <p className="px-3 py-2 text-faint">No response was recorded for this request.</p>
   }
 
-  const { status, headers } = response.payload
+  const { status } = response.payload
+  const headers = byName(response.payload.headers)
   return (
     <div className="relative px-3 py-2 pr-15">
       {headers.length > 0 && (
         <CopyButton className="top-1.5 right-0" text={headersText(headers)} label="Copy all headers" />
       )}
-      <div className="flex items-baseline gap-2 pb-1.5">
+      <div className="flex items-baseline gap-2 pb-3">
         <Caption>Response headers</Caption>
         <span className="font-mono text-xs text-muted tabular-nums">{status}</span>
       </div>
@@ -270,6 +272,17 @@ function ResponseHeader({ name, value }: { name: string; value: string }) {
       <LineCopy label="Copy value" idle="copy" text={() => value} line={line} />
     </li>
   )
+}
+
+/**
+ * Headers sorted by name, ignoring case. The sort is stable, so headers sharing a name keep the
+ * order the app set them in, which is the one order HTTP gives a meaning to.
+ */
+function byName(headers: readonly [string, string][]) {
+  return headers.toSorted(([one], [other]) => {
+    const [a, b] = [one.toLowerCase(), other.toLowerCase()]
+    return a < b ? -1 : a > b ? 1 : 0
+  })
 }
 
 /** Every header, one per line, as `Name: value`. */
