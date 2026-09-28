@@ -47,3 +47,18 @@ export type LeafNode =
   | { type: "filtered" }
   /** A value that contains itself, drawn as the text its source gave the repeat. */
   | { type: "cycle"; text: string }
+
+/**
+ * A value as its source hands it to the viewer: the tree to draw, and the text each copy out
+ * of it hands over. The viewer never writes a path or a copy itself.
+ */
+export type ValueSource = {
+  tree: ValueNode
+  /** What copying `node` hands over: the value it stands for, written the source's way. The whole value's copy is `copyText(tree)`. */
+  copyText(node: ValueNode): string
+  /** How the source reaches the node down `path` from the whole value. */
+  pathText(path: readonly PathStep[]): string
+}
+
+/** One step down a path: a child's key, and the kind of container it is a key of. */
+export type PathStep = { key: string; in: ContainerKind }

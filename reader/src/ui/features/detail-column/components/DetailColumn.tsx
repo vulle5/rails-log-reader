@@ -9,7 +9,7 @@ import { Tag } from "../../../components/Tag"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
-import { CopyButton } from "./CopyButton"
+import { CopyButton } from "../../../components/CopyButton"
 import { bytes } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
@@ -18,7 +18,7 @@ import { EditorContext } from "../../../hooks/editor-scheme"
 import { withOpenModifier } from "../../../lib/platform"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
-import { paramsTree } from "../lib/params-tree"
+import { paramsSource } from "../lib/params-source"
 import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 
@@ -197,12 +197,12 @@ function RunDetail({
   )
 }
 
-/** A request's params in the *Value viewer*: everything params-specific is in `paramsTree`. */
+/** A request's params in the *Value viewer*: everything params-specific is in `paramsSource`. */
 function Params({ params }: { params: RequestRoutePayload["params"] }) {
-  const tree = useMemo(() => paramsTree(params), [params])
+  const source = useMemo(() => paramsSource(params), [params])
   return (
     <div className="px-3 py-2">
-      <ValueViewer label="Params" value={tree} />
+      <ValueViewer label="Params" source={source} />
     </div>
   )
 }

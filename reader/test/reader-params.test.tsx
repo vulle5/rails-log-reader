@@ -352,7 +352,7 @@ describe("the Value viewer's leaves", () => {
 
     const reopened = treeItem(treeItem(tree, "order"), "gift_note")
     expect(reopened).toHaveAccessibleName(`gift_note: ${JSON.stringify(note)}`)
-    expect(within(reopened).queryByRole("button")).not.toBeInTheDocument()
+    expect(within(reopened).queryByRole("button", { name: /more chars/ })).not.toBeInTheDocument()
   })
 })
 
@@ -402,5 +402,142 @@ describe("the Params tab's key order", () => {
 
     expectLines(treeItemsOf(tree), ['id: "12"', /^post: /])
     expectLines(treeItemsOf(post), ['title: "Hello"'])
+  })
+})
+
+/**
+ * Copying out of the *Value viewer*: what lands on the clipboard is read back off the clipboard,
+ * and each control is found by its role and name, the way assistive technology finds it.
+ */
+describe("copying params", () => {
+  async function showParams(params: RequestRoutePayload["params"] = { pairs: [] }) {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "POST", "/comments"),
+      run.route("req-1", "CommentsController", "create", params),
+    ])
+    await select(user, "/comments")
+    await showDetailTab(user, "Params")
+    return { user, tree: valueTree("Params") }
+  }
+
+  /** A node's own copy control: the first under its item, ahead of any its open children hold. */
+  function copyControl(item: HTMLElement, name: "Copy value" | "Copy path") {
+    const [own] = within(item).getAllByRole("button", { name })
+    if (own === undefined) throw new Error(`no ${name} control`)
+    return own
+  }
+
+  test("copies the whole params as JSON that parses back to the params", async () => {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, AWKWARD_PARAMS.path)
+    await showDetailTab(user, "Params")
+
+    await user.click(within(detailPanel("Params")).getByRole("button", { name: "Copy params" }))
+
+    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(AWKWARD_PARAMS.params)
+  })
+
+  test("copies the whole params in the order the tree holds them, integer-like keys included", async () => {
+    const { user } = await showParams({ pairs: [["name", "Ada"], ["42", "1"], ["7", "2"]] })
+
+    await user.click(within(detailPanel("Params")).getByRole("button", { name: "Copy params" }))
+
+    expect(await navigator.clipboard.readText()).toBe('{\n  "name": "Ada",\n  "42": "1",\n  "7": "2"\n}')
+  })
+
+  test("offers a copy of a hovered node's value, as that node's JSON", async () => {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, AWKWARD_PARAMS.path)
+    await showDetailTab(user, "Params")
+    const order = treeItem(valueTree("Params"), "order")
+    await user.click(order)
+    const items = treeItem(order, "line_items")
+    await user.click(items)
+
+    await user.hover(treeItem(items, "1"))
+    await user.click(copyControl(treeItem(items, "1"), "Copy value"))
+
+    expect(JSON.parse(await navigator.clipboard.readText())).toEqual(AWKWARD_PARAMS.params.order.line_items[1])
+  })
+
+  test("copies a leaf's value as its JSON, so a string keeps its quotes and a filtered value is the text Rails left", async () => {
+    const { user, tree } = await showParams({
+      pairs: [["id", "48"], ["count", 3], ["password", "[FILTERED]"], ["gone", null]],
+    })
+
+    await user.click(copyControl(treeItem(tree, "id"), "Copy value"))
+    expect(await navigator.clipboard.readText()).toBe('"48"')
+    await user.click(copyControl(treeItem(tree, "count"), "Copy value"))
+    expect(await navigator.clipboard.readText()).toBe("3")
+    await user.click(copyControl(treeItem(tree, "password"), "Copy value"))
+    expect(await navigator.clipboard.readText()).toBe('"[FILTERED]"')
+    await user.click(copyControl(treeItem(tree, "gone"), "Copy value"))
+    expect(await navigator.clipboard.readText()).toBe("null")
+  })
+
+  test("offers a copy of a hovered node's path, symbol keys for a hash and indices for an array", async () => {
+    const { user, tree } = await showParams({
+      pairs: [["comment", { pairs: [["tags", ["ruby", "rails"]]] }]],
+    })
+    const comment = treeItem(tree, "comment")
+    await user.click(comment)
+    const tags = treeItem(comment, "tags")
+    await user.click(tags)
+
+    await user.hover(treeItem(tags, "0"))
+    await user.click(copyControl(treeItem(tags, "0"), "Copy path"))
+
+    expect(await navigator.clipboard.readText()).toBe("params[:comment][:tags][0]")
+  })
+
+  test("quotes a symbol key that is no bare Ruby symbol", async () => {
+    const { user, tree } = await showParams({
+      pairs: [["quantities", { pairs: [["42", "1"]] }], ["data-id", "7"], ["ok?", true]],
+    })
+    const quantities = treeItem(tree, "quantities")
+    await user.click(quantities)
+
+    await user.click(copyControl(treeItem(quantities, "42"), "Copy path"))
+    expect(await navigator.clipboard.readText()).toBe('params[:quantities][:"42"]')
+    await user.click(copyControl(treeItem(tree, "data-id"), "Copy path"))
+    expect(await navigator.clipboard.readText()).toBe('params[:"data-id"]')
+    await user.click(copyControl(treeItem(tree, "ok?"), "Copy path"))
+    expect(await navigator.clipboard.readText()).toBe("params[:ok?]")
+  })
+
+  test("reaches a node's copy controls from the keyboard, each described by the node's line", async () => {
+    const { user, tree } = await showParams({ pairs: [["id", "48"]] })
+    const id = treeItem(tree, "id")
+
+    await user.click(within(detailPanel("Params")).getByRole("button", { name: "Copy params" }))
+    await user.tab()
+    expect(copyControl(id, "Copy value")).toHaveFocus()
+    expect(copyControl(id, "Copy value")).toHaveAccessibleDescription('id: "48"')
+    await user.tab()
+    expect(copyControl(id, "Copy path")).toHaveFocus()
+    expect(copyControl(id, "Copy path")).toHaveAccessibleDescription('id: "48"')
+  })
+
+  test("leaves a node folded or open as it was when a copy on its line is clicked or pressed", async () => {
+    const { user, tree } = await showParams({ pairs: [["comment", { pairs: [["body", "Hi"]] }]] })
+    const comment = treeItem(tree, "comment")
+
+    await user.click(copyControl(comment, "Copy value"))
+    expect(comment).toHaveAttribute("aria-expanded", "false")
+    await user.tab()
+    expect(copyControl(comment, "Copy path")).toHaveFocus()
+    await user.keyboard("{Enter}")
+
+    expect(comment).toHaveAttribute("aria-expanded", "false")
+    expect(await navigator.clipboard.readText()).toBe("params[:comment]")
+  })
+
+  test("says a copy happened", async () => {
+    const { user, tree } = await showParams({ pairs: [["id", "48"]] })
+
+    await user.click(copyControl(treeItem(tree, "id"), "Copy path"))
+
+    expect(copyControl(treeItem(tree, "id"), "Copy path")).toHaveTextContent("Copied")
   })
 })

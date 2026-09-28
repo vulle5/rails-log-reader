@@ -8,25 +8,7 @@ import { useEffect, useState } from "react"
  * reads as "did that work?"
  */
 export function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false)
-
-  // The confirmation is a fact about time passing since the last successful copy, not about
-  // the click itself — so it is this effect, and not the click handler, that owns clearing it.
-  useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), 1500)
-    return () => clearTimeout(timer)
-  }, [copied])
-
-  async function onClick() {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-    } catch {
-      // Nothing to confirm — the confirmation would itself be the lie the copy button
-      // exists to avoid.
-    }
-  }
+  const [copied, copy] = useCopy()
 
   return (
     // Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
@@ -38,9 +20,37 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
       className="absolute top-1.5 right-2 min-w-13 cursor-pointer rounded border border-border bg-raised px-2 py-0.5 font-ui text-xs text-foreground opacity-70 hover:opacity-100 focus-visible:opacity-100"
       title={label}
       aria-label={label}
-      onClick={onClick}
+      onClick={() => copy(text)}
     >
       {copied ? "Copied" : "Copy"}
     </button>
   )
+}
+
+/**
+ * Whether a copy just succeeded, and the copy itself. `copied` holds for a moment after the
+ * clipboard took the text, and never after a copy that failed.
+ */
+export function useCopy() {
+  const [copied, setCopied] = useState(false)
+
+  // The confirmation is a fact about time passing since the last successful copy, not about
+  // the click itself — so it is this effect, and not the click handler, that owns clearing it.
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      // Nothing to confirm — the confirmation would itself be the lie the copy button
+      // exists to avoid.
+    }
+  }
+
+  return [copied, copy] as const
 }
