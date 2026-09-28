@@ -10,7 +10,7 @@ import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
 import { CopyButton, LineCopy } from "../../../components/CopyButton"
-import { bytes, size, statusLine } from "../lib/format"
+import { bytes, mediaType, size, statusLine } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
 import { OpenModifierHeld, useOpenModifierHeld } from "../hooks/open-modifier"
@@ -21,7 +21,8 @@ import { tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
 import { jsonSource } from "../lib/json-source"
 import { xmlSource } from "../lib/xml-source"
-import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
+import { isHijacked, kindOf, noBodyHint, type NoBodyPayload } from "../lib/no-body"
+import { DetailScroller, DetailTabs, type DetailTab, type DetailTabId, type PanelScroll } from "./DetailTabs"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import { countMatches } from "../../value-viewer/lib/value-matches"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
@@ -136,6 +137,7 @@ function RequestDetail({
   }
   const raw = body !== null && (rawChosen || body.source === null)
   const bodyMatches = useMemo(() => responseBodyMatches(search, body, raw), [search, body, raw])
+  const hint = responseHint(row.response, body)
 
   return (
     <Detail
@@ -193,11 +195,18 @@ function RequestDetail({
             label: "Response",
             // Waiting while in flight, but an interrupted request's response never comes.
             disabled: row.state === "interrupted",
-            hint: body === null ? undefined : { text: body.format, tone: "strong" },
+            hint,
             subject: row.id,
             matches: bodyMatches,
             panel: (
-              <Response state={row.state} response={row.response} body={body} raw={raw} onRaw={setRawChosen} />
+              <Response
+                state={row.state}
+                method={row.method}
+                response={row.response}
+                body={body}
+                raw={raw}
+                onRaw={setRawChosen}
+              />
             ),
           },
         ]}
@@ -255,6 +264,10 @@ function Params({ source }: { source: ValueSource }) {
 function ResponseHeaders({ response }: { response: RowResponse | null }) {
   if (response === null) {
     return <p className="px-3 py-2 text-faint">No response was recorded for this request.</p>
+  }
+
+  if (isHijacked(response.payload)) {
+    return <p className="px-3 py-2 text-faint">The connection was handed over, so there are no headers to read.</p>
   }
 
   const { status } = response.payload
@@ -356,6 +369,17 @@ function responseBody(response: RowResponse | null): ResponseBody | null {
 }
 
 /**
+ * What the Response tab's label says before it is opened: a bold `json` or `xml` for a kept
+ * body, and a faint word for why there is none.
+ */
+function responseHint(response: RowResponse | null, body: ResponseBody | null): DetailTab["hint"] {
+  if (body !== null) return { text: body.format, tone: "strong" }
+  if (response === null || !("no_body" in response.payload)) return undefined
+  const text = noBodyHint(response.payload)
+  return text === undefined ? undefined : { text, tone: "faint" }
+}
+
+/**
  * How many matches of the current term lie in a response's body, the same ones `Response` lights,
  * showing it raw or pretty.
  */
@@ -369,16 +393,19 @@ function responseBodyMatches(search: Search, body: ResponseBody | null, raw: boo
  * beside it Pretty | Raw, then the body. Pretty draws it in the *Value viewer*, and Raw as the
  * text the app sent. Every body opens pretty, a new Selection's included. A body with no tree,
  * cut or not valid JSON or XML, is raw only, Pretty drawn struck through and disabled, with a
- * line saying why. The one Copy hands over what is showing.
+ * line saying why. The one Copy hands over what is showing. A response with no body has the
+ * strip and the reason there is none.
  */
 function Response({
   state,
+  method,
   response,
   body,
   raw,
   onRaw,
 }: {
   state: RequestRow["state"]
+  method: string | null
   response: RowResponse | null
   body: ResponseBody | null
   /** Whether the body shows raw: always, for a body with no tree. */
@@ -393,18 +420,27 @@ function Response({
     )
   }
 
-  const { status, content_type: contentType, size: sent } = response.payload
+  const { payload } = response
+  const { status, content_type: contentType, size: sent } = payload
   const original = body?.cutFrom ?? sent
   const strip = [
     statusLine(status),
     // The media type alone: its parameters, such as the charset, are on the Headers tab.
-    ...(contentType === null ? [] : [contentType.split(";")[0]?.trim() ?? contentType]),
+    ...(contentType === null ? [] : [mediaType(contentType)]),
     ...(original === undefined || original === null ? [] : [size(original)]),
   ]
   const stripLine = <p className="font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
 
   if (body === null) {
-    return <div className="px-3 py-2">{stripLine}</div>
+    if (!("no_body" in payload)) return <div className="px-3 py-2">{stripLine}</div>
+    return (
+      <div className="px-3 py-2">
+        {/* A hijacked response has no strip: its status is whatever the app returned after the
+            server let go of the connection. */}
+        {!isHijacked(payload) && <div className="pb-3">{stripLine}</div>}
+        <NoBodyReason payload={payload} method={method} />
+      </div>
+    )
   }
 
   const hasTree = body.source !== null
@@ -439,6 +475,64 @@ function Response({
       )}
     </div>
   )
+}
+
+/**
+ * Why a response has no body, in plain words, so the Response tab is never an unexplained
+ * blank: what it is and why that can't be previewed, with the size and encoding where the
+ * reason turns on them.
+ */
+function NoBodyReason({ payload, method }: { payload: NoBodyPayload; method: string | null }) {
+  const [what, why] = noBodyLines(payload, method)
+  return (
+    <>
+      <p>{what}</p>
+      {why !== null && <p className="text-muted">{why}</p>}
+    </>
+  )
+}
+
+/**
+ * A reason's lines: what the response is or what happened to it, then why that leaves nothing
+ * to preview, when the first line has not already said.
+ */
+function noBodyLines(payload: NoBodyPayload, method: string | null): [string, ReactNode | null] {
+  const sent = payload.size === undefined ? "" : ` (${size(payload.size)})`
+  const noBody = payload.no_body
+  switch (noBody.reason) {
+    case "type":
+      return [`This response is ${kindOf(payload.content_type)}${sent}.`, "Only JSON and XML responses can be previewed here."]
+    case "streamed":
+      return [
+        "This response was streamed.",
+        `The app sent ${kindOf(payload.content_type)} in pieces as it went, so there was never a whole body to preview.`,
+      ]
+    case "encoded":
+      return [
+        `This response is compressed${sent}.`,
+        `The app compressed it (${noBody.content_encoding}) before sending it, so it can't be previewed.`,
+      ]
+    case "empty":
+      return ["No body.", emptyBecause(payload, method)]
+    case "hijacked":
+      return ["The connection was handed over, for example to a WebSocket, so there are no headers and no body.", null]
+  }
+}
+
+/** The line under "No body.": what the status says, where the redirect goes, or that HEAD asked for none. */
+function emptyBecause(payload: NoBodyPayload, method: string | null): ReactNode {
+  if (payload.status === 204) return "204 No Content means the request worked and there's nothing to send back."
+  if (payload.status === 304) return "304 Not Modified tells the browser to use the copy it already has, so nothing is sent."
+  const location = payload.headers.find(([name]) => name.toLowerCase() === "location")?.[1]
+  if (payload.status >= 300 && payload.status < 400 && location !== undefined) {
+    return (
+      <>
+        This is a redirect to <code className="font-mono">{location}</code>.
+      </>
+    )
+  }
+  if (method === "HEAD") return "A HEAD request asks for the headers alone, so nothing is sent."
+  return "The app sent an empty response."
 }
 
 /** A body's text exactly as the app sent it: monospace, wrapped, and lit only by *Search*. */

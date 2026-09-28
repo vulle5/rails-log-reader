@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import { aRun } from "./sidecar.fixtures"
-import { DENSE_TRAFFIC, HANGS, NEVER_ROUTED, RESPONSES, SERVER_RUN } from "./traffic.fixtures"
+import { DENSE_TRAFFIC, HANGS, NEVER_ROUTED, NO_BODY, RESPONSES, SERVER_RUN } from "./traffic.fixtures"
 import { Reader } from "../src/ui/Reader"
 import {
   detailPanel,
@@ -170,6 +170,16 @@ describe("the Headers tab", () => {
     await showDetailTab(user, "Headers")
 
     expect(within(detailPanel("Headers")).getByText("No response was recorded for this request.")).toBeInTheDocument()
+  })
+
+  test("says a hijacked connection has no headers to read", async () => {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, NO_BODY.hijacked.path)
+    await showDetailTab(user, "Headers")
+
+    const panel = within(detailPanel("Headers"))
+    expect(panel.getByText("The connection was handed over, so there are no headers to read.")).toBeInTheDocument()
+    expect(panel.queryByText("Response headers")).not.toBeInTheDocument()
   })
 })
 

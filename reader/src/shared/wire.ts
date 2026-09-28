@@ -191,11 +191,21 @@ export type AppLogPayload = {
 }
 
 /** Why a response has no body on the wire. */
-export type NoBody = {
-  reason: "type"
-  /** The response's own `content-type`, `null` when it sent none. */
-  content_type: string | null
-}
+export type NoBody =
+  | {
+      /** Anything but JSON or XML. */
+      reason: "type"
+      /** The response's own `content-type`, `null` when it sent none. */
+      content_type: string | null
+    }
+  /** Never whole in memory: sent in pieces as the app wrote them. */
+  | { reason: "streamed" }
+  /** Compressed by the app before sending. */
+  | { reason: "encoded"; content_encoding: string }
+  /** A HEAD request, a 1xx, 204 or 304, or a body of no bytes, such as a redirect's. */
+  | { reason: "empty" }
+  /** The app took the connection and wrote whatever followed itself: `headers` is empty. */
+  | { reason: "hijacked" }
 
 /**
  * What a request sent back, emitted when its body closes, which is after its `request_finish`.

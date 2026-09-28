@@ -372,8 +372,8 @@ describe("a busy dev app's Sidecar", () => {
   test("gives every request in the file exactly one row", async () => {
     const { rows } = await theReaderReadsTheSeed()
 
-    expect(requests(rows)).toHaveLength(57)
-    expect(new Set(requests(rows).map((candidate) => candidate.requestId)).size).toBe(57)
+    expect(requests(rows)).toHaveLength(65)
+    expect(new Set(requests(rows).map((candidate) => candidate.requestId)).size).toBe(65)
   })
 
   test("files a JSON body, an XML body and an HTML page's reason for none on their own requests", async () => {

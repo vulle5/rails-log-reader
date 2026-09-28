@@ -402,6 +402,137 @@ route(9010, G, "Api::V1::SessionsController", "destroy", "json")
 sql(9060, G, "Session Destroy", 'DELETE FROM "sessions" WHERE "sessions"."id" = ?  [["id", 90211]]', 0.9)
 log(9110, G, "info", "Signed out user 4021")
 finish(9180, G, 204, 180, 0.0, 0.9)
+response(9185, G, {
+  status: 204,
+  headers: [
+    ["cache-control", "no-cache"],
+    ["x-request-id", G],
+    ["x-runtime", "0.180114"],
+  ],
+  content_type: null,
+  no_body: { reason: "empty" },
+})
+
+// --- a response for every reason there is no body ----------------------------
+const SIGN_IN = "0e7c21d5"
+start(9200, SIGN_IN, "GET", "/sign_in")
+route(9205, SIGN_IN, "SessionsController", "new")
+finish(9215, SIGN_IN, 302, 15, 0.0, 0.0)
+response(9216, SIGN_IN, {
+  status: 302,
+  headers: [
+    ["location", "http://localhost:3000/session/new"],
+    ["content-type", "text/html; charset=utf-8"],
+    ["x-request-id", SIGN_IN],
+    ["x-runtime", "0.015207"],
+  ],
+  content_type: "text/html; charset=utf-8",
+  size: 0,
+  no_body: { reason: "empty" },
+})
+
+const AVATAR = "3f9a0b62"
+start(9220, AVATAR, "GET", "/api/v1/me/avatar")
+route(9225, AVATAR, "Api::V1::AvatarsController", "show", "json")
+finish(9240, AVATAR, 304, 20, 0.0, 0.4)
+response(9241, AVATAR, {
+  status: 304,
+  headers: [
+    ["last-modified", "Thu, 01 Jan 2026 00:00:00 GMT"],
+    ["cache-control", "max-age=0, private, must-revalidate"],
+    ["x-request-id", AVATAR],
+    ["x-runtime", "0.020931"],
+  ],
+  content_type: null,
+  no_body: { reason: "empty" },
+})
+
+const INVOICE = "8d41ce07"
+start(9300, INVOICE, "GET", "/invoices/77213.pdf")
+route(9305, INVOICE, "InvoicesController", "show", "pdf")
+finish(9340, INVOICE, 200, 40, 0.0, 0.6)
+response(9345, INVOICE, {
+  status: 200,
+  headers: [
+    ["content-type", "application/pdf"],
+    ["content-disposition", 'inline; filename="77213.pdf"'],
+    ["x-request-id", INVOICE],
+    ["x-runtime", "0.040377"],
+  ],
+  content_type: "application/pdf",
+  size: 48_213,
+  no_body: { reason: "type", content_type: "application/pdf" },
+})
+
+const QR = "b25d0f18"
+start(9350, QR, "GET", "/qr/77213.png")
+route(9355, QR, "QrCodesController", "show", "png")
+finish(9370, QR, 200, 20, 0.0, 0.0)
+response(9371, QR, {
+  status: 200,
+  headers: [
+    ["content-type", "image/png"],
+    ["x-request-id", QR],
+    ["x-runtime", "0.020502"],
+  ],
+  content_type: "image/png",
+  size: 1204,
+  no_body: { reason: "type", content_type: "image/png" },
+})
+
+const EXPORT = "6c08e9a3"
+start(9600, EXPORT, "GET", "/exports/orders.csv")
+route(9605, EXPORT, "ExportsController", "orders", "csv")
+finish(9690, EXPORT, 200, 90, 0.0, 4.2)
+response(9691, EXPORT, {
+  status: 200,
+  headers: [
+    ["content-type", "text/csv"],
+    ["cache-control", "no-cache"],
+    ["x-request-id", EXPORT],
+    ["x-runtime", "0.090415"],
+  ],
+  content_type: "text/csv",
+  no_body: { reason: "streamed" },
+})
+
+const TIMELINE = "e8b3176d"
+start(9700, TIMELINE, "GET", "/api/v1/timeline")
+route(9705, TIMELINE, "Api::V1::TimelineController", "index", "json")
+finish(9740, TIMELINE, 200, 40, 2.1, 1.1)
+response(9741, TIMELINE, {
+  status: 200,
+  headers: [
+    ["content-encoding", "gzip"],
+    ["content-type", "application/json; charset=utf-8"],
+    ["x-request-id", TIMELINE],
+    ["x-runtime", "0.040882"],
+  ],
+  content_type: "application/json; charset=utf-8",
+  size: 3789,
+  no_body: { reason: "encoded", content_encoding: "gzip" },
+})
+
+const CABLE = "71fd4a0c"
+start(9800, CABLE, "GET", "/cable")
+finish(9810, CABLE, -1, 10, 0.0, 0.0)
+response(9811, CABLE, { status: -1, headers: [], content_type: null, no_body: { reason: "hijacked" } })
+
+const UP = "a4c9e25b"
+start(9850, UP, "HEAD", "/up")
+route(9852, UP, "Rails::HealthController", "show")
+finish(9860, UP, 200, 10, 0.4, 0.0)
+response(9861, UP, {
+  status: 200,
+  headers: [
+    ["content-type", "text/html; charset=utf-8"],
+    ["x-request-id", UP],
+    ["x-runtime", "0.010093"],
+  ],
+  content_type: "text/html; charset=utf-8",
+  size: 0,
+  no_body: { reason: "empty" },
+})
 
 const SITEMAP = "5a0e3c7d"
 export const SITEMAP_XML =
@@ -587,6 +718,20 @@ export const AWKWARD_PARAMS = { requestId: E, path: "/api/v1/orders", params: OR
 
 /** The requests whose Response events carry a JSON body, an XML body, and an HTML page's reason for none. */
 export const RESPONSES = { json: C, xml: SITEMAP, html: MISTYPED }
+
+/** A request for every reason a Response event has no body, by the path it was made to. */
+export const NO_BODY = {
+  html: { requestId: MISTYPED, path: "/api/v1/notifcations" },
+  pdf: { requestId: INVOICE, path: "/invoices/77213.pdf" },
+  png: { requestId: QR, path: "/qr/77213.png" },
+  streamed: { requestId: EXPORT, path: "/exports/orders.csv" },
+  encoded: { requestId: TIMELINE, path: "/api/v1/timeline" },
+  noContent: { requestId: G, path: "/api/v1/sessions/current" },
+  notModified: { requestId: AVATAR, path: "/api/v1/me/avatar" },
+  redirect: { requestId: SIGN_IN, path: "/sign_in" },
+  head: { requestId: UP, path: "/up" },
+  hijacked: { requestId: CABLE, path: "/cable" },
+}
 
 /** The request that starts, emits, and never finishes. */
 export const HANGS = { requestId: H, path: "/admin/reports/monthly.csv" }

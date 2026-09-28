@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import { aRun } from "./sidecar.fixtures"
-import { DENSE_TRAFFIC, HANGS, NEVER_ROUTED, SERVER_RUN, SITEMAP_XML } from "./traffic.fixtures"
+import { DENSE_TRAFFIC, HANGS, NEVER_ROUTED, NO_BODY, SERVER_RUN, SITEMAP_XML } from "./traffic.fixtures"
 import { Reader } from "../src/ui/Reader"
 import {
   detailPanel,
@@ -155,6 +155,114 @@ describe("the Response tab's label", () => {
     await select(user, "/posts/12")
 
     expect(detailTab("Response")).toHaveAccessibleName("Response")
+  })
+})
+
+describe("the Response tab's label, for a response with no body", () => {
+  test.each([
+    ["an HTML page", NO_BODY.html, "html"],
+    ["a PDF", NO_BODY.pdf, "pdf"],
+    ["an image", NO_BODY.png, "png"],
+    ["a streamed response", NO_BODY.streamed, "stream"],
+    ["a compressed response", NO_BODY.encoded, "gzip"],
+    ["a 204", NO_BODY.noContent, "204"],
+    ["a 304", NO_BODY.notModified, "304"],
+    ["a redirect", NO_BODY.redirect, "302"],
+    ["a HEAD request", NO_BODY.head, "200"],
+    ["a hijacked connection", NO_BODY.hijacked, "ws"],
+  ])("carries a word for %s", async (_, request, word) => {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, request.path)
+
+    expect(detailTab("Response")).toHaveAccessibleName(`Response ${word}`)
+  })
+})
+
+describe("a Response tab with no body", () => {
+  /** The Response panel of the seed's request to `path`. */
+  async function responseOf(path: string) {
+    const { user } = openTheReader(DENSE_TRAFFIC)
+    await select(user, path)
+    await showDetailTab(user, "Response")
+    return within(detailPanel("Response"))
+  }
+
+  test.each([
+    ["an HTML page", NO_BODY.html, "This response is an HTML page (17.8 KB)."],
+    ["a PDF", NO_BODY.pdf, "This response is a PDF (47.1 KB)."],
+    ["an image", NO_BODY.png, "This response is a PNG image (1.2 KB)."],
+  ])("names %s and its size, and says only JSON and XML can be previewed", async (_, request, sentence) => {
+    const panel = await responseOf(request.path)
+
+    expect(panel.getByText(sentence)).toBeInTheDocument()
+    expect(panel.getByText("Only JSON and XML responses can be previewed here.")).toBeInTheDocument()
+  })
+
+  test("says a streamed response was sent in pieces, naming what it was", async () => {
+    const panel = await responseOf(NO_BODY.streamed.path)
+
+    expect(panel.getByText("This response was streamed.")).toBeInTheDocument()
+    expect(
+      panel.getByText("The app sent a CSV file in pieces as it went, so there was never a whole body to preview."),
+    ).toBeInTheDocument()
+  })
+
+  test("says a compressed response was compressed, with its size and its encoding", async () => {
+    const panel = await responseOf(NO_BODY.encoded.path)
+
+    expect(panel.getByText("This response is compressed (3.7 KB).")).toBeInTheDocument()
+    expect(panel.getByText("The app compressed it (gzip) before sending it, so it can't be previewed.")).toBeInTheDocument()
+  })
+
+  test("leaves the size out of the sentence when the app's size is not known", async () => {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "GET", "/feed"),
+      run.finish("req-1"),
+      run.response("req-1", {
+        headers: [["content-encoding", "br"]],
+        size: undefined,
+        no_body: { reason: "encoded", content_encoding: "br" },
+      }),
+    ])
+    await select(user, "/feed")
+    await showDetailTab(user, "Response")
+
+    expect(within(detailPanel("Response")).getByText("This response is compressed.")).toBeInTheDocument()
+  })
+
+  test.each([
+    ["a 204", NO_BODY.noContent, "204 No Content means the request worked and there's nothing to send back."],
+    ["a 304", NO_BODY.notModified, "304 Not Modified tells the browser to use the copy it already has, so nothing is sent."],
+    ["a HEAD request", NO_BODY.head, "A HEAD request asks for the headers alone, so nothing is sent."],
+  ])("says there is no body on %s, and why", async (_, request, why) => {
+    const panel = await responseOf(request.path)
+
+    expect(panel.getByText("No body.")).toBeInTheDocument()
+    expect(panel.getByText(why)).toBeInTheDocument()
+  })
+
+  test("names a redirect's target", async () => {
+    const panel = await responseOf(NO_BODY.redirect.path)
+
+    expect(panel.getByText("No body.")).toBeInTheDocument()
+    expect(panel.getByText(wholeText("This is a redirect to http://localhost:3000/session/new."))).toBeInTheDocument()
+    expect(panel.getByRole("code")).toHaveTextContent("http://localhost:3000/session/new")
+  })
+
+  test("keeps the strip over the reason", async () => {
+    const panel = await responseOf(NO_BODY.pdf.path)
+
+    expect(panel.getByText(wholeText("200 OK · application/pdf · 47.1 KB"))).toBeInTheDocument()
+  })
+
+  test("says a hijacked connection was handed over, with no strip", async () => {
+    const panel = await responseOf(NO_BODY.hijacked.path)
+
+    expect(
+      panel.getByText("The connection was handed over, for example to a WebSocket, so there are no headers and no body."),
+    ).toBeInTheDocument()
+    expect(panel.queryByText(/-1/)).not.toBeInTheDocument()
   })
 })
 

@@ -11,6 +11,12 @@ export function size(howMany: number) {
   return `${(howMany / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** A content type's media type alone, lowercased: its parameters, such as the charset, dropped. */
+export function mediaType(contentType: string | null) {
+  if (contentType === null) return null
+  return (contentType.split(";")[0] ?? contentType).trim().toLowerCase()
+}
+
 /** A status with its reason phrase, `200 OK`, or the bare code for one with no registered phrase. */
 export function statusLine(status: number) {
   const phrase = REASON_PHRASES[status]
