@@ -1,4 +1,4 @@
-import { useCallback, useContext, useId, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useCallback, useContext, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
 import { CopyButton, LineCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
@@ -184,6 +184,7 @@ function Item({
   const key = pathKey(path)
   const open = isOpen(key)
   const found = inside.get(key)
+  const closing = useRef<HTMLDivElement>(null)
   // An event from inside an open node's children is theirs to answer, not this node's, and
   // one from a button on its line is the button's.
   const own = (event: MouseEvent | KeyboardEvent) =>
@@ -197,7 +198,8 @@ function Item({
       aria-labelledby={line}
       tabIndex={0}
       onClick={(event) => {
-        if (own(event)) onToggle(key)
+        // The closing bracket is drawn, not a toggle.
+        if (own(event) && !(closing.current?.contains(event.target as Node) ?? false)) onToggle(key)
       }}
       onKeyDown={(event) => {
         if (!own(event)) return
@@ -235,7 +237,7 @@ function Item({
             <Children node={node} path={path} {...view} />
           </ul>
           {/* Under the opening line's key, past the space the fold marker takes. */}
-          <div className="pl-4" aria-hidden="true">
+          <div ref={closing} className="pl-4" aria-hidden="true">
             {DRAWN[node.kind].close}
           </div>
         </>

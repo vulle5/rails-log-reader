@@ -183,6 +183,16 @@ describe("the Params tab", () => {
     expect(items).toHaveTextContent(/]$/)
   })
 
+  test("leaves an open hash open when its closing bracket is clicked", async () => {
+    const { user, tree } = await showParams()
+    const order = treeItem(tree, "order")
+    await user.click(order)
+
+    await user.click(within(order).getByText("}"))
+
+    expect(order).toHaveAttribute("aria-expanded", "true")
+  })
+
   test("draws an empty hash or array as its brackets, with nothing to open", async () => {
     const run = aRun(SERVER_RUN)
     const { user } = openTheReader([
