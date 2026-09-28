@@ -543,7 +543,9 @@ what it holds, cutting describes what the wire sent, and neither reads the other
 **Value viewer** — the Reader's one collapsible, highlighted view of a structured value: a
 request's params, a JSON or XML response body, and an *Evaluation*'s result. A
 tree, with the top level open and every nested hash or array folded to a summary of what it
-holds (`{…} 7 keys`, `[…] 3 items`). It may lay a structure out, because a tree is not an edit,
+holds (`{…} 7 keys`, `[…] 3 items`). An open one sits between its brackets, the opening one
+on its key's line and the closing one under its children. An empty one is just its brackets,
+`{}` or `[]`, with nothing to open. It may lay a structure out, because a tree is not an edit,
 and it may colour each value by the type it actually has: a form's `"48"` is a string and is
 coloured as one, and only a JSON body carries real numbers, booleans and `null`. A `[FILTERED]`
 value, already filtered by the app's own `filter_parameters`, reads as a marker rather than as
@@ -568,7 +570,8 @@ A response body is text the app sent, so it is laid out as a tree by default wit
 exactly as sent one toggle away. XML is the same tree as JSON rather than a view of its own: an
 element is a node named by its tag, with its attributes beside it, an element holding only text
 is a leaf with that text as its string value, and an element with children folds to a summary of
-them. Copy hands over what is showing, laid-out text while laid out and the exact text while raw.
+them. The tree stands for the document, so the root element is its one node, and starts open.
+Copy hands over what is showing, laid-out text while laid out and the exact text while raw.
 A node's path is what reaches it in a Rails test, `response.parsed_body["posts"][0]`, or its
 XPath in XML.
 
@@ -597,9 +600,11 @@ tab that is not showing is counted on that tab.
 _Avoid_: pane, panel, section.
 
 Headers and Response both read the request's *Response event*, and Headers comes first, in the
-order an HTTP response reads. **Headers** holds the response's headers only, in the order the app
-set them, and says "Response headers" at its top, because a tab named Headers is otherwise easily
-taken for the request's. **Response** is the body: a strip with the status, the content type and
+order an HTTP response reads. **Headers** holds the response's headers only, sorted by name the
+way browser dev tools list them, and says "Response headers" at its top, because a tab named
+Headers is otherwise easily taken for the request's. Sorting loses nothing: HTTP gives no meaning
+to the order of differently named headers, and headers sharing a name, like two `set-cookie`s,
+keep the order the app set them in. The wire keeps the app's order all the same. **Response** is the body: a strip with the status, the content type and
 the size the app sent, then the body in the *Value viewer*. The tab's label says whether there is
 a body to look at before it is opened: `json` or `xml` when there is one, and otherwise a faint
 word for why not (`html`, `304`, `gzip`). When there is no body, the tab says why in plain words

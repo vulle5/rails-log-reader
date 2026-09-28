@@ -31,14 +31,16 @@ function expectLines(items: readonly HTMLElement[], lines: readonly (string | Re
 }
 
 describe("the Detail tab bar", () => {
-  test("sits under a request's header as Timeline | Params, with Timeline showing", async () => {
+  test("sits under a request's header as Timeline | Params | Headers | Response, with Timeline showing", async () => {
     const { user } = openTheReader(DENSE_TRAFFIC)
     await select(user, AWKWARD_PARAMS.path)
 
     const tabs = within(detailTabBar()).getAllByRole("tab")
-    expect(tabs).toHaveLength(2)
+    expect(tabs).toHaveLength(4)
     expect(tabs[0]).toHaveTextContent(/^Timeline$/)
     expect(tabs[1]).toHaveTextContent(/^Params$/)
+    expect(tabs[2]).toHaveTextContent(/^Headers$/)
+    expect(tabs[3]).toHaveTextContent(/^Response$/)
     expect(detailTab("Timeline")).toHaveAttribute("aria-selected", "true")
     expect(detailTab("Params")).toHaveAttribute("aria-selected", "false")
     expect(detailPanel("Timeline")).toContainElement(timeline())
@@ -119,7 +121,7 @@ describe("the Detail tab bar", () => {
     detailTab("Timeline").focus()
     await user.keyboard("{ArrowRight}")
 
-    expect(detailTab("Timeline")).toHaveFocus()
+    expect(detailTab("Headers")).toHaveFocus()
   })
 })
 
@@ -163,6 +165,50 @@ describe("the Params tab", () => {
     ])
     expect(treeItem(order, "shipping")).toHaveAttribute("aria-expanded", "false")
     expect(treeItem(order, "line_items")).toHaveAttribute("aria-expanded", "false")
+  })
+
+  test("draws an open hash or array between its brackets, the opening one on its own line", async () => {
+    const { user, tree } = await showParams()
+    const order = treeItem(tree, "order")
+
+    await user.click(order)
+
+    expect(order).toHaveAccessibleName("order: {")
+    expect(order).toHaveTextContent(/}$/)
+
+    const items = treeItem(order, "line_items")
+    await user.click(items)
+
+    expect(items).toHaveAccessibleName("line_items: [")
+    expect(items).toHaveTextContent(/]$/)
+  })
+
+  test("leaves an open hash open when its closing bracket is clicked", async () => {
+    const { user, tree } = await showParams()
+    const order = treeItem(tree, "order")
+    await user.click(order)
+
+    await user.click(within(order).getByText("}"))
+
+    expect(order).toHaveAttribute("aria-expanded", "true")
+  })
+
+  test("draws an empty hash or array as its brackets, with nothing to open", async () => {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "GET", "/posts"),
+      run.route("req-1", "PostsController", "index", { pairs: [["filters", { pairs: [] }], ["ids", []]] }),
+    ])
+    await select(user, "/posts")
+    await showDetailTab(user, "Params")
+    const tree = valueTree("Params")
+
+    expectLines(treeItemsOf(tree), ["filters: {}", "ids: []"])
+    expect(treeItem(tree, "filters")).not.toHaveAttribute("aria-expanded")
+
+    await user.click(treeItem(tree, "ids"))
+
+    expect(treeItem(tree, "ids")).not.toHaveAttribute("aria-expanded")
   })
 
   test("labels an array's items by their index, and folds a hash inside one", async () => {

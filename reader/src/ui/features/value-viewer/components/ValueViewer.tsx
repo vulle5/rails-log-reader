@@ -1,6 +1,6 @@
-import { useCallback, useContext, useId, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useCallback, useContext, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
-import { CopyButton, useCopy } from "../../../components/CopyButton"
+import { CopyButton, LineCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
 import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
@@ -17,7 +17,9 @@ import type {
 
 /**
  * The *Value viewer*: a value tree drawn as an ARIA tree. The top level is open, and every
- * container under it starts folded to its summary until the developer opens it.
+ * container under it starts folded to its summary until the developer opens it, unless its
+ * source says it starts open. An open one is drawn between its brackets, the opening one on
+ * its own line and the closing one under its children. An empty one is drawn as its brackets, `{}` or `[]`, with nothing to open.
  *
  * What the developer opened and closed is this instance's own, keyed by each node's path, so
  * closing a node keeps what was opened inside it, and a new instance starts folded again.
@@ -33,19 +35,22 @@ import type {
  *
  * One control copies the whole value, and each node, on hover or focus, offers a copy of its
  * value and of its path. Every text copied is the source's: the viewer only asks for it.
+ *
+ * A `caption` is drawn over the tree, and the copy control sits on its line rather than the
+ * tree's first, so the control is in the same place whatever the viewer is placed under.
  */
-export function ValueViewer({ label, source }: { label: string; source: ValueSource }) {
+export function ValueViewer({ label, source, caption }: { label: string; source: ValueSource; caption?: ReactNode }) {
   const value = source.tree
   const search = useContext(SearchContext)
   const inside = useMemo(() => matchesInside(search, value), [search, value])
-  // Only the nodes the developer toggled: absent is folded.
+  // Only the nodes the developer toggled: absent is as the source said.
   const [opened, setOpened] = useState<ReadonlyMap<string, boolean>>(() => new Map())
   // The developer's folds over a match, which hold only under the search they were made in.
   const [folds, setFolds] = useState<HeldFolds>(() => ({ search, paths: NO_PATHS }))
   const held = heldUnder(folds, search)
-  const isOpen = (path: string) => opened.get(path) === true || (inside.has(path) && !held.has(path))
-  const toggle = (path: string) => {
-    const open = isOpen(path)
+  const isOpen = (path: string, node: ContainerNode) =>
+    (opened.get(path) ?? node.open === true) || (inside.has(path) && !held.has(path))
+  const toggle = (path: string, open: boolean) => {
     setOpened((previous) => new Map(previous).set(path, !open))
     setFolds((previous) => {
       const paths = new Set(heldUnder(previous, search))
@@ -61,15 +66,23 @@ export function ValueViewer({ label, source }: { label: string; source: ValueSou
   const view: ViewState = { source, search, inside, isOpen, onToggle: toggle, whole, onOpenWhole: openWhole }
   const wholeText = useMemo(() => source.copyText(value), [source, value])
 
-  if (value.type === "container" && value.children.length === 0 && value.cut === undefined) {
-    return <p className="font-mono text-sm text-muted">{DRAWN[value.kind].empty}</p>
+  if (value.type === "container" && isEmpty(value)) {
+    return (
+      <>
+        {caption}
+        <p className="font-mono text-sm">
+          <Empty node={value} />
+        </p>
+      </>
+    )
   }
 
   return (
     // The right padding keeps the top lines clear of the copy button, which is anchored here.
     <div className="relative pr-15">
-      {/* Centred on the tree's first line, which starts at the block's top edge. */}
+      {/* Centred on the first line, the caption's or the tree's, which starts at the block's top edge. */}
       <CopyButton className="-top-0.5 right-0" text={wholeText} label={`Copy ${label.toLowerCase()}`} />
+      {caption}
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (
           <Children node={value} path={[]} {...view} />
@@ -104,10 +117,11 @@ function heldUnder(folds: HeldFolds, search: Search) {
   return folds.search === search ? folds.paths : NO_PATHS
 }
 
-/** How each kind of container is drawn: empty, folded, and what its summary counts. */
-const DRAWN: Record<ContainerKind, { empty: string; folded: string; noun: string }> = {
-  hash: { empty: "{}", folded: "{…}", noun: "key" },
-  list: { empty: "[]", folded: "[…]", noun: "item" },
+/** Each kind of container's brackets, and what its summary counts, one and many. */
+const DRAWN: Record<ContainerKind, { open: string; close: string; nouns: readonly [string, string] }> = {
+  hash: { open: "{", close: "}", nouns: ["key", "keys"] },
+  list: { open: "[", close: "]", nouns: ["item", "items"] },
+  element: { open: "<", close: ">", nouns: ["child", "children"] },
 }
 
 /** The source drawn, what Search found in it, and what is open in this instance, keyed by `pathKey`. */
@@ -116,8 +130,9 @@ type ViewState = {
   search: Search
   /** How many matches lie inside each container that has any. */
   inside: ReadonlyMap<string, number>
-  isOpen: (path: string) => boolean
-  onToggle: (path: string) => void
+  isOpen: (path: string, node: ContainerNode) => boolean
+  /** Opens or folds the node at `path`, which is `open` now. */
+  onToggle: (path: string, open: boolean) => void
   /** The strings opened whole, by path. */
   whole: ReadonlySet<string>
   onOpenWhole: (path: string) => void
@@ -155,12 +170,13 @@ function Item({
   const line = useId()
   const { node } = child
 
-  if (node.type !== "container") {
+  // An empty container has nothing to open, so it is drawn as a leaf is.
+  if (node.type !== "container" || isEmpty(node)) {
     return (
       <li className="group/line pl-4" role="treeitem" aria-labelledby={line}>
         <span id={line}>
           <Key text={child.key} keyed={keyed} search={search} />
-          <Leaf leaf={node} path={path} {...view} />
+          {node.type === "container" ? <Empty node={node} /> : <Leaf leaf={node} path={path} {...view} />}
         </span>
         <NodeCopies node={node} path={path} source={source} line={line} />
       </li>
@@ -168,8 +184,9 @@ function Item({
   }
 
   const key = pathKey(path)
-  const open = isOpen(key)
+  const open = isOpen(key, node)
   const found = inside.get(key)
+  const closing = useRef<HTMLDivElement>(null)
   // An event from inside an open node's children is theirs to answer, not this node's, and
   // one from a button on its line is the button's.
   const own = (event: MouseEvent | KeyboardEvent) =>
@@ -183,14 +200,15 @@ function Item({
       aria-labelledby={line}
       tabIndex={0}
       onClick={(event) => {
-        if (own(event)) onToggle(key)
+        // The closing bracket is drawn, not a toggle.
+        if (own(event) && !(closing.current?.contains(event.target as Node) ?? false)) onToggle(key, open)
       }}
       onKeyDown={(event) => {
         if (!own(event)) return
         const wanted = event.key === "ArrowRight" ? true : event.key === "ArrowLeft" ? false : null
         if (event.key === "Enter" || event.key === " " || (wanted !== null && wanted !== open)) {
           event.preventDefault()
-          onToggle(key)
+          onToggle(key, open)
         }
       }}
     >
@@ -202,7 +220,9 @@ function Item({
         <span id={line}>
           <Key text={child.key} keyed={keyed} search={search} />
           {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
-          {!open && found !== undefined ? (
+          {open ? (
+            <Opening node={node} />
+          ) : found !== undefined ? (
             <span className="rounded-xs bg-match" data-lit>
               <Summary node={node} />
               {` · ${found} ${found === 1 ? "match" : "matches"}`}
@@ -214,9 +234,15 @@ function Item({
         <NodeCopies node={node} path={path} source={source} line={line} />
       </div>
       {open && (
-        <ul className="pl-4" role="group">
-          <Children node={node} path={path} {...view} />
-        </ul>
+        <>
+          <ul className="pl-4" role="group">
+            <Children node={node} path={path} {...view} />
+          </ul>
+          {/* Under the opening line's key, past the space the fold marker takes. */}
+          <div ref={closing} className="pl-4" aria-hidden="true">
+            {DRAWN[node.kind].close}
+          </div>
+        </>
       )}
     </li>
   )
@@ -239,30 +265,9 @@ function NodeCopies({
 }) {
   return (
     <>
-      <NodeCopy label="Copy value" idle="value" text={() => source.copyText(node)} line={line} />
-      <NodeCopy label="Copy path" idle="path" text={() => source.pathText(path)} line={line} />
+      <LineCopy label="Copy value" idle="value" text={() => source.copyText(node)} line={line} />
+      <LineCopy label="Copy path" idle="path" text={() => source.pathText(path)} line={line} />
     </>
-  )
-}
-
-/** The text is asked for on the click, so a node's copy is never written until it is wanted. */
-function NodeCopy({ label, idle, text, line }: { label: string; idle: string; text: () => string; line?: string }) {
-  const [copied, copy] = useCopy()
-  return (
-    <button
-      className={cn(
-        "ml-2 cursor-pointer font-ui text-2xs text-faint hover:text-foreground hover:underline",
-        // A confirmation stays drawn for as long as it lasts, hovered or not.
-        "opacity-0 group-hover/line:opacity-100 focus-visible:opacity-100 data-copied:opacity-100",
-      )}
-      type="button"
-      aria-label={label}
-      aria-describedby={line}
-      data-copied={copied || undefined}
-      onClick={() => copy(text())}
-    >
-      {copied ? "Copied" : idle}
-    </button>
   )
 }
 
@@ -276,21 +281,46 @@ function Key({ text, keyed, search }: { text: string; keyed: boolean; search: Se
   )
 }
 
+/** A container holding nothing, and not cut short: there is nothing more to it than it shows. */
+function isEmpty(node: ContainerNode) {
+  return node.children.length === 0 && node.cut === undefined
+}
+
+/** An empty container, said as its brackets alone: `{}`, `[]`, or `Comment {}`. */
+function Empty({ node }: { node: ContainerNode }) {
+  return (
+    <span className="text-muted">
+      {node.label !== undefined && `${node.label} `}
+      {`${DRAWN[node.kind].open}${DRAWN[node.kind].close}`}
+    </span>
+  )
+}
+
+/** An open container's first line, said as its opening bracket: `{`, `[`, or `Comment {`. */
+function Opening({ node }: { node: ContainerNode }) {
+  return (
+    <>
+      {node.label !== undefined && `${node.label} `}
+      {DRAWN[node.kind].open}
+    </>
+  )
+}
+
 /** A folded container, said as its brackets and a count: `{…} 7 keys`, `[…] 3 items`. */
 function Summary({ node }: { node: ContainerNode }) {
   const count = node.children.length + (node.cut?.more ?? 0)
   return (
     <>
       {node.label !== undefined && `${node.label} `}
-      {DRAWN[node.kind].folded}
+      {`${DRAWN[node.kind].open}…${DRAWN[node.kind].close}`}
       <span className="text-faint">{` ${count}${node.cut?.more === null ? "+" : ""} ${noun(node, count)}`}</span>
     </>
   )
 }
 
 function noun(node: ContainerNode, count: number) {
-  const one = DRAWN[node.kind].noun
-  return count === 1 ? one : `${one}s`
+  const [one, many] = DRAWN[node.kind].nouns
+  return count === 1 ? one : many
 }
 
 /** A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app sent. */

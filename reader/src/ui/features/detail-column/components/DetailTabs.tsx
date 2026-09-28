@@ -12,13 +12,16 @@ import { cn } from "../../../lib/cn"
  */
 
 /** Every tab a row can have. Which ones a row has, and which of them are enabled, is its own. */
-export type DetailTabId = "timeline" | "params"
+export type DetailTabId = "timeline" | "params" | "headers" | "response"
 
 export type DetailTab = {
   id: DetailTabId
   label: string
-  /** Drawn faint after the label, saying what the tab holds before it is opened. */
-  hint?: ReactNode
+  /**
+   * Drawn after the label, saying what the tab holds before it is opened: bold when it names
+   * something to look at, faint when it says why there is nothing.
+   */
+  hint?: { text: string; tone: "strong" | "faint" }
   /**
    * How many matches of the current *Search* term lie in the panel, counted by whatever lights
    * them there. Drawn as a badge while the tab is not showing, and never when there are none.
@@ -108,7 +111,14 @@ export function DetailTabs({
               onClick={() => onChoose(tab.id)}
             >
               {tab.label}
-              {tab.hint !== undefined && <span className="text-faint">{tab.hint}</span>}
+              {tab.hint !== undefined && (
+                <>
+                  {/* The space is dropped by the flex layout, and keeps the label and hint two
+                      words to a screen reader. */}
+                  {" "}
+                  <span className={cn(tab.hint.tone === "strong" ? "font-bold" : "text-faint")}>{tab.hint.text}</span>
+                </>
+              )}
               {found > 0 && <MatchesBadge id={badgeId(tab)} count={found} />}
             </button>
           )

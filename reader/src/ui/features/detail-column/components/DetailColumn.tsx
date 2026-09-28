@@ -1,6 +1,6 @@
-import { memo, useContext, useMemo, useState, type ComponentProps, type ReactNode } from "react"
+import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
-import type { ActivityRow, RequestRow, RunRow, TimelineEvent } from "../../../../shared/activity"
+import type { ActivityRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
@@ -8,9 +8,9 @@ import { MethodText } from "../../../components/MethodText"
 import { Tag } from "../../../components/Tag"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
-import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
-import { CopyButton } from "../../../components/CopyButton"
-import { bytes } from "../lib/format"
+import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
+import { CopyButton, LineCopy } from "../../../components/CopyButton"
+import { bytes, mediaType, size, statusLine } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
 import { OpenModifierHeld, useOpenModifierHeld } from "../hooks/open-modifier"
@@ -19,7 +19,10 @@ import { withOpenModifier } from "../../../lib/platform"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
-import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
+import { jsonSource } from "../lib/json-source"
+import { xmlSource } from "../lib/xml-source"
+import { isHijacked, kindOf, noBodyHint, type NoBodyPayload } from "../lib/no-body"
+import { DetailScroller, DetailTabs, type DetailTab, type DetailTabId, type PanelScroll } from "./DetailTabs"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import { countMatches } from "../../value-viewer/lib/value-matches"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
@@ -122,6 +125,19 @@ function RequestDetail({
   const search = useContext(SearchContext)
   const params = useMemo(() => (row.params === null ? null : paramsSource(row.params)), [row.params])
   const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
+  const headersMatches = useMemo(() => headerMatches(search, row.response), [search, row.response])
+  const body = useMemo(() => responseBody(row.response), [row.response])
+  // Whether Raw was chosen on the Response tab. Any new Selection, one shown before included,
+  // opens pretty.
+  const [rawChosen, setRawChosen] = useState(false)
+  const [rawFor, setRawFor] = useState(row.id)
+  if (rawFor !== row.id) {
+    setRawFor(row.id)
+    setRawChosen(false)
+  }
+  const raw = body !== null && (rawChosen || body.source === null)
+  const bodyMatches = useMemo(() => responseBodyMatches(search, body, raw), [search, body, raw])
+  const hint = responseHint(row.response, body)
 
   return (
     <Detail
@@ -164,6 +180,34 @@ function RequestDetail({
             subject: row.id,
             matches: paramsMatches,
             panel: params !== null && <Params source={params} />,
+          },
+          {
+            id: "headers",
+            label: "Headers",
+            // Enabled on every finished request, one that never reached a controller included.
+            disabled: row.state !== "finished",
+            subject: row.id,
+            matches: headersMatches,
+            panel: <ResponseHeaders response={row.response} />,
+          },
+          {
+            id: "response",
+            label: "Response",
+            // Waiting while in flight, but an interrupted request's response never comes.
+            disabled: row.state === "interrupted",
+            hint,
+            subject: row.id,
+            matches: bodyMatches,
+            panel: (
+              <Response
+                state={row.state}
+                method={row.method}
+                response={row.response}
+                body={body}
+                raw={raw}
+                onRaw={setRawChosen}
+              />
+            ),
           },
         ]}
       />
@@ -209,6 +253,332 @@ function Params({ source }: { source: ValueSource }) {
     <div className="px-3 py-2">
       <ValueViewer label="Params" source={source} />
     </div>
+  )
+}
+
+/**
+ * A request's response headers, as its *Response event* carries them: every one, sorted by name
+ * whatever its case, a repeated header repeated in the order the app set it, under a "Response
+ * headers" heading and the status. Copy all copies them in that same order.
+ */
+function ResponseHeaders({ response }: { response: RowResponse | null }) {
+  if (response === null) {
+    return <p className="px-3 py-2 text-faint">No response was recorded for this request.</p>
+  }
+
+  if (isHijacked(response.payload)) {
+    return <p className="px-3 py-2 text-faint">The connection was handed over, so there are no headers to read.</p>
+  }
+
+  const { status } = response.payload
+  const headers = byName(response.payload.headers)
+  return (
+    <div className="px-3 py-2">
+      <Copyable text={headers.length > 0 ? headersText(headers) : null} label="Copy all headers">
+        <div className="flex items-baseline gap-2 pb-3">
+          <Caption>Response headers</Caption>
+          <span className="font-mono text-xs text-muted tabular-nums">{status}</span>
+        </div>
+        {headers.length === 0 ? (
+          <p className="text-faint">The response set no headers.</p>
+        ) : (
+          <ul className="font-mono text-sm leading-sql" aria-label="Response headers">
+            {headers.map(([name, value], at) => (
+              // A header can repeat, so its place is the only identity it has.
+              <ResponseHeader key={at} name={name} value={value} />
+            ))}
+          </ul>
+        )}
+      </Copyable>
+    </div>
+  )
+}
+
+/**
+ * A block with one copy control for the whole of it, placed as the *Value viewer* places its
+ * own: centred on the block's first line, which the right padding keeps clear of it. No text,
+ * no control.
+ */
+function Copyable({ text, label, children }: { text: string | null; label: string; children: ReactNode }) {
+  return (
+    <div className="relative pr-15">
+      {text !== null && <CopyButton className="-top-0.5 right-0" text={text} label={label} />}
+      {children}
+    </div>
+  )
+}
+
+/** One header, named by its own line, `name: value`, which its copy control is described by. */
+function ResponseHeader({ name, value }: { name: string; value: string }) {
+  const line = useId()
+  return (
+    <li className="group/line break-all" aria-labelledby={line}>
+      <span id={line}>
+        <span className="text-sql-identifier">
+          <Highlight text={name} />
+          {": "}
+        </span>
+        <Highlight text={value} />
+      </span>
+      <LineCopy label="Copy value" idle="copy" text={() => value} line={line} />
+    </li>
+  )
+}
+
+/**
+ * Headers sorted by name, ignoring case. The sort is stable, so headers sharing a name keep the
+ * order the app set them in, which is the one order HTTP gives a meaning to.
+ */
+function byName(headers: readonly [string, string][]) {
+  return headers.toSorted(([one], [other]) => {
+    const [a, b] = [one.toLowerCase(), other.toLowerCase()]
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+}
+
+/** Every header, one per line, as `Name: value`. */
+function headersText(headers: readonly (readonly [string, string])[]) {
+  return headers.map(([name, value]) => `${name}: ${value}`).join("\n")
+}
+
+/** How many matches of the current term lie in a response's headers, the same ones `ResponseHeaders` lights. */
+function headerMatches(search: Search, response: RowResponse | null) {
+  if (response === null) return 0
+  return response.payload.headers.reduce(
+    (count, [name, value]) => count + search.find(name).length + search.find(value).length,
+    0,
+  )
+}
+
+/**
+ * A kept body: its format, the text the app sent, the tree to draw it as when it has one, and
+ * the size it was cut from when the wire cut it.
+ */
+type ResponseBody = { format: "json" | "xml"; text: string; source: ValueSource | null; cutFrom: number | null }
+
+/**
+ * A response's kept body, parsed only here, for the one request selected. A body the wire cut,
+ * or one that does not parse as its format, has no tree.
+ */
+function responseBody(response: RowResponse | null): ResponseBody | null {
+  if (response === null || !("body" in response.payload)) return null
+  const { format, body: text } = response.payload
+  const cutFrom = response.bodyCutFrom
+  const source = cutFrom !== null ? null : format === "json" ? jsonSource(text) : xmlSource(text)
+  return { format, text, source, cutFrom }
+}
+
+/**
+ * What the Response tab's label says before it is opened: a bold `json` or `xml` for a kept
+ * body, and a faint word for why there is none.
+ */
+function responseHint(response: RowResponse | null, body: ResponseBody | null): DetailTab["hint"] {
+  if (body !== null) return { text: body.format, tone: "strong" }
+  if (response === null || !("no_body" in response.payload)) return undefined
+  const text = noBodyHint(response.payload)
+  return text === undefined ? undefined : { text, tone: "faint" }
+}
+
+/**
+ * How many matches of the current term lie in a response's body, the same ones `Response` lights,
+ * showing it raw or pretty.
+ */
+function responseBodyMatches(search: Search, body: ResponseBody | null, raw: boolean) {
+  if (body === null) return 0
+  return raw || body.source === null ? search.find(body.text).length : countMatches(search, body.source.tree)
+}
+
+/**
+ * The Response tab: a strip saying the status, the content type and the size the app sent, and
+ * beside it Pretty | Raw, then the body. Pretty draws it in the *Value viewer*, and Raw as the
+ * text the app sent. Every body opens pretty, a new Selection's included. A body with no tree,
+ * cut or not valid JSON or XML, is raw only, Pretty drawn struck through and disabled, with a
+ * line saying why. The one Copy hands over what is showing. A response with no body has the
+ * strip and the reason there is none.
+ */
+function Response({
+  state,
+  method,
+  response,
+  body,
+  raw,
+  onRaw,
+}: {
+  state: RequestRow["state"]
+  method: string | null
+  response: RowResponse | null
+  body: ResponseBody | null
+  /** Whether the body shows raw: always, for a body with no tree. */
+  raw: boolean
+  onRaw: (raw: boolean) => void
+}) {
+  if (response === null) {
+    return (
+      <p className="px-3 py-2 text-faint">
+        {state === "in-flight" ? "Waiting for the response…" : "No response for this request."}
+      </p>
+    )
+  }
+
+  const { payload } = response
+  const { status, content_type: contentType, size: sent } = payload
+  const original = body?.cutFrom ?? sent
+  const strip = [
+    statusLine(status),
+    // The media type alone: its parameters, such as the charset, are on the Headers tab.
+    ...(contentType === null ? [] : [mediaType(contentType)]),
+    ...(original === undefined || original === null ? [] : [size(original)]),
+  ]
+  const stripLine = <p className="font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
+
+  if (body === null) {
+    if (!("no_body" in payload)) return <div className="px-3 py-2">{stripLine}</div>
+    return (
+      <div className="px-3 py-2">
+        {/* A hijacked response has no strip: its status is whatever the app returned after the
+            server let go of the connection. */}
+        {!isHijacked(payload) && <div className="pb-3">{stripLine}</div>}
+        <NoBodyReason payload={payload} method={method} />
+      </div>
+    )
+  }
+
+  const hasTree = body.source !== null
+  const caption = (
+    <>
+      <div className="flex items-baseline gap-3 pb-3">
+        {stripLine}
+        <BodyView hasTree={hasTree} raw={raw} onRaw={onRaw} />
+      </div>
+      {body.cutFrom !== null ? (
+        <p className="pb-3 text-faint">
+          {`This response is ${bytes(body.cutFrom)}, and only the first 64 KB is shown. Because it's cut off, it can only be shown as raw text.`}
+        </p>
+      ) : (
+        !hasTree && (
+          <p className="pb-3 text-faint">
+            {`This body isn't valid ${body.format.toUpperCase()}, so it can only be shown as raw text.`}
+          </p>
+        )
+      )}
+    </>
+  )
+  return (
+    <div className="px-3 py-2">
+      {body.source !== null && !raw ? (
+        <ValueViewer label="Response body" source={body.source} caption={caption} />
+      ) : (
+        <Copyable text={body.text} label="Copy response body">
+          {caption}
+          <RawBody text={body.text} />
+        </Copyable>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Why a response has no body, in plain words, so the Response tab is never an unexplained
+ * blank: what it is and why that can't be previewed, with the size and encoding where the
+ * reason turns on them.
+ */
+function NoBodyReason({ payload, method }: { payload: NoBodyPayload; method: string | null }) {
+  const [what, why] = noBodyLines(payload, method)
+  return (
+    <>
+      <p>{what}</p>
+      {why !== null && <p className="text-muted">{why}</p>}
+    </>
+  )
+}
+
+/**
+ * A reason's lines: what the response is or what happened to it, then why that leaves nothing
+ * to preview, when the first line has not already said.
+ */
+function noBodyLines(payload: NoBodyPayload, method: string | null): [string, ReactNode | null] {
+  const sent = payload.size === undefined ? "" : ` (${size(payload.size)})`
+  const noBody = payload.no_body
+  switch (noBody.reason) {
+    case "type":
+      return [`This response is ${kindOf(payload.content_type)}${sent}.`, "Only JSON and XML responses can be previewed here."]
+    case "streamed":
+      return [
+        "This response was streamed.",
+        `The app sent ${kindOf(payload.content_type)} in pieces as it went, so there was never a whole body to preview.`,
+      ]
+    case "encoded":
+      return [
+        `This response is compressed${sent}.`,
+        `The app compressed it (${noBody.content_encoding}) before sending it, so it can't be previewed.`,
+      ]
+    case "empty":
+      return ["No body.", emptyBecause(payload, method)]
+    case "hijacked":
+      return ["The connection was handed over, for example to a WebSocket, so there are no headers and no body.", null]
+  }
+}
+
+/** The line under "No body.": what the status says, where the redirect goes, or that HEAD asked for none. */
+function emptyBecause(payload: NoBodyPayload, method: string | null): ReactNode {
+  if (payload.status === 204) return "204 No Content means the request worked and there's nothing to send back."
+  if (payload.status === 304) return "304 Not Modified tells the browser to use the copy it already has, so nothing is sent."
+  const location = payload.headers.find(([name]) => name.toLowerCase() === "location")?.[1]
+  if (payload.status >= 300 && payload.status < 400 && location !== undefined) {
+    return (
+      <>
+        This is a redirect to <code className="font-mono">{location}</code>.
+      </>
+    )
+  }
+  if (method === "HEAD") return "A HEAD request asks for the headers alone, so nothing is sent."
+  return "The app sent an empty response."
+}
+
+/** A body's text exactly as the app sent it: monospace, wrapped, and lit only by *Search*. */
+function RawBody({ text }: { text: string }) {
+  return (
+    <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
+      <Highlight text={text} />
+    </pre>
+  )
+}
+
+/** Pretty | Raw, the pressed one showing. Pretty is disabled, and struck through, when the body has no tree. */
+function BodyView({ hasTree, raw, onRaw }: { hasTree: boolean; raw: boolean; onRaw: (raw: boolean) => void }) {
+  return (
+    <div className="flex gap-0.5" role="group" aria-label="Show the body as">
+      <BodyViewButton pressed={!raw} disabled={!hasTree} onClick={() => onRaw(false)}>
+        Pretty
+      </BodyViewButton>
+      <BodyViewButton pressed={raw} onClick={() => onRaw(true)}>
+        Raw
+      </BodyViewButton>
+    </div>
+  )
+}
+
+function BodyViewButton({
+  pressed,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  pressed: boolean
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className="cursor-pointer rounded border border-transparent px-1.5 font-ui text-2xs text-muted not-aria-pressed:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint disabled:line-through aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
+      aria-pressed={pressed}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -667,10 +1037,13 @@ function Openable({
 function Trailing({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
     <section className="mt-3 border-t border-dashed border-border" aria-label="After the request finished">
-      <h3 className="px-3 py-1.5 text-2xs font-semibold tracking-wider text-faint uppercase">
-        After the request finished
-      </h3>
+      <Caption className="px-3 py-1.5">After the request finished</Caption>
       <Timeline events={events} railsRoot={railsRoot} />
     </section>
   )
+}
+
+/** A small heading over one part of a panel. */
+function Caption({ className, children }: { className?: string; children: ReactNode }) {
+  return <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)}>{children}</h3>
 }

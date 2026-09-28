@@ -1,5 +1,5 @@
 import { LOAD_ON_OPEN_EVENTS } from "./bounds"
-import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RequestRoutePayload, type RunKind, type SqlEvent } from "./wire"
+import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RequestRoutePayload, type ResponsePayload, type RunKind, type SqlEvent } from "./wire"
 
 /** The fold: Sidecar envelopes in append order become Activity table rows. */
 
@@ -120,8 +120,20 @@ export type RequestRow = {
    * promise the Reader can only keep if it says when the file could not.
    */
   backtraceCutFrom: number | null
+  /**
+   * What the request sent back. `null` until its Response event arrives: while it is in
+   * flight, and for good on a request recorded before Response events existed.
+   */
+  response: RowResponse | null
   /** The owning Run's `rails_root`, kept in step with `RunRow.railsRoot`. `null` until that Run's `run_header` is folded, whenever that turns out to be. */
   railsRoot: string | null
+}
+
+/** A request's Response event, as the fold keeps it. */
+export type RowResponse = {
+  payload: ResponsePayload
+  /** The body's size before the wire cut it at 64 KB. `null` when nothing was cut. */
+  bodyCutFrom: number | null
 }
 
 /**
@@ -360,6 +372,7 @@ export function activityTable(): ActivityTable {
         trailing: [],
         exception: null,
         backtraceCutFrom: null,
+        response: null,
         // Backfilled below if this Run's header lands after this row already opened.
         railsRoot: byRun.get(envelope.run_id)?.row.railsRoot ?? null,
       },
@@ -676,6 +689,10 @@ export function activityTable(): ActivityTable {
         // Finished even if the row had been called Interrupted: that was inferred from a
         // Run looking ended, and a finish is the file saying outright that it was not.
         row.state = "finished"
+        break
+      case "response":
+        // On the row and never in `trailing`, though it always follows the finish.
+        row.response = { payload: envelope.payload, bodyCutFrom: envelope.truncated?.body ?? null }
         break
       case "sql":
         row.sqlCount += 1
