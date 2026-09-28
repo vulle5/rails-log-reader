@@ -7,7 +7,22 @@ import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
 import type { Envelope } from "../src/shared/wire"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { Reader } from "../src/ui/Reader"
-import { aFold, chip, collapseConsole, column, expandConsole, itemsOf, lit, rowShowing, search, select, tab, timeline } from "./reader.harness"
+import {
+  aFold,
+  chip,
+  collapseConsole,
+  column,
+  detailPanel,
+  expandConsole,
+  itemsOf,
+  lit,
+  rowShowing,
+  search,
+  select,
+  showDetailTab,
+  tab,
+  timeline,
+} from "./reader.harness"
 
 /**
  * The three *auto-scrolls*, through the columns that own them. `auto-scroll.test.ts` has the
@@ -128,9 +143,11 @@ function openTheReader(...envelopes: Envelope[]) {
 type ColumnName = "Console" | "Activity table" | "Detail column"
 
 /**
- * A column's scrollport. It has no role of its own — it is the column's body — so it is found
- * as what directly holds what the column lists: the Console's lines, the Activity table's
- * grid, the Detail column's selection or its placeholder.
+ * A column's scrollport. It has no role of its own — it is the column's body, or in the Detail
+ * column the Timeline tab's own panel — so it is found as what directly holds what the column
+ * lists: the Console's lines, the Activity table's grid, the Detail column's timeline or its
+ * placeholder. The timeline is found whether or not its tab is the one showing, since its
+ * scrollport carries on following behind another tab.
  */
 function scrollport(name: ColumnName) {
   const region = within(column(name))
@@ -139,7 +156,7 @@ function scrollport(name: ColumnName) {
       ? region.getByRole("list")
       : name === "Activity table"
         ? region.getByRole("grid")
-        : (region.queryByRole("article") ?? region.getByText(/Nothing selected/))
+        : (region.queryByRole("list", { name: "Timeline", hidden: true }) ?? region.getByText(/Nothing selected/))
   return content.parentElement!
 }
 
@@ -556,6 +573,79 @@ describe("the Detail column", () => {
 
     expect(pinnedToBottom("Console")).toBe(false)
     expect(pinnedToBottom("Activity table")).toBe(true)
+  })
+})
+
+/**
+ * Each *Detail tab* is a scrollport of its own, so each keeps its own position: Params opens
+ * at its top, and the Timeline carries on where it was, following or paused, behind it.
+ */
+describe("the Detail tabs", () => {
+  /** A request whose params overflow the Params panel, twelve keys to its three rows. */
+  function withParams(id: string, path: string): Envelope[] {
+    const params = Object.fromEntries(Array.from({ length: 12 }, (_, at) => [`field_${at}`, `value ${at}`]))
+    const queries = Array.from({ length: 4 }, () => run.sql(id))
+    return [run.start(id, "POST", path), run.route(id, "FormsController", "create", params), ...queries, run.finish(id)]
+  }
+
+  /** Scrolls the Params panel, the way `scrollUp` scrolls a column: set, then announced. */
+  function scrollParamsTo(top: number) {
+    const port = detailPanel("Params")
+    port.scrollTop = top
+    fireEvent.scroll(port)
+  }
+
+  test("opens Params at its top, and brings Timeline back where it was left", async () => {
+    const { user } = openTheReader(...HISTORY, ...withParams("p1", "/forms/1"))
+    await select(user, "/forms/1")
+    scrollUp("Detail column")
+    const timelineAt = scrollport("Detail column").scrollTop
+
+    await showDetailTab(user, "Params")
+    expect(detailPanel("Params").scrollTop).toBe(0)
+
+    await showDetailTab(user, "Timeline")
+    expect(scrollport("Detail column").scrollTop).toBe(timelineAt)
+    expect(pinnedToBottom("Detail column")).toBe(false)
+  })
+
+  test("keeps Params where it was left across a trip to Timeline", async () => {
+    const { user } = openTheReader(...HISTORY, ...withParams("p1", "/forms/1"))
+    await select(user, "/forms/1")
+    await showDetailTab(user, "Params")
+    scrollParamsTo(2 * ROW)
+
+    await showDetailTab(user, "Timeline")
+    await showDetailTab(user, "Params")
+
+    expect(detailPanel("Params").scrollTop).toBe(2 * ROW)
+  })
+
+  test("opens the next Selection's Params at its top, and pins its Timeline to the bottom", async () => {
+    const { user } = openTheReader(...HISTORY, ...withParams("p1", "/forms/1"), ...withParams("p2", "/forms/2"))
+    await select(user, "/forms/1")
+    scrollUp("Detail column")
+    await showDetailTab(user, "Params")
+    scrollParamsTo(2 * ROW)
+
+    await select(user, "/forms/2")
+
+    expect(detailPanel("Params").scrollTop).toBe(0)
+    await showDetailTab(user, "Timeline")
+    expect(pinnedToBottom("Detail column")).toBe(true)
+  })
+
+  test("scrolling Params never pauses the Timeline's auto-scroll", async () => {
+    const { user, arrive } = openTheReader(...HISTORY)
+    await select(user, "/reports/monthly.csv")
+    await showDetailTab(user, "Params")
+    scrollParamsTo(2 * ROW)
+
+    arrive(run.log(HANGS, "still aggregating"))
+    await showDetailTab(user, "Timeline")
+
+    expect(pinnedToBottom("Detail column")).toBe(true)
+    expect(pill("Detail column")).not.toBeInTheDocument()
   })
 })
 

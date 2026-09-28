@@ -40,14 +40,16 @@ class SidecarTest < ActiveSupport::TestCase
   # calling the writer's own front door.
   test "a field past 64 KB is cut, and the file records how long it really was" do
     huge = "x" * 100_000
-    run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts", params: { spoiler: huge }))
+    run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts", params: { "42" => "a", "spoiler" => huge, "7" => "b" }))
 
     assert run.booted?, run.output
     route = run.events_of("request_route").sole
+    pairs = route["payload"]["params"]["pairs"]
 
-    assert_operator route["payload"]["params"]["spoiler"].bytesize, :<, huge.bytesize
-    assert_equal %w[action controller spoiler], route["payload"]["params"].keys.sort,
-      "a params hash losing a key would say the request never carried it — it must keep all three"
+    assert_equal %w[42 spoiler 7 controller action], pairs.map(&:first),
+      "a params hash losing a key would say the request never carried it — it must keep all five, in order"
+    assert_operator pairs.to_h["spoiler"].bytesize, :<, huge.bytesize
+    assert_equal %w[a b posts index], pairs.to_h.values_at("42", "7", "controller", "action")
     assert_operator route["truncated"]["params"], :>, 64 * 1024
   end
 

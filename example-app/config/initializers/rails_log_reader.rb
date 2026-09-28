@@ -45,7 +45,7 @@ module RailsLogReader
   # including when a field a Reader could once count on becomes one it has to check for. The
   # Reader reads it to tell "the new file is loaded" from "the file on disk is new but the
   # process is not".
-  WIRE_VERSION = 3
+  WIRE_VERSION = 4
 
   SIDECAR = Rails.root.join("log/rails_log_reader.jsonl")
 
@@ -612,14 +612,15 @@ module RailsLogReader
         ActiveSupport::Notifications.subscribe("request.action_dispatch", RequestFinishSubscriber.new)
 
         # `params` arrives already run through the app's own `filter_parameters` — Rails does
-        # that before this payload exists, not us. Fires only when a controller is entered, so
-        # its *absence* is how the Reader tells a routing failure apart from an ordinary 404
-        # the app rendered on purpose.
+        # that before this payload exists, not us — and goes out as `tagged_pairs`, in the
+        # app's key order. Fires only when a controller is entered, so its *absence* is how
+        # the Reader tells a routing failure apart from an ordinary 404 the app rendered on
+        # purpose.
         ActiveSupport::Notifications.subscribe("start_processing.action_controller") do |*, payload|
           guard do
             emit("request_route", {
               controller: payload[:controller], action: payload[:action],
-              format: payload[:format]&.to_s, params: payload[:params]
+              format: payload[:format]&.to_s, params: tagged_pairs(payload[:params])
             }, request_id: Current.request_id)
           end
         end
@@ -744,6 +745,22 @@ module RailsLogReader
       def booted_by_a_rack_server?
         caller_locations.any? { |location| location.path.end_with?("config.ru") }
       end
+
+      # Every Hash, at every level, as `{ pairs: [[key, value], …] }` in its own order. The
+      # tag is what tells a Hash from an Array of two-element Arrays, such as `a[][]=x`'s.
+      # Arrays stay Arrays and everything else is left as it is.
+      def tagged_pairs(value)
+        case value
+        when Hash then { pairs: value.map { |key, nested| [key.to_s, tagged_pairs(nested)] } }
+        when Array then value.map { |element| tagged_pairs(element) }
+        else value
+        end
+      end
+
+      # The one shape `tagged_pairs` writes: a Hash whose only key is the Symbol `pairs`,
+      # holding an Array. A HashWithIndifferentAccess keeps its keys as Strings, so an app's
+      # own `pairs` key never matches.
+      def tagged_hash?(value) = value.keys == [:pairs] && value[:pairs].is_a?(Array)
 
       # A field whose whole weight is under the cap cannot contain a string over it, so the
       # ordinary event is one walk and no allocation. Only an oversized field is walked twice
@@ -873,7 +890,8 @@ module RailsLogReader
       # elements from its tail, its least-informative end, which for a backtrace is the
       # framework frames farthest from where it actually broke. A Hash
       # never loses a key: a `params` hash missing one would be a lie about what the request
-      # carried, so its values are shrunk instead, evenly, and no key goes unaccounted for.
+      # carried, so its values are shrunk instead, evenly, and no key goes unaccounted for. A
+      # tagged Hash is a Hash here too, never the Array its pairs sit in.
       #
       # `respect_kept_whole` is true everywhere except the line cap, which is allowed to
       # touch a backtrace that the field cap above must leave alone.
@@ -884,7 +902,12 @@ module RailsLogReader
         case value
         when String then cut_string(value, budget)
         when Array then shrink_array(field, value, budget, respect_kept_whole:)
-        when Hash then shrink_hash(value, budget, respect_kept_whole:)
+        when Hash
+          if tagged_hash?(value)
+            shrink_pairs(value, budget, respect_kept_whole:)
+          else
+            shrink_hash(value, budget, respect_kept_whole:)
+          end
         else value
         end
       end
@@ -920,6 +943,16 @@ module RailsLogReader
 
         per_key = budget / hash.size
         hash.to_h { |key, value| [key, shrink_to_fit(key, value, per_key, respect_kept_whole:)] }
+      end
+
+      # `shrink_hash` for a tagged Hash: each pair keeps its key and its place, and its value
+      # gets an even share of the budget, less the key's own bytes.
+      def shrink_pairs(tagged, budget, respect_kept_whole:)
+        pairs = tagged[:pairs]
+        return tagged if pairs.empty?
+
+        per_pair = budget / pairs.size
+        { pairs: pairs.map { |key, value| [key, shrink_to_fit(key, value, per_pair - key.bytesize, respect_kept_whole:)] } }
       end
 
       # `scrub` because the cut can land in the middle of a multibyte character, and a line

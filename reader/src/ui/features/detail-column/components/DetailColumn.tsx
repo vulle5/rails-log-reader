@@ -9,7 +9,7 @@ import { Tag } from "../../../components/Tag"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match } from "../../../hooks/search"
-import { CopyButton } from "./CopyButton"
+import { CopyButton } from "../../../components/CopyButton"
 import { bytes } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
@@ -18,6 +18,11 @@ import { EditorContext } from "../../../hooks/editor-scheme"
 import { withOpenModifier } from "../../../lib/platform"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
+import { paramsSource } from "../lib/params-source"
+import { DetailScroller, DetailTabs, type DetailTabId, type PanelScroll } from "./DetailTabs"
+import { ValueViewer } from "../../value-viewer/components/ValueViewer"
+import { countMatches } from "../../value-viewer/lib/value-matches"
+import type { ValueSource } from "../../value-viewer/lib/value-tree"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines
@@ -55,11 +60,19 @@ export function DetailColumn({
   row,
   filter,
   railsRoot,
+  tab,
+  onTab,
+  scroll,
 }: {
   row: ActivityRow | null
   filter: DetailFilter
   /** The live Run's `rails_root`, off `RunIdentity` — see `RequestDetail`'s own doc. */
   railsRoot: string | null
+  /** The *Detail tab* chosen, which outlives any one Selection. */
+  tab: DetailTabId
+  onTab: (tab: DetailTabId) => void
+  /** The column's *auto-scroll*, which follows the timeline's own scrollport. */
+  scroll: PanelScroll
 }) {
   const held = useOpenModifierHeld()
 
@@ -74,9 +87,9 @@ export function DetailColumn({
   return (
     <OpenModifierHeld value={held}>
       {row.kind === "request" ? (
-        <RequestDetail row={row} filter={filter} railsRoot={railsRoot} />
+        <RequestDetail row={row} filter={filter} railsRoot={railsRoot} tab={tab} onTab={onTab} scroll={scroll} />
       ) : (
-        <RunDetail row={row} filter={filter} railsRoot={railsRoot} />
+        <RunDetail row={row} filter={filter} railsRoot={railsRoot} scroll={scroll} />
       )}
     </OpenModifierHeld>
   )
@@ -86,6 +99,9 @@ function RequestDetail({
   row,
   filter,
   railsRoot,
+  tab,
+  onTab,
+  scroll,
 }: {
   row: RequestRow
   filter: DetailFilter
@@ -95,11 +111,17 @@ function RequestDetail({
    * where `RunIdentity`'s does not — see the *Run identity* glossary entry.
    */
   railsRoot: string | null
+  tab: DetailTabId
+  onTab: (tab: DetailTabId) => void
+  scroll: PanelScroll
 }) {
   // Filtered once each, rather than where they are rendered: `trailing` is read twice below —
   // once for whether the section exists at all, once for what it holds — and a second pass
   // over the same array for the same filter would say nothing a first pass had not already.
   const trailing = eventsShown(row.trailing, filter)
+  const search = useContext(SearchContext)
+  const params = useMemo(() => (row.params === null ? null : paramsSource(row.params)), [row.params])
+  const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
 
   return (
     <Detail
@@ -111,15 +133,40 @@ function RequestDetail({
       name={row.path ?? ""}
       facts={controllerAction(row)}
     >
-      <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
-      {row.exception !== null && (
-        <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
-      )}
-      {/* Checked on the filtered length rather than `row.trailing.length`: a trailing block of
-          nothing but SCHEMA queries, hidden, must not leave an empty "After the request
-          finished" section behind — the section is about there being something to show
-          under it. */}
-      {trailing.length > 0 && <Trailing events={trailing} railsRoot={railsRoot} />}
+      <DetailTabs
+        chosen={tab}
+        onChoose={onTab}
+        tabs={[
+          {
+            id: "timeline",
+            label: "Timeline",
+            scroll,
+            panel: (
+              <>
+                <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+                {row.exception !== null && (
+                  <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
+                )}
+                {/* Checked on the filtered length rather than `row.trailing.length`: a trailing
+                    block of nothing but SCHEMA queries, hidden, must not leave an empty "After the
+                    request finished" section behind — the section is about there being something
+                    to show under it. */}
+                {trailing.length > 0 && <Trailing events={trailing} railsRoot={railsRoot} />}
+              </>
+            ),
+          },
+          {
+            id: "params",
+            label: "Params",
+            // A request that never reached a controller has none: `null` is that reading.
+            disabled: params === null,
+            // Another Selection's params open at their top, and folded.
+            subject: row.id,
+            matches: paramsMatches,
+            panel: params !== null && <Params source={params} />,
+          },
+        ]}
+      />
     </Detail>
   )
 }
@@ -133,24 +180,47 @@ function RequestDetail({
  * No trailing section and no exception: a Run has no finish for anything to trail, and an
  * exception on the wire belongs to a request.
  */
-function RunDetail({ row, filter, railsRoot }: { row: RunRow; filter: DetailFilter; railsRoot: string | null }) {
+function RunDetail({
+  row,
+  filter,
+  railsRoot,
+  scroll,
+}: {
+  row: RunRow
+  filter: DetailFilter
+  railsRoot: string | null
+  scroll: PanelScroll
+}) {
   const { kind, facts } = runDescription(row)
 
   return (
+    // No tab bar: a Run has nothing but its timeline to show.
     <Detail kind={<Highlight text={kind} />} name={row.appName ?? ""} facts={facts.join(" · ")}>
-      <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      <DetailScroller className="flex-auto" scroll={scroll}>
+        <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      </DetailScroller>
     </Detail>
+  )
+}
+
+/** A request's params in the *Value viewer*: everything params-specific is in `paramsSource`. */
+function Params({ source }: { source: ValueSource }) {
+  return (
+    <div className="px-3 py-2">
+      <ValueViewer label="Params" source={source} />
+    </div>
   )
 }
 
 /**
  * The whole of one row's detail: a heading saying which row is being read, so the column says
- * so without the table beside it, then its entries, one hairline apart.
+ * so without the table beside it, then what it holds. The heading never scrolls: what is under
+ * it is its own scrollport.
  */
 function Detail({ kind, name, facts, children }: { kind: ReactNode; name: string; facts: string; children: ReactNode }) {
   return (
-    <article className="flex flex-col gap-px pb-6">
-      <header className="sticky top-0 z-1 flex items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm">
+    <article className="flex min-h-0 flex-auto flex-col">
+      <header className="flex flex-none items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm">
         {/* A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */}
         <span className="font-bold text-accent">{kind}</span>
         <span className="truncate">

@@ -7,7 +7,7 @@
  * Reader built before the change reads the absence as `undefined` and renders straight
  * through it, which is the exact failure `isWireVersionUnderstood` exists to refuse.
  */
-export const WIRE_VERSION = 3
+export const WIRE_VERSION = 4
 
 export const EVENT_TYPES = [
   "run_header",
@@ -74,14 +74,38 @@ export type RequestStartPayload = {
 }
 
 /**
+ * A params Hash, as its pairs in the order the app had them. The tag tells it apart from an
+ * Array of two-element Arrays.
+ */
+export interface ParamsHash {
+  pairs: [string, ParamValue][]
+}
+
+/** A params value: every Hash in it is a `ParamsHash`, and an Array stays an Array. */
+export type ParamValue = string | number | boolean | null | ParamValue[] | ParamsHash
+
+/** An object whose one key is `pairs`, holding only `[string, value]` pairs. */
+export function isParamsHash(value: unknown): value is ParamsHash {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const keys = Object.keys(value)
+  if (keys.length !== 1 || keys[0] !== "pairs") return false
+  const pairs: unknown = (value as { pairs: unknown }).pairs
+  return (
+    Array.isArray(pairs) &&
+    pairs.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string")
+  )
+}
+
+/**
  * Emitted only when a controller is entered, so its *absence* is how a routing failure
- * is read. `params` arrives already filtered by the app's own `filter_parameters`.
+ * is read. `params` arrives already filtered by the app's own `filter_parameters`. Before
+ * v4 it is a plain object, its integer-like keys already moved first by `JSON.parse`.
  */
 export type RequestRoutePayload = {
   controller: string
   action: string
   format: string | null
-  params: Record<string, unknown>
+  params: ParamsHash | Record<string, unknown>
 }
 
 export type RequestException = {

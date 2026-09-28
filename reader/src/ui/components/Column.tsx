@@ -34,10 +34,16 @@ type ColumnProps = {
   action?: ReactNode
   /** This column's own *auto-scroll*: the scrollport it follows, and what the pill says. */
   scroll: ColumnAutoScroll
+  /**
+   * Whether the body is the scrollport. `false` for the Detail column, whose body holds
+   * scrollports of its own, one per *Detail tab*, and attaches `scroll.port` to the one its
+   * auto-scroll follows.
+   */
+  bodyScrolls?: boolean
   children?: ReactNode
 }
 
-export function Column({ place, name, controls, action, scroll, children }: ColumnProps) {
+export function Column({ place, name, controls, action, scroll, bodyScrolls = true, children }: ColumnProps) {
   // `min-h-0` for the same reason as `min-w-0`: a grid item's automatic minimum size is its
   // content, so without it a column would overflow the track the grid constrained it to and
   // hand the overflow back to the page.
@@ -76,18 +82,20 @@ export function Column({ place, name, controls, action, scroll, children }: Colu
         )}
       </header>
       {/* The scrollport is also what the sticky headings inside the column stick against; without
-          one of its own they would stick to the window's. The gutter is reserved whether or not
-          the content needs a scrollbar yet, so the Detail column does not narrow under the
-          reader the moment a Selection first gives it something to scroll. Arbitrary properties,
-          because Tailwind 4.1 has no scrollbar utilities. */}
-      <div
-        className="min-h-0 flex-auto overflow-auto [scrollbar-gutter:stable] [scrollbar-width:thin]"
-        data-scrollport
-        ref={scroll.port}
-        onScroll={scroll.onScroll}
-      >
-        {children}
-      </div>
+          one of its own they would stick to the window's. Arbitrary properties, because Tailwind
+          4.1 has no scrollbar utilities. */}
+      {bodyScrolls ? (
+        <div
+          className="min-h-0 flex-auto overflow-auto [scrollbar-gutter:stable] [scrollbar-width:thin]"
+          data-scrollport
+          ref={scroll.port}
+          onScroll={scroll.onScroll}
+        >
+          {children}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-auto flex-col overflow-hidden">{children}</div>
+      )}
       {/* Only where there is something to go and see. A pill on a paused column with nothing
           below it would read "0 new" — sending the reader to look at nothing, and covering
           the lines they scrolled up to read while it did. Scrolling back down is the way out

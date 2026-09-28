@@ -138,6 +138,46 @@ export function timeline() {
   return within(column("Detail column")).getByRole("list", { name: "Timeline" })
 }
 
+/** The *Detail tab* bar under the Detail column's header. A *Run row* has none. */
+export function detailTabBar() {
+  return within(column("Detail column")).getByRole("tablist", { name: "Detail tabs" })
+}
+
+/** One *Detail tab*, by the label it starts with: a later tab may carry a hint or a count after it. */
+export function detailTab(name: string) {
+  return within(column("Detail column")).getByRole("tab", { name: new RegExp(`^${name}`) })
+}
+
+/** The panel a *Detail tab* shows, while it is the one showing. */
+export function detailPanel(name: string) {
+  return within(column("Detail column")).getByRole("tabpanel", { name: new RegExp(`^${name}`) })
+}
+
+export async function showDetailTab(user: UserEvent, name: string) {
+  await user.click(detailTab(name))
+}
+
+/** A *Value viewer*'s tree, by what it is a view of: `Params`. */
+export function valueTree(name: string) {
+  return within(column("Detail column")).getByRole("tree", { name })
+}
+
+/**
+ * The items directly under a tree or an open tree item, and none of theirs: a tree's own
+ * items are its children, and an open item's sit in the group it holds.
+ */
+export function treeItemsOf(parent: HTMLElement) {
+  return within(parent)
+    .queryAllByRole("treeitem")
+    .filter((item) => item.parentElement === parent || item.parentElement?.parentElement === parent)
+}
+
+/** The tree item under `key`, wherever it is inside `scope`: it is named by its own line, `key: …`. */
+export function treeItem(scope: HTMLElement, key: string) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return within(scope).getByRole("treeitem", { name: new RegExp(`^${escaped}: `) })
+}
+
 /** A list's own items, and none of the items of the lists inside them. */
 export function itemsOf(list: HTMLElement) {
   return within(list)
