@@ -222,3 +222,127 @@ describe("choosing Response", () => {
     expect(treeItem(valueTree("Response body"), "id")).toHaveAccessibleName("id: 13")
   })
 })
+
+/**
+ * Pretty and Raw: the body laid out as a tree, or as the text the app sent. The toggle is two
+ * buttons, the pressed one showing, and Copy hands over whichever is showing.
+ */
+describe("Pretty and Raw", () => {
+  const RAW = '{"posts":[{"id":1,"title":"Hi"}],  "total": 1}'
+
+  /** `sent` is the size the app sent, `null` for one it did not know. */
+  async function showBody(body = RAW, truncated?: Record<string, number>, sent: number | null = body.length) {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "GET", "/posts"),
+      run.finish("req-1"),
+      run.response("req-1", { body, size: sent ?? undefined }, truncated),
+      run.start("req-2", "GET", "/posts/13"),
+      run.finish("req-2"),
+      run.response("req-2", { body: '{"id":13}' }),
+    ])
+    await select(user, "/posts")
+    await showDetailTab(user, "Response")
+    return user
+  }
+
+  function bodyView() {
+    return within(detailPanel("Response")).getByRole("group", { name: "Show the body as" })
+  }
+
+  function toggle(name: "Pretty" | "Raw") {
+    return within(bodyView()).getByRole("button", { name })
+  }
+
+  function copyBody() {
+    return within(detailPanel("Response")).getByRole("button", { name: "Copy response body" })
+  }
+
+  test("opens pretty, and Raw shows the body exactly as recorded", async () => {
+    const user = await showBody()
+
+    expect(toggle("Pretty")).toBePressed()
+    expect(toggle("Raw")).not.toBePressed()
+    expect(valueTree("Response body")).toBeInTheDocument()
+
+    await user.click(toggle("Raw"))
+
+    expect(toggle("Raw")).toBePressed()
+    expect(within(detailPanel("Response")).queryByRole("tree")).not.toBeInTheDocument()
+    expect(within(detailPanel("Response")).getByText(wholeText(RAW))).toBeInTheDocument()
+  })
+
+  test("opens the next Selection's body pretty, whatever the last one showed", async () => {
+    const user = await showBody()
+    await user.click(toggle("Raw"))
+
+    await select(user, "/posts/13")
+
+    expect(toggle("Pretty")).toBePressed()
+    expect(treeItem(valueTree("Response body"), "id")).toHaveAccessibleName("id: 13")
+  })
+
+  test("copies indented JSON while pretty, and the exact text while raw", async () => {
+    const user = await showBody()
+
+    await user.click(copyBody())
+    expect(await navigator.clipboard.readText()).toBe(
+      '{\n  "posts": [\n    {\n      "id": 1,\n      "title": "Hi"\n    }\n  ],\n  "total": 1\n}',
+    )
+
+    await user.click(toggle("Raw"))
+    await user.click(copyBody())
+    expect(await navigator.clipboard.readText()).toBe(RAW)
+  })
+
+  test("copies a nested node's path as parsed_body Ruby, and its value as its JSON", async () => {
+    const user = await showBody()
+    const tree = valueTree("Response body")
+    await user.click(treeItem(tree, "posts"))
+    await user.click(treeItem(tree, "0"))
+    const id = treeItem(tree, "id")
+
+    await user.click(within(id).getByRole("button", { name: "Copy path" }))
+    expect(await navigator.clipboard.readText()).toBe('response.parsed_body["posts"][0]["id"]')
+    await user.click(within(treeItem(tree, "title")).getByRole("button", { name: "Copy value" }))
+    expect(await navigator.clipboard.readText()).toBe('"Hi"')
+
+    const [post] = within(treeItem(tree, "0")).getAllByRole("button", { name: "Copy value" })
+    if (post === undefined) throw new Error("no Copy value control")
+    await user.click(post)
+    expect(await navigator.clipboard.readText()).toBe('{\n  "id": 1,\n  "title": "Hi"\n}')
+  })
+
+  test("shows a body that does not parse as raw, with Pretty disabled and a note saying why", async () => {
+    await showBody('{"id":12,')
+
+    expect(toggle("Pretty")).toBeDisabled()
+    expect(toggle("Raw")).toBePressed()
+    expect(
+      within(detailPanel("Response")).getByText("This body isn't valid JSON, so it can only be shown as raw text."),
+    ).toBeInTheDocument()
+    expect(within(detailPanel("Response")).getByText('{"id":12,')).toBeInTheDocument()
+  })
+
+  test("shows a cut body as raw only, Pretty still there but disabled, and says how big the whole was", async () => {
+    const cut = `{"items":[${'"x",'.repeat(10)}`
+    await showBody(cut, { body: 200 * 1024 })
+
+    expect(toggle("Pretty")).toBeDisabled()
+    expect(toggle("Raw")).toBePressed()
+    expect(
+      within(detailPanel("Response")).getByText(
+        "This response is 200 KB, and only the first 64 KB is shown. Because it's cut off, it can only be shown as raw text.",
+      ),
+    ).toBeInTheDocument()
+    expect(within(detailPanel("Response")).getByText(wholeText(cut))).toBeInTheDocument()
+  })
+
+  test("strips a cut body's original size, not the size of what was kept", async () => {
+    await showBody('{"id":', { body: 200 * 1024 }, 6)
+
+    expect(
+      within(detailPanel("Response")).getByText(wholeText("200 OK · application/json · 200.0 KB")),
+    ).toBeInTheDocument()
+  })
+})

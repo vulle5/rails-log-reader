@@ -249,12 +249,7 @@ function ResponseHeaders({ response }: { response: RowResponse | null }) {
   const headers = byName(response.payload.headers)
   return (
     <div className="px-3 py-2">
-      {/* The right padding keeps the caption clear of the copy button, which is anchored here and
-          placed as the Value viewer places its own. */}
-      <div className="relative pr-15">
-        {headers.length > 0 && (
-          <CopyButton className="-top-0.5 right-0" text={headersText(headers)} label="Copy all headers" />
-        )}
+      <Copyable text={headers.length > 0 ? headersText(headers) : null} label="Copy all headers">
         <div className="flex items-baseline gap-2 pb-3">
           <Caption>Response headers</Caption>
           <span className="font-mono text-xs text-muted tabular-nums">{status}</span>
@@ -269,7 +264,21 @@ function ResponseHeaders({ response }: { response: RowResponse | null }) {
             ))}
           </ul>
         )}
-      </div>
+      </Copyable>
+    </div>
+  )
+}
+
+/**
+ * A block with one copy control for the whole of it, placed as the *Value viewer* places its
+ * own: centred on the block's first line, which the right padding keeps clear of it. No text,
+ * no control.
+ */
+function Copyable({ text, label, children }: { text: string | null; label: string; children: ReactNode }) {
+  return (
+    <div className="relative pr-15">
+      {text !== null && <CopyButton className="-top-0.5 right-0" text={text} label={label} />}
+      {children}
     </div>
   )
 }
@@ -316,8 +325,11 @@ function headerMatches(search: Search, response: RowResponse | null) {
   )
 }
 
-/** A kept body: its format, the text the app sent, and the tree to draw it as when it has one. */
-type ResponseBody = { format: "json" | "xml"; text: string; source: ValueSource | null }
+/**
+ * A kept body: its format, the text the app sent, the tree to draw it as when it has one, and
+ * the size it was cut from when the wire cut it.
+ */
+type ResponseBody = { format: "json" | "xml"; text: string; source: ValueSource | null; cutFrom: number | null }
 
 /**
  * A response's kept body, parsed only here, for the one request selected. A JSON body the wire
@@ -326,8 +338,9 @@ type ResponseBody = { format: "json" | "xml"; text: string; source: ValueSource 
 function responseBody(response: RowResponse | null): ResponseBody | null {
   if (response === null || !("body" in response.payload)) return null
   const { format, body: text } = response.payload
-  const source = format === "json" && response.bodyCutFrom === null ? jsonSource(text) : null
-  return { format, text, source }
+  const cutFrom = response.bodyCutFrom
+  const source = format === "json" && cutFrom === null ? jsonSource(text) : null
+  return { format, text, source, cutFrom }
 }
 
 /** How many matches of the current term lie in a response's body, the same ones `Response` lights. */
@@ -337,8 +350,11 @@ function responseBodyMatches(search: Search, body: ResponseBody | null) {
 }
 
 /**
- * The Response tab: a strip saying the status, the content type and the size the app sent, then
- * the body in the *Value viewer*, or as the text the app sent when it has no tree.
+ * The Response tab: a strip saying the status, the content type and the size the app sent, and
+ * beside it Pretty | Raw, then the body. Pretty draws it in the *Value viewer*, and Raw as the
+ * text the app sent. Every body opens pretty, a new Selection's included. A body with no tree,
+ * cut or not valid JSON, is raw only, Pretty drawn struck through and disabled, with a line
+ * saying why. An XML body is raw alone, with no Pretty. The one Copy hands over what is showing.
  */
 function Response({
   state,
@@ -349,6 +365,8 @@ function Response({
   response: RowResponse | null
   body: ResponseBody | null
 }) {
+  const [raw, setRaw] = useState(false)
+
   if (response === null) {
     return (
       <p className="px-3 py-2 text-faint">
@@ -358,28 +376,99 @@ function Response({
   }
 
   const { status, content_type: contentType, size: sent } = response.payload
+  const original = body?.cutFrom ?? sent
   const strip = [
     statusLine(status),
     // The media type alone: its parameters, such as the charset, are on the Headers tab.
     ...(contentType === null ? [] : [contentType.split(";")[0]?.trim() ?? contentType]),
-    ...(sent === undefined ? [] : [size(sent)]),
+    ...(original === undefined || original === null ? [] : [size(original)]),
   ]
-  const caption = <p className="pb-3 font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
+  const stripLine = <p className="font-mono text-xs text-muted tabular-nums">{strip.join(" · ")}</p>
+
+  if (body === null || (body.format !== "json" && body.cutFrom === null)) {
+    return (
+      <div className="px-3 py-2">
+        <div className="pb-3">{stripLine}</div>
+        {body !== null && <RawBody text={body.text} />}
+      </div>
+    )
+  }
+
+  const hasTree = body.source !== null
+  const showingRaw = raw || !hasTree
+  const caption = (
+    <>
+      <div className="flex items-baseline gap-3 pb-3">
+        {stripLine}
+        <BodyView hasTree={hasTree} raw={showingRaw} onRaw={setRaw} />
+      </div>
+      {body.cutFrom !== null ? (
+        <p className="pb-3 text-faint">
+          {`This response is ${bytes(body.cutFrom)}, and only the first 64 KB is shown. Because it's cut off, it can only be shown as raw text.`}
+        </p>
+      ) : (
+        !hasTree && <p className="pb-3 text-faint">This body isn't valid JSON, so it can only be shown as raw text.</p>
+      )}
+    </>
+  )
   return (
     <div className="px-3 py-2">
-      {body !== null && body.source !== null ? (
+      {body.source !== null && !showingRaw ? (
         <ValueViewer label="Response body" source={body.source} caption={caption} />
       ) : (
-        <>
+        <Copyable text={body.text} label="Copy response body">
           {caption}
-          {body !== null && (
-            <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
-              <Highlight text={body.text} />
-            </pre>
-          )}
-        </>
+          <RawBody text={body.text} />
+        </Copyable>
       )}
     </div>
+  )
+}
+
+/** A body's text exactly as the app sent it: monospace, wrapped, and lit only by *Search*. */
+function RawBody({ text }: { text: string }) {
+  return (
+    <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
+      <Highlight text={text} />
+    </pre>
+  )
+}
+
+/** Pretty | Raw, the pressed one showing. Pretty is disabled, and struck through, when the body has no tree. */
+function BodyView({ hasTree, raw, onRaw }: { hasTree: boolean; raw: boolean; onRaw: (raw: boolean) => void }) {
+  return (
+    <div className="flex gap-0.5" role="group" aria-label="Show the body as">
+      <BodyViewButton pressed={!raw} disabled={!hasTree} onClick={() => onRaw(false)}>
+        Pretty
+      </BodyViewButton>
+      <BodyViewButton pressed={raw} onClick={() => onRaw(true)}>
+        Raw
+      </BodyViewButton>
+    </div>
+  )
+}
+
+function BodyViewButton({
+  pressed,
+  disabled = false,
+  onClick,
+  children,
+}: {
+  pressed: boolean
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      className="cursor-pointer rounded border border-transparent px-1.5 font-ui text-2xs text-muted not-aria-pressed:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint disabled:line-through aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
+      aria-pressed={pressed}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
   )
 }
 
