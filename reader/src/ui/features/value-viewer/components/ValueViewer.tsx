@@ -17,7 +17,8 @@ import type {
 
 /**
  * The *Value viewer*: a value tree drawn as an ARIA tree. The top level is open, and every
- * container under it starts folded to its summary until the developer opens it.
+ * container under it starts folded to its summary until the developer opens it. An empty one is
+ * drawn as its brackets, `{}` or `[]`, with nothing to open.
  *
  * What the developer opened and closed is this instance's own, keyed by each node's path, so
  * closing a node keeps what was opened inside it, and a new instance starts folded again.
@@ -64,11 +65,13 @@ export function ValueViewer({ label, source, caption }: { label: string; source:
   const view: ViewState = { source, search, inside, isOpen, onToggle: toggle, whole, onOpenWhole: openWhole }
   const wholeText = useMemo(() => source.copyText(value), [source, value])
 
-  if (value.type === "container" && value.children.length === 0 && value.cut === undefined) {
+  if (value.type === "container" && isEmpty(value)) {
     return (
       <>
         {caption}
-        <p className="font-mono text-sm text-muted">{DRAWN[value.kind].empty}</p>
+        <p className="font-mono text-sm">
+          <Empty node={value} />
+        </p>
       </>
     )
   }
@@ -164,12 +167,13 @@ function Item({
   const line = useId()
   const { node } = child
 
-  if (node.type !== "container") {
+  // An empty container has nothing to open, so it is drawn as a leaf is.
+  if (node.type !== "container" || isEmpty(node)) {
     return (
       <li className="group/line pl-4" role="treeitem" aria-labelledby={line}>
         <span id={line}>
           <Key text={child.key} keyed={keyed} search={search} />
-          <Leaf leaf={node} path={path} {...view} />
+          {node.type === "container" ? <Empty node={node} /> : <Leaf leaf={node} path={path} {...view} />}
         </span>
         <NodeCopies node={node} path={path} source={source} line={line} />
       </li>
@@ -260,6 +264,21 @@ function Key({ text, keyed, search }: { text: string; keyed: boolean; search: Se
     <span className="text-sql-identifier">
       <Marked text={text} matches={keyed ? search.find(text) : []} />
       {": "}
+    </span>
+  )
+}
+
+/** A container holding nothing, and not cut short: there is nothing more to it than it shows. */
+function isEmpty(node: ContainerNode) {
+  return node.children.length === 0 && node.cut === undefined
+}
+
+/** An empty container, said as its brackets alone: `{}`, `[]`, or `Comment {}`. */
+function Empty({ node }: { node: ContainerNode }) {
+  return (
+    <span className="text-muted">
+      {node.label !== undefined && `${node.label} `}
+      {DRAWN[node.kind].empty}
     </span>
   )
 }

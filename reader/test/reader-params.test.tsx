@@ -167,6 +167,24 @@ describe("the Params tab", () => {
     expect(treeItem(order, "line_items")).toHaveAttribute("aria-expanded", "false")
   })
 
+  test("draws an empty hash or array as its brackets, with nothing to open", async () => {
+    const run = aRun(SERVER_RUN)
+    const { user } = openTheReader([
+      run.start("req-1", "GET", "/posts"),
+      run.route("req-1", "PostsController", "index", { pairs: [["filters", { pairs: [] }], ["ids", []]] }),
+    ])
+    await select(user, "/posts")
+    await showDetailTab(user, "Params")
+    const tree = valueTree("Params")
+
+    expectLines(treeItemsOf(tree), ["filters: {}", "ids: []"])
+    expect(treeItem(tree, "filters")).not.toHaveAttribute("aria-expanded")
+
+    await user.click(treeItem(tree, "ids"))
+
+    expect(treeItem(tree, "ids")).not.toHaveAttribute("aria-expanded")
+  })
+
   test("labels an array's items by their index, and folds a hash inside one", async () => {
     const { user, tree } = await showParams()
     const order = treeItem(tree, "order")
