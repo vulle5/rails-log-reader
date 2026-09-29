@@ -8,15 +8,16 @@ import { rubySource } from "../lib/ruby-source"
 import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
 
 /**
- * An *Evaluation*'s result: its value drawn in the *Value viewer*, with Tree | Text beside it to
- * show its `pretty_inspect` text instead. A value with no structure to draw is its text alone,
- * with no toggle. The toggle is this instance's own, and every instance opens on the tree.
- * An `inspect` that raised while the result was built is noted under it.
+ * An *Evaluation*'s result: its value drawn in the *Value viewer* as Pretty, with Raw beside it
+ * to show its `pretty_inspect` text instead, as the Response tab offers a body. A value with no
+ * structure to draw is its text alone, with no toggle. The toggle is this instance's own, and
+ * every instance opens pretty. An `inspect` that raised while the result was built is noted
+ * under it.
  */
 export function EvaluationResult({ outcome }: { outcome: Extract<Outcome, { kind: "result" }> }) {
   const source = useMemo(() => rubySource(outcome.tree), [outcome.tree])
-  const [asText, setAsText] = useState(false)
-  const showsText = source === null || asText
+  const [raw, setRaw] = useState(false)
+  const showsRaw = source === null || raw
 
   return (
     <>
@@ -26,9 +27,9 @@ export function EvaluationResult({ outcome }: { outcome: Extract<Outcome, { kind
           {outcome.text}
         </Text>
       ) : (
-        <ResultView source={source} text={outcome.text} asText={asText} onAsText={setAsText} />
+        <ResultView source={source} text={outcome.text} raw={raw} onRaw={setRaw} />
       )}
-      {showsText && outcome.cut && <Cut>Result cut at 64 KB</Cut>}
+      {showsRaw && outcome.cut && <Cut>Result cut at 64 KB</Cut>}
       {outcome.inspectError !== null && <ErrorNote>{`inspect raised ${outcome.inspectError}`}</ErrorNote>}
     </>
   )
@@ -37,29 +38,29 @@ export function EvaluationResult({ outcome }: { outcome: Extract<Outcome, { kind
 function ResultView({
   source,
   text,
-  asText,
-  onAsText,
+  raw,
+  onRaw,
 }: {
   source: ValueSource
   text: string
-  asText: boolean
-  onAsText: (asText: boolean) => void
+  raw: boolean
+  onRaw: (raw: boolean) => void
 }) {
   const caption = (
-    <div className="flex items-baseline gap-1">
+    <div className="flex items-baseline gap-3 pb-1">
       <Marker>{"=>"}</Marker>
       <ToggleGroup label="Show the result as">
-        <ToggleButton pressed={!asText} onClick={() => onAsText(false)}>
-          Tree
+        <ToggleButton pressed={!raw} onClick={() => onRaw(false)}>
+          Pretty
         </ToggleButton>
-        <ToggleButton pressed={asText} onClick={() => onAsText(true)}>
-          Text
+        <ToggleButton pressed={raw} onClick={() => onRaw(true)}>
+          Raw
         </ToggleButton>
       </ToggleGroup>
     </div>
   )
 
-  if (!asText) return <ValueViewer label="Result" source={source} caption={caption} />
+  if (!raw) return <ValueViewer label="Result" source={source} caption={caption} />
   return (
     <>
       {caption}

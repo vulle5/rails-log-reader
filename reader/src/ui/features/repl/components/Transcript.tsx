@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react"
 
 import type { Outcome, TranscriptEntry } from "../../../../shared/repl"
+import { cn } from "../../../lib/cn"
 import { EvaluationResult } from "./EvaluationResult"
 import { RubyCode } from "./RubyCode"
 import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
@@ -36,7 +37,9 @@ export function Transcript({ entries }: { entries: readonly TranscriptEntry[] })
       onScroll={scrolled}
     >
       {entries.map((entry) => (
-        <li key={entry.id}>
+        // An evaluation is ruled down its left edge, so where one ends and the next begins
+        // reads at a glance, and so does which one a control at the far edge belongs to.
+        <li key={entry.id} className={cn(entry.kind === "evaluation" && "border-l-2 border-accent pl-2")}>
           {entry.kind === "evaluation" ? (
             <>
               <Text className="text-strong">

@@ -466,7 +466,7 @@ describe("a REPL result", () => {
     return within(transcriptEntries()[0]!).getByRole("tree", { name: "Result" })
   }
 
-  function viewToggle(name: "Tree" | "Text") {
+  function viewToggle(name: "Pretty" | "Raw") {
     return within(transcriptEntries()[0]!).getByRole("button", { name })
   }
 
@@ -482,19 +482,19 @@ describe("a REPL result", () => {
     expect(tree.getByText("1.0")).toHaveAttribute("data-source-type", "float")
     expect(tree.getByText("nil")).toHaveAttribute("data-source-type", "nil")
     expect(tree.getByText(":c")).toHaveAttribute("data-source-type", "symbol")
-    expect(viewToggle("Tree")).toHaveAttribute("aria-pressed", "true")
+    expect(viewToggle("Pretty")).toHaveAttribute("aria-pressed", "true")
   })
 
-  test("toggles to the pretty_inspect text, and back to the tree", async () => {
+  test("shows the pretty_inspect text on Raw, and the tree again on Pretty", async () => {
     const { user } = await openedOver({ state: READY, transcript: [evaluation({ outcome: result(PRETTY, HASH) })] })
 
-    await user.click(viewToggle("Text"))
+    await user.click(viewToggle("Raw"))
 
     expect(within(transcriptEntries()[0]!).queryByRole("tree")).not.toBeInTheDocument()
     expect(within(transcriptEntries()[0]!).getByText(PRETTY)).toBeInTheDocument()
-    expect(viewToggle("Text")).toHaveAttribute("aria-pressed", "true")
+    expect(viewToggle("Raw")).toHaveAttribute("aria-pressed", "true")
 
-    await user.click(viewToggle("Tree"))
+    await user.click(viewToggle("Pretty"))
 
     expect(resultTree()).toBeInTheDocument()
   })
@@ -505,7 +505,7 @@ describe("a REPL result", () => {
     const entry = within(transcriptEntries()[0]!)
     expect(entry.getByText("42")).toBeInTheDocument()
     expect(entry.queryByRole("tree")).not.toBeInTheDocument()
-    expect(entry.queryByRole("button", { name: "Text" })).not.toBeInTheDocument()
+    expect(entry.queryByRole("button", { name: "Raw" })).not.toBeInTheDocument()
   })
 
   test("says how many items the loop left out of a cut array", async () => {
