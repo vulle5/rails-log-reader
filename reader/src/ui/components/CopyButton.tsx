@@ -97,7 +97,7 @@ export function Copyable({
     <div className="flow-root">
       {(text !== null || controls !== undefined) && (
         // Centred on the block's first line.
-        <div className="float-right -mt-0.5 ml-3 flex gap-2">
+        <div className="float-right -mt-0.5 ml-3 flex gap-4">
           {controls}
           {text !== null && <CopyButton className="static" text={text} label={label} />}
         </div>
