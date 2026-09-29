@@ -8,6 +8,7 @@ import type {
   ContainerKind,
   ContainerNode,
   LeafNode,
+  LeafType,
   PathStep,
   TokenClass,
   ValueChild,
@@ -175,7 +176,7 @@ function Item({
     return (
       <li className="group/line pl-4" role="treeitem" aria-labelledby={line}>
         <span id={line}>
-          <Key text={child.key} keyed={keyed} search={search} />
+          <Key text={child.key} type={child.keyType} keyed={keyed} search={search} />
           {node.type === "container" ? <Empty node={node} /> : <Leaf leaf={node} path={path} {...view} />}
         </span>
         <NodeCopies node={node} path={path} source={source} line={line} />
@@ -218,7 +219,7 @@ function Item({
           {open ? "▾" : "▸"}
         </span>
         <span id={line}>
-          <Key text={child.key} keyed={keyed} search={search} />
+          <Key text={child.key} type={child.keyType} keyed={keyed} search={search} />
           {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
           {open ? (
             <Opening node={node} />
@@ -271,13 +272,16 @@ function NodeCopies({
   )
 }
 
-/** `keyed` when the key is text Search matches, rather than a list index. */
-function Key({ text, keyed, search }: { text: string; keyed: boolean; search: Search }) {
+/**
+ * `keyed` when the key is text Search matches, rather than a list index. A key with a `type` is
+ * coloured as a leaf of that type is, its colon with it.
+ */
+function Key({ text, type, keyed, search }: { text: string; type?: LeafType; keyed: boolean; search: Search }) {
   return (
-    <span className="text-sql-identifier">
+    <Token className="text-sql-identifier" token={type?.token} sourceType={type?.sourceType}>
       <Marked text={text} matches={keyed ? search.find(text) : []} />
       {": "}
-    </span>
+    </Token>
   )
 }
 
@@ -354,7 +358,7 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
     matches.some(([, stop]) => stop > shown.length)
   ) {
     return (
-      <Token token={leaf.token}>
+      <Token token={leaf.token} sourceType={leaf.sourceType}>
         <Marked text={leaf.text} matches={matches} />
       </Token>
     )
@@ -362,7 +366,7 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
 
   return (
     <>
-      <Token token={leaf.token} cut>
+      <Token token={leaf.token} sourceType={leaf.sourceType} cut>
         <Marked text={shown} matches={matches} />
       </Token>
       <button className="cursor-pointer text-faint italic hover:underline" type="button" onClick={() => onOpenWhole(key)}>
@@ -372,8 +376,20 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
   )
 }
 
-/** A leaf's text in the colour of its token class, read off its `data-token`. */
-function Token({ token, cut = false, children }: { token?: TokenClass; cut?: boolean; children: ReactNode }) {
+/** A leaf's text in the colour of its token class, read off its `data-token`, with its source's type as `data-source-type`. */
+function Token({
+  token,
+  sourceType,
+  cut = false,
+  className,
+  children,
+}: {
+  token?: TokenClass
+  sourceType?: string
+  cut?: boolean
+  className?: string
+  children: ReactNode
+}) {
   return (
     <span
       className={cn(
@@ -381,9 +397,12 @@ function Token({ token, cut = false, children }: { token?: TokenClass; cut?: boo
         "data-[token=string]:text-sql-string",
         "data-[token=number]:text-sql-number",
         "data-[token=keyword]:text-sql-keyword",
+        "data-[token=symbol]:text-sql-identifier",
         "data-[token=null]:text-faint data-[token=null]:italic",
+        className,
       )}
       data-token={token}
+      data-source-type={sourceType}
       data-cut={cut || undefined}
     >
       {children}

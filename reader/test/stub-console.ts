@@ -20,7 +20,8 @@ import { stubComplete } from "./repl.fixtures"
  * - `later TEXT` answers `nil`, then prints TEXT on fd 1 after the answer.
  * - `exit CODE` exits with CODE without answering.
  * - `signal NAME` sends itself signal NAME without answering.
- * - Anything else answers with itself as the result's text.
+ * - `broken` answers `#<Broken>`, noting that its `inspect` raised.
+ * - Anything else answers with itself as the result's text, and as its tree's one leaf.
  *
  * It answers a check at once, even while an evaluation runs, by `stubComplete`. When
  * `log/stub-console.uncheckable` is there, it says it has no multi-line check, and answers none.
@@ -61,7 +62,8 @@ process.on("SIGINT", () => {
 
 const channel = connect({ fd: 3 } as never)
 const send = (frame: object) => channel.write(`${JSON.stringify(frame)}\n`)
-const answer = (id: number, text: string) => send({ type: "result", id, text, cut: false })
+const answer = (id: number, text: string, extra: object = {}) =>
+  send({ type: "result", id, text, cut: false, tree: { type: "object", inspect: text }, ...extra })
 
 const checkable = !existsSync("log/stub-console.uncheckable")
 send({ type: "ready", pid: process.pid, capabilities: checkable ? ["check"] : [] })
@@ -111,6 +113,8 @@ async function evaluate({ id, input }: { id: number; input: string }) {
     case "signal":
       process.kill(process.pid, argument)
       return
+    case "broken":
+      return answer(id, "#<Broken>", { inspect_error: "RuntimeError: nope" })
     default:
       return answer(id, input)
   }

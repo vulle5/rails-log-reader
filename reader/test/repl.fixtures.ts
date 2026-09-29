@@ -2,6 +2,8 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import type { RubyNode } from "../src/shared/repl"
+
 const STUB = Bun.fileURLToPath(new URL("./stub-console.ts", import.meta.url))
 
 /**
@@ -58,4 +60,26 @@ export async function stubConsoleStarts(root: string) {
 /** What the stub consoles in `root` heard from outside, in order: `stdin closed`, `SIGTERM`, `SIGINT`. */
 export async function stubConsoleHeard(root: string) {
   return (await stubConsoleLog(root)).flatMap((noted) => ("heard" in noted ? [noted.heard] : []))
+}
+
+/** `{a: 1, "b" => [1.0, nil, :c]}` as the eval loop lays it out. */
+export const RUBY_HASH: RubyNode = {
+  type: "hash",
+  inspect: '{a: 1, "b" => [1.0, nil, :c]}',
+  pairs: [
+    [{ type: "symbol", inspect: ":a" }, { type: "integer", inspect: "1", step: "[:a]" }],
+    [
+      { type: "string", inspect: '"b"' },
+      {
+        type: "array",
+        inspect: "[1.0, nil, :c]",
+        step: '["b"]',
+        items: [
+          { type: "float", inspect: "1.0", step: "[0]" },
+          { type: "nil", inspect: "nil", step: "[1]" },
+          { type: "symbol", inspect: ":c", step: "[2]" },
+        ],
+      },
+    ],
+  ],
 }

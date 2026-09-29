@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
-import type { ReplSnapshot, ReplState, TranscriptEntry } from "../src/shared/repl"
+import type { Outcome, ReplSnapshot, ReplState, RubyNode, TranscriptEntry } from "../src/shared/repl"
 import { Reader } from "../src/ui/Reader"
 import { aReplSession, openRepl, openTheReader, replDrawer, type ReaderProps } from "./reader.harness"
+import { RUBY_HASH } from "./repl.fixtures"
 
 /**
  * The *REPL* in its drawer, through the rendered Reader over a stand-in session: the console
@@ -44,6 +45,11 @@ function restartButton() {
 
 function transcriptEntries() {
   return within(within(replDrawer()).getByRole("list", { name: "Transcript" })).queryAllByRole("listitem")
+}
+
+/** A result whose value is `tree`, by default a structureless leaf of its text. */
+function result(text: string, tree: RubyNode = { type: "object", inspect: text }, inspectError: string | null = null): Extract<Outcome, { kind: "result" }> {
+  return { kind: "result", text, cut: false, tree, inspectError }
 }
 
 function evaluation(entry: Partial<Extract<TranscriptEntry, { kind: "evaluation" }>>): TranscriptEntry {
@@ -378,7 +384,7 @@ describe("the REPL's Transcript", () => {
   test("shows each evaluation's input, then what it printed, then its result", async () => {
     await openedOver({
       state: READY,
-      transcript: [evaluation({ input: "answer = 42", output: "side effect\n", outcome: { kind: "result", text: "42", cut: false } })],
+      transcript: [evaluation({ input: "answer = 42", output: "side effect\n", outcome: result("42") })],
     })
 
     expect(transcriptEntries()[0]).toHaveTextContent(/answer = 42\s*side effect\s*=> 42/)
@@ -417,7 +423,7 @@ describe("the REPL's Transcript", () => {
       state: READY,
       transcript: [
         { kind: "output", id: 1, output: "Loading development environment (Rails 8.1.3)\n", outputCut: false },
-        evaluation({ id: 2, outcome: { kind: "result", text: "2", cut: false } }),
+        evaluation({ id: 2, outcome: result("2") }),
       ],
     })
 
@@ -438,7 +444,7 @@ describe("the REPL's Transcript", () => {
   test("says when a result or what was printed was cut", async () => {
     await openedOver({
       state: READY,
-      transcript: [evaluation({ output: "x", outputCut: true, outcome: { kind: "result", text: "y", cut: true } })],
+      transcript: [evaluation({ output: "x", outputCut: true, outcome: { ...result("y"), cut: true } })],
     })
 
     expect(within(transcriptEntries()[0]!).getByText(/Output cut/)).toBeInTheDocument()
@@ -449,6 +455,83 @@ describe("the REPL's Transcript", () => {
     await openedOver({ state: EXITED, transcript: [evaluation({ outcome: { kind: "lost" } })] })
 
     expect(transcriptEntries()[0]).toHaveTextContent("The REPL exited before it answered.")
+  })
+})
+
+describe("a REPL result", () => {
+  const HASH = RUBY_HASH
+  const PRETTY = HASH.inspect
+
+  function resultTree() {
+    return within(transcriptEntries()[0]!).getByRole("tree", { name: "Result" })
+  }
+
+  function viewToggle(name: "Tree" | "Text") {
+    return within(transcriptEntries()[0]!).getByRole("button", { name })
+  }
+
+  test("shows a Hash as a tree, each key's and leaf's Ruby type on it", async () => {
+    const { user } = await openedOver({ state: READY, transcript: [evaluation({ outcome: result(PRETTY, HASH) })] })
+
+    await user.click(within(resultTree()).getByRole("treeitem", { name: /"b"/ }))
+
+    const tree = within(resultTree())
+    expect(tree.getByText("a:")).toHaveAttribute("data-source-type", "symbol")
+    expect(tree.getByText('"b":')).toHaveAttribute("data-source-type", "string")
+    expect(within(tree.getByRole("treeitem", { name: "a: 1" })).getByText("1")).toHaveAttribute("data-source-type", "integer")
+    expect(tree.getByText("1.0")).toHaveAttribute("data-source-type", "float")
+    expect(tree.getByText("nil")).toHaveAttribute("data-source-type", "nil")
+    expect(tree.getByText(":c")).toHaveAttribute("data-source-type", "symbol")
+    expect(viewToggle("Tree")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("toggles to the pretty_inspect text, and back to the tree", async () => {
+    const { user } = await openedOver({ state: READY, transcript: [evaluation({ outcome: result(PRETTY, HASH) })] })
+
+    await user.click(viewToggle("Text"))
+
+    expect(within(transcriptEntries()[0]!).queryByRole("tree")).not.toBeInTheDocument()
+    expect(within(transcriptEntries()[0]!).getByText(PRETTY)).toBeInTheDocument()
+    expect(viewToggle("Text")).toHaveAttribute("aria-pressed", "true")
+
+    await user.click(viewToggle("Tree"))
+
+    expect(resultTree()).toBeInTheDocument()
+  })
+
+  test("shows a scalar as its text alone, with no toggle", async () => {
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result("42", { type: "integer", inspect: "42" }) })] })
+
+    const entry = within(transcriptEntries()[0]!)
+    expect(entry.getByText("42")).toBeInTheDocument()
+    expect(entry.queryByRole("tree")).not.toBeInTheDocument()
+    expect(entry.queryByRole("button", { name: "Text" })).not.toBeInTheDocument()
+  })
+
+  test("says how many items the loop left out of a cut array", async () => {
+    const tree: RubyNode = {
+      type: "array",
+      inspect: "[0, 1, …]",
+      items: [
+        { type: "integer", inspect: "0", step: "[0]" },
+        { type: "integer", inspect: "1", step: "[1]" },
+      ],
+      more: 4_998,
+    }
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result("[0, 1, …]", tree) })] })
+
+    expect(within(resultTree()).getByText("…4998 more items")).toBeInTheDocument()
+  })
+
+  test("shows a value whose inspect raised as a result, noting what inspect raised", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [evaluation({ outcome: result("#<Broken>", { type: "object", inspect: "#<Broken>" }, "RuntimeError: nope") })],
+    })
+
+    const entry = within(transcriptEntries()[0]!)
+    expect(entry.getByText("#<Broken>")).toBeInTheDocument()
+    expect(entry.getByText("inspect raised RuntimeError: nope")).toBeInTheDocument()
   })
 })
 

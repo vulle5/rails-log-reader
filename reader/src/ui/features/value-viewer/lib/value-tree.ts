@@ -34,7 +34,15 @@ export type ContainerNode = {
  * XML child's XPath step, such as `post[2]`.
  * A key is unique among its siblings, so the keys down to a node are its path.
  */
-export type ValueChild = { key: string; node: ValueNode }
+export type ValueChild = {
+  key: string
+  node: ValueNode
+  /** The key's own type in its source, for a source whose keys are values of any type. Absent, a key takes the key colour. */
+  keyType?: LeafType
+}
+
+/** What type a leaf, or a key, has: the class it is coloured by, and the source's own name for it, such as `float`. */
+export type LeafType = { token: TokenClass; sourceType: string }
 
 /** What kind of token a leaf is: the type the value has in its source, never one guessed from how it reads. */
 export type TokenClass = "string" | "number" | "keyword" | "null" | "symbol" | "plain"
@@ -45,6 +53,8 @@ export type LeafNode =
       /** Exactly as drawn: a string with its quotes and escapes, a number as its source wrote it. */
       text: string
       token: TokenClass
+      /** What type the value has in its source, when the source names more types than there are token classes, such as `float`. */
+      sourceType?: string
     }
   /** A value the app's own `filter_parameters` replaced before the Reader ever saw it. */
   | { type: "filtered" }

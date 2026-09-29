@@ -11,6 +11,7 @@ import {
   type ReplSnapshot,
   type ReplState,
   type ReplUpdate,
+  type RubyNode,
 } from "../shared/repl"
 
 /** The eval loop the console process runs, beside the Initializer's master copy. Never copied into the Host app. */
@@ -49,7 +50,7 @@ export type ReplSession = {
 /** A frame the eval loop sends on fd 3. */
 type Frame =
   | { type: "ready"; pid: number; capabilities: string[] }
-  | { type: "result"; id: number; text: string; cut: boolean }
+  | { type: "result"; id: number; text: string; cut: boolean; tree: RubyNode; inspect_error?: string }
   | { type: "error"; id: number; class: string; message: string }
   | { type: "checked"; id: number; complete: boolean }
 
@@ -177,7 +178,7 @@ export function replSession(railsRoot: string): ReplSession {
 
     const outcome: Outcome =
       frame.type === "result"
-        ? { kind: "result", text: frame.text, cut: frame.cut }
+        ? { kind: "result", text: frame.text, cut: frame.cut, tree: frame.tree, inspectError: frame.inspect_error ?? null }
         : { kind: "error", className: frame.class, message: frame.message }
     publish({ type: "finished", id: frame.id, outcome })
     become({ kind: "ready", pid: state.pid })

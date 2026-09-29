@@ -11,9 +11,20 @@
 #   in:  {"type":"eval","id":1,"input":"1 + 1"}
 #        {"type":"check","id":2,"text":"[1, 2].each do |x|"}
 #   out: {"type":"ready","pid":48213,"capabilities":["check"]}
-#        {"type":"result","id":1,"text":"2","cut":false}
+#        {"type":"result","id":1,"text":"2","cut":false,"tree":{"type":"integer","inspect":"2"}}
 #        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ..."}
 #        {"type":"checked","id":2,"complete":false}
+#
+# A result's `tree` is its value laid out, and `inspect_error` says what an `inspect` raised while
+# it was built, when one did. A node carries its own `inspect` text, `cut` when that was cut, and
+# its type class: `hash` and `array`, which are laid out, or a leaf's, such as `symbol`, `float`
+# or `time`. Under the whole value, each node carries the `[…]` step that reaches it from its
+# container. A Hash's `pairs` are `[key, value]`, the key a leaf that is never laid out. An
+# Array's are `items`. A container cut short carries how many it left out as `more`:
+#
+#   {"type":"hash","inspect":"{a: [1, 2]}","pairs":[
+#     [{"type":"symbol","inspect":":a"},
+#      {"type":"array","inspect":"[1, 2]","step":"[:a]","items":[{"type":"integer","inspect":"1","step":"[0]"}],"more":1}]]}
 #
 # `check` asks whether a text is a whole input or needs more lines, and is answered even while
 # an evaluation runs. It uses IRB's lexer, and `ready` lists "check" among its capabilities
@@ -28,6 +39,15 @@ require "pp"
 module RailsLogReaderRepl
   # A result's text is cut at this many bytes.
   RESULT_LIMIT = 64 * 1024
+
+  # The most nodes a result's tree holds, spent breadth-first.
+  NODE_LIMIT = 1_000
+
+  # A node's `inspect` text, and what an `inspect` raised, is cut at this many bytes.
+  INSPECT_LIMIT = 4 * 1024
+
+  # What an `inspect` can raise and still leave a result.
+  INSPECT_FAILURES = [StandardError, ScriptError, SystemStackError].freeze
 
   # The width `pretty_inspect` wraps a result at.
   WIDTH = 80
@@ -150,13 +170,13 @@ module RailsLogReaderRepl
     end
 
     # Runs `source` the way a request runs, so the query cache is fresh and a reload is safe. The
-    # result is inspected inside too, since inspecting a relation runs its query.
+    # result is inspected and laid out inside too, since inspecting a relation runs its query.
     #
     # `exit` and a signal such as SIGTERM end the process rather than the evaluation, except
     # Ctrl-C's `Interrupt`, which is the evaluation's answer.
     def evaluate(id, source)
-      text, cut = interruptible { Rails.application.executor.wrap { inspected(@binding.eval(source, "(repl)", 1)) } }
-      send_frame("type" => "result", "id" => id, "text" => text, "cut" => cut)
+      frame = interruptible { Rails.application.executor.wrap { result(@binding.eval(source, "(repl)", 1)) } }
+      send_frame({ "type" => "result", "id" => id }.merge(frame))
     rescue SystemExit
       raise
     rescue Exception => error
@@ -172,7 +192,19 @@ module RailsLogReaderRepl
       @evaluating = false
     end
 
-    def inspected(value)
+    # A result frame's fields for `value`. An `inspect` that raises, the value's own or one
+    # inside it, leaves its node's label in place of its text, and the first one is noted.
+    def result(value)
+      @inspect_error = nil
+      tree = tree(value)
+      text, cut = pretty(value) { tree["inspect"] }
+      frame = { "text" => text, "cut" => cut, "tree" => tree }
+      frame["inspect_error"] = @inspect_error if @inspect_error
+      frame
+    end
+
+    # `value`'s `pretty_inspect`, or what `fallback` gives when it raises.
+    def pretty(value)
       buffer = Bounded.new(RESULT_LIMIT)
       cut = true
       catch(buffer) do
@@ -181,6 +213,105 @@ module RailsLogReaderRepl
       end
       text = cut ? buffer.text.byteslice(0, RESULT_LIMIT) : buffer.text.chomp
       [utf8(text), cut]
+    rescue *INSPECT_FAILURES => error
+      noted(error)
+      [yield, false]
+    end
+
+    # `value` laid out breadth-first, until `NODE_LIMIT` nodes have been spent. A key is part of
+    # its pair's node, not one of its own.
+    def tree(value)
+      root = node(value)
+      budget = NODE_LIMIT - 1
+      queue = []
+      queue << [value, root] if laid_out?(root)
+      until queue.empty?
+        container, parent = queue.shift
+        children = parent[parent["type"] == "hash" ? "pairs" : "items"] = []
+        each_entry(container) do |item, step, key|
+          break if budget.zero?
+
+          budget -= 1
+          child = node(item).merge("step" => step)
+          children << (key ? [key, child] : child)
+          queue << [item, child] if laid_out?(child)
+        end
+        parent["more"] = container.size - children.size if children.size < container.size
+      end
+      root
+    end
+
+    # Yields each item of a Hash or an Array with the `[…]` step that reaches it, and a Hash
+    # item's key node. A key cut at `INSPECT_LIMIT` gives a step cut with it.
+    def each_entry(container)
+      if container.is_a?(Hash)
+        container.each_pair do |key, item|
+          key_node = node(key)
+          yield item, "[#{key_node['inspect']}]", key_node
+        end
+      else
+        container.each_with_index { |item, index| yield item, "[#{index}]", nil }
+      end
+    end
+
+    def laid_out?(node)
+      node["type"] == "hash" || node["type"] == "array"
+    end
+
+    def node(value)
+      text, cut = inspect_text(value)
+      node = { "type" => type_class(value), "inspect" => text }
+      node["cut"] = true if cut
+      node
+    end
+
+    # What kind of value `value` is, told by `===` alone, which a BasicObject answers too.
+    def type_class(value)
+      case value
+      when nil then "nil"
+      when true, false then "boolean"
+      when String then "string"
+      when Symbol then "symbol"
+      when Integer then "integer"
+      when Float then "float"
+      when Rational then "rational"
+      when Complex then "complex"
+      when Hash then "hash"
+      when Array then "array"
+      when Time then "time"
+      else
+        if defined?(::Date) && ::Date === value then "time"
+        elsif defined?(::BigDecimal) && ::BigDecimal === value then "decimal"
+        else "object"
+        end
+      end
+    end
+
+    # `value`'s `inspect` cut to `INSPECT_LIMIT`, and whether it was cut. One that raises gives
+    # the value's label.
+    def inspect_text(value)
+      text = value.inspect.to_s
+      return [utf8(text), false] if text.bytesize <= INSPECT_LIMIT
+
+      [utf8(text.byteslice(0, INSPECT_LIMIT)), true]
+    rescue *INSPECT_FAILURES => error
+      noted(error)
+      [label(value), false]
+    end
+
+    # `#<Post>`: the value's class, which a BasicObject, with no `class` of its own, answers too.
+    def label(value)
+      klass =
+        begin
+          Kernel.instance_method(:class).bind(value).call
+        rescue TypeError
+          (class << value; self; end).superclass
+        end
+      "#<#{klass.name || klass.inspect}>"
+    end
+
+    def noted(error)
+      @inspect_error ||= utf8("#{class_name(error)}: #{error.message}".byteslice(0, INSPECT_LIMIT))
     end
 
     def class_name(error)

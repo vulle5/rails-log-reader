@@ -143,8 +143,18 @@ describe("the REPL session", () => {
       input: "1 + 1",
       output: "",
       outputCut: false,
-      outcome: { kind: "result", text: "1 + 1", cut: false },
+      outcome: { kind: "result", text: "1 + 1", cut: false, tree: { type: "object", inspect: "1 + 1" }, inspectError: null },
     })
+  })
+
+  test("answers an evaluation whose inspect raised as a result, noting what inspect raised", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    const entry = await evaluate(listening, "broken")
+
+    expect(entry).toMatchObject({ outcome: { kind: "result", text: "#<Broken>", inspectError: "RuntimeError: nope" } })
   })
 
   test("answers an evaluation that raised with its error's class and message", async () => {

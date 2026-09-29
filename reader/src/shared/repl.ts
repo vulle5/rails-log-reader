@@ -31,11 +31,53 @@ export type ReplState =
 export type ExitedState = { kind: "exited"; code: number | null; signal: string | null; stderr: string }
 
 export type Outcome =
-  /** Its value's `pretty_inspect`, cut to 64 KB when `cut`. */
-  | { kind: "result"; text: string; cut: boolean }
+  /**
+   * Its value's `pretty_inspect`, cut to 64 KB when `cut`, and the value laid out as `tree`.
+   * `inspectError` says what an `inspect` raised while the result was built, when one did.
+   */
+  | { kind: "result"; text: string; cut: boolean; tree: RubyNode; inspectError: string | null }
   | { kind: "error"; className: string; message: string }
   /** The console process ended before the evaluation answered. */
   | { kind: "lost" }
+
+/**
+ * What kind of Ruby value a node is: `hash` or `array`, which the eval loop lays out, or a
+ * leaf's type class. `time` is a Time or a Date, `decimal` a BigDecimal, and `object` anything
+ * with no class of its own here.
+ */
+export type RubyTypeClass =
+  | "hash"
+  | "array"
+  | "nil"
+  | "boolean"
+  | "string"
+  | "symbol"
+  | "integer"
+  | "float"
+  | "rational"
+  | "complex"
+  | "decimal"
+  | "time"
+  | "object"
+
+/**
+ * A node of a result's value as the eval loop laid it out, breadth-first, until its node budget
+ * was spent.
+ */
+export type RubyNode = {
+  type: RubyTypeClass
+  /** Its own `inspect`, cut to 4 KB when `cut`. */
+  inspect: string
+  cut?: true
+  /** The `[…]` that reaches it from its container. The whole value has none. */
+  step?: string
+  /** A Hash's `[key, value]` pairs, in its order. A key is a leaf, never laid out. */
+  pairs?: [RubyNode, RubyNode][]
+  /** An Array's items. */
+  items?: RubyNode[]
+  /** How many pairs or items the budget left out. Absent for a container carried whole. */
+  more?: number
+}
 
 export type TranscriptEntry =
   /** One *Evaluation*: its input, what it printed, and how it ended, once it has. */

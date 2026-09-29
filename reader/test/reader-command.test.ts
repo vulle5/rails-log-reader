@@ -636,7 +636,7 @@ describe("the REPL socket", () => {
     expect(await repl.next((message) => message.type === "finished")).toEqual({
       type: "finished",
       id: expect.any(Number),
-      outcome: { kind: "result", text: "1 + 1", cut: false },
+      outcome: { kind: "result", text: "1 + 1", cut: false, tree: { type: "object", inspect: "1 + 1" }, inspectError: null },
     })
     repl.close()
   })

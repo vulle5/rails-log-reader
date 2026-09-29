@@ -54,11 +54,95 @@ class EvalLoopTest < ActiveSupport::TestCase
     end
   end
 
-  test "answers an evaluation with its value's pretty_inspect, tied to its id" do
+  test "answers an evaluation with its value's pretty_inspect and its tree, tied to its id" do
     DevelopmentRun.console_process do |repl|
       answer = repl.evaluate("1 + 1")
 
-      assert_equal({ "type" => "result", "id" => 1, "text" => "2", "cut" => false }, answer)
+      assert_equal({ "type" => "result", "id" => 1, "text" => "2", "cut" => false, "tree" => { "type" => "integer", "inspect" => "2" } }, answer)
+    end
+  end
+
+  test "lays a Hash out as pairs and an Array as items, each node with its inspect, its type and its path step" do
+    DevelopmentRun.console_process do |repl|
+      tree = repl.evaluate(%({a: 1, "b" => [1.0, nil, :c]}))["tree"]
+
+      assert_equal "hash", tree["type"]
+      assert_equal %({a: 1, "b" => [1.0, nil, :c]}), tree["inspect"]
+      assert_nil tree["step"], "the whole value is reached by no step"
+      (a_key, a_value), (b_key, b_value) = tree["pairs"]
+      assert_equal({ "type" => "symbol", "inspect" => ":a" }, a_key)
+      assert_equal({ "type" => "integer", "inspect" => "1", "step" => "[:a]" }, a_value)
+      assert_equal({ "type" => "string", "inspect" => %("b") }, b_key)
+      assert_equal "array", b_value["type"]
+      assert_equal %([1.0, nil, :c]), b_value["inspect"]
+      assert_equal %(["b"]), b_value["step"]
+      assert_equal [
+        { "type" => "float", "inspect" => "1.0", "step" => "[0]" },
+        { "type" => "nil", "inspect" => "nil", "step" => "[1]" },
+        { "type" => "symbol", "inspect" => ":c", "step" => "[2]" },
+      ], b_value["items"]
+    end
+  end
+
+  test "gives each leaf a Ruby type class, and a Time its own text" do
+    DevelopmentRun.console_process do |repl|
+      items = repl.evaluate(%([1, 1.0, BigDecimal("1.5"), 3r, "a", :a, nil, true, false, Time.utc(2026, 9, 29), Date.new(2026, 9, 29), Object]))["tree"]["items"]
+
+      assert_equal %w[integer float decimal rational string symbol nil boolean boolean time time object], items.map { |item| item["type"] }
+      assert_equal "2026-09-29 00:00:00 UTC", items[9]["inspect"]
+    end
+  end
+
+  test "spends 1,000 nodes on a tree, breadth-first, saying how many items it left out" do
+    DevelopmentRun.console_process do |repl|
+      long = repl.evaluate("Array.new(5_000) { |i| i }")["tree"]
+      nested = repl.evaluate("[Array.new(998, 0), [1, 2]]")["tree"]
+
+      assert_equal 999, long["items"].size
+      assert_equal 4_001, long["more"]
+      first, second = nested["items"]
+      assert_equal 997, first["items"].size
+      assert_equal 1, first["more"]
+      assert_equal [], second["items"], "breadth-first, the budget was spent on the first's items before the second's"
+      assert_equal 2, second["more"]
+    end
+  end
+
+  test "leaves out a container's more when it holds every item" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal false, repl.evaluate("[1, 2]")["tree"].key?("more")
+    end
+  end
+
+  test "cuts a node's inspect at 4 KB" do
+    DevelopmentRun.console_process do |repl|
+      leaf = repl.evaluate("['x' * 5_000]")["tree"]["items"][0]
+
+      assert_equal 4 * 1024, leaf["inspect"].bytesize
+      assert_equal true, leaf["cut"]
+    end
+  end
+
+  test "answers a value whose inspect raises as a result, labelled with its class and noting what inspect raised" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(%(class Broken; def inspect = raise("nope"); end))
+      answer = repl.evaluate("Broken.new")
+
+      assert_equal "result", answer["type"]
+      assert_equal "#<Broken>", answer["text"]
+      assert_equal({ "type" => "object", "inspect" => "#<Broken>" }, answer["tree"])
+      assert_equal "RuntimeError: nope", answer["inspect_error"]
+    end
+  end
+
+  test "notes an inspect that raised inside a result, whatever it raised short of a signal" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(%(class Broken; def inspect = raise(NotImplementedError, "nope"); end))
+      answer = repl.evaluate("[1, Broken.new]")
+
+      assert_equal "result", answer["type"]
+      assert_equal({ "type" => "object", "inspect" => "#<Broken>", "step" => "[1]" }, answer["tree"]["items"][1])
+      assert_equal "NotImplementedError: nope", answer["inspect_error"]
     end
   end
 

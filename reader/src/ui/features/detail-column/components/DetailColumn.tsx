@@ -6,6 +6,7 @@ import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
 import { Tag } from "../../../components/Tag"
+import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
@@ -547,38 +548,14 @@ function RawBody({ text }: { text: string }) {
 /** Pretty | Raw, the pressed one showing. Pretty is disabled, and struck through, when the body has no tree. */
 function BodyView({ hasTree, raw, onRaw }: { hasTree: boolean; raw: boolean; onRaw: (raw: boolean) => void }) {
   return (
-    <div className="flex gap-0.5" role="group" aria-label="Show the body as">
-      <BodyViewButton pressed={!raw} disabled={!hasTree} onClick={() => onRaw(false)}>
+    <ToggleGroup label="Show the body as">
+      <ToggleButton pressed={!raw} disabled={!hasTree} onClick={() => onRaw(false)}>
         Pretty
-      </BodyViewButton>
-      <BodyViewButton pressed={raw} onClick={() => onRaw(true)}>
+      </ToggleButton>
+      <ToggleButton pressed={raw} onClick={() => onRaw(true)}>
         Raw
-      </BodyViewButton>
-    </div>
-  )
-}
-
-function BodyViewButton({
-  pressed,
-  disabled = false,
-  onClick,
-  children,
-}: {
-  pressed: boolean
-  disabled?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      className="cursor-pointer rounded border border-transparent px-1.5 font-ui text-2xs text-muted not-aria-pressed:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint disabled:line-through aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
+      </ToggleButton>
+    </ToggleGroup>
   )
 }
 
