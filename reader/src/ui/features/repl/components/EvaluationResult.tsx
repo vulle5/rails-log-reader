@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 
 import type { Outcome } from "../../../../shared/repl"
+import { Copyable } from "../../../components/CopyButton"
 import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
@@ -35,6 +36,10 @@ export function EvaluationResult({ outcome }: { outcome: Extract<Outcome, { kind
   )
 }
 
+/**
+ * `=>` on the left and Pretty | Raw on the right, beside the copy control, so a result's
+ * controls sit together whichever way it shows.
+ */
 function ResultView({
   source,
   text,
@@ -47,7 +52,7 @@ function ResultView({
   onRaw: (raw: boolean) => void
 }) {
   const caption = (
-    <div className="flex items-baseline gap-3 pb-1">
+    <div className="flex items-center justify-between gap-3 pb-1">
       <Marker>{"=>"}</Marker>
       <ToggleGroup label="Show the result as">
         <ToggleButton pressed={!raw} onClick={() => onRaw(false)}>
@@ -62,9 +67,9 @@ function ResultView({
 
   if (!raw) return <ValueViewer label="Result" source={source} caption={caption} />
   return (
-    <>
+    <Copyable text={text} label="Copy result">
       {caption}
       <Text>{text}</Text>
-    </>
+    </Copyable>
   )
 }

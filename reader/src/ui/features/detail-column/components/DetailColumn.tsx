@@ -10,7 +10,7 @@ import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
-import { CopyButton, LineCopy } from "../../../components/CopyButton"
+import { Copyable, CopyButton, LineCopy } from "../../../components/CopyButton"
 import { bytes, mediaType, size, statusLine } from "../lib/format"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { fillScheme, sourceLocation } from "../lib/source-location"
@@ -291,20 +291,6 @@ function ResponseHeaders({ response }: { response: RowResponse | null }) {
           </ul>
         )}
       </Copyable>
-    </div>
-  )
-}
-
-/**
- * A block with one copy control for the whole of it, placed as the *Value viewer* places its
- * own: centred on the block's first line, which the right padding keeps clear of it. No text,
- * no control.
- */
-function Copyable({ text, label, children }: { text: string | null; label: string; children: ReactNode }) {
-  return (
-    <div className="relative pr-15">
-      {text !== null && <CopyButton className="-top-0.5 right-0" text={text} label={label} />}
-      {children}
     </div>
   )
 }

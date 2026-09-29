@@ -37,9 +37,9 @@ export function Transcript({ entries }: { entries: readonly TranscriptEntry[] })
       onScroll={scrolled}
     >
       {entries.map((entry) => (
-        // An evaluation is ruled down its left edge, so where one ends and the next begins
-        // reads at a glance, and so does which one a control at the far edge belongs to.
-        <li key={entry.id} className={cn(entry.kind === "evaluation" && "border-l-2 border-accent pl-2")}>
+        // An evaluation is a raised block edged in the accent, so where one ends and the next
+        // begins reads at a glance, and so does which one a control at its far edge belongs to.
+        <li key={entry.id} className={cn(entry.kind === "evaluation" && "bg-raised px-3 py-1.5 shadow-pinned")}>
           {entry.kind === "evaluation" ? (
             <>
               <Text className="text-strong">

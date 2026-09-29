@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 
 import { cn } from "../lib/cn"
 
@@ -86,4 +86,18 @@ export function useCopy() {
   }
 
   return [copied, copy] as const
+}
+
+/**
+ * A block with one copy control for the whole of it, placed as the *Value viewer* places its
+ * own: centred on the block's first line, which the right padding keeps clear of it. No text,
+ * no control.
+ */
+export function Copyable({ text, label, children }: { text: string | null; label: string; children: ReactNode }) {
+  return (
+    <div className="relative pr-15">
+      {text !== null && <CopyButton className="-top-0.5 right-0" text={text} label={label} />}
+      {children}
+    </div>
+  )
 }

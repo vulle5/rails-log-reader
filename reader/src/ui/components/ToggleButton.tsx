@@ -18,7 +18,7 @@ export function ToggleButton({
   return (
     <button
       type="button"
-      className="cursor-pointer rounded border border-transparent px-1.5 font-ui text-2xs text-muted not-aria-pressed:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint disabled:line-through aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
+      className="cursor-pointer rounded border border-transparent px-2 py-0.5 font-ui text-xs text-muted not-aria-pressed:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint disabled:line-through aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
       aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
