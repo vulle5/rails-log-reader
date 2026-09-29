@@ -9,7 +9,7 @@ import { ActivityTable, rowSelector } from "./features/activity-table/components
 import { Column, scrollportSelector } from "./components/Column"
 import { ColumnDivider } from "./components/ColumnDivider"
 import { useAutoScroll } from "./hooks/auto-scroll"
-import { useColumnWidths } from "./hooks/column-widths"
+import { COLLAPSED, useColumnWidths } from "./hooks/column-widths"
 import {
   ConsoleFilters,
   consoleFilterKey,
@@ -22,6 +22,8 @@ import { detailItems, DetailColumn } from "./features/detail-column/components/D
 import type { DetailTabId } from "./features/detail-column/components/DetailTabs"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
+import { ReplDrawer } from "./features/repl/components/ReplDrawer"
+import { FOLDED, useReplDrawer } from "./features/repl/hooks/repl-drawer"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"
 import type { RepairState } from "./features/setup-status/lib/initializer-repair"
@@ -36,10 +38,10 @@ import { EDITOR_SCHEME, EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField,
 import { openModifier } from "./lib/platform"
 
 /**
- * The Reader's three persistent columns. All three are present from the first paint and
- * are sized by the grid rather than by their contents, so filling one never reflows the
- * others — including the Detail column, which holds a placeholder until something is
- * selected rather than appearing when it is.
+ * The Reader's three persistent columns, and the *REPL* drawer under the first two. All of
+ * them are present from the first paint and are sized by the grid rather than by their
+ * contents, so filling one never reflows the others — including the Detail column, which holds
+ * a placeholder until something is selected rather than appearing when it is.
  *
  * The Activity table is present with no rows in it rather than absent until there are some,
  * for the same reason: the first request of the session must not be the thing that
@@ -220,6 +222,7 @@ export function Reader({
   const reader = useRef<HTMLDivElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
   const widths = useColumnWidths(viewport)
+  const drawer = useReplDrawer(viewport)
   const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
@@ -317,21 +320,30 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The width the columns and their gaps share, and the backdrop the columns float
-              on. A window too narrow for the grid's `minWidth` scrolls the grid sideways in here
-              rather than drawing a column under its minimum. */}
-          <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden bg-sunken" ref={viewport}>
+          {/* The size the columns, the drawer and their gaps share, and the backdrop they float
+              on. A window too small for the grid's `minWidth` or `minHeight` scrolls the grid in
+              here rather than drawing a column or the drawer under its minimum. */}
+          <div className="min-h-0 flex-auto overflow-auto bg-sunken" ref={viewport}>
             {/* The outer two column tracks are the widths the Column dividers set, or the
                 Collapsed Console's strip in place of the Console's, so a column that fills
                 scrolls inside its own track and never widens, narrows or displaces its neighbours;
                 the Activity table takes the rest. Between each two is a divider's track, and
-                `p-1` is the gap around all three — the `GAP`s the widths are fitted around. The
-                row's minimum is pinned to 0 (`grid-rows-1`) because an `auto` row grows to the
-                tallest column and never shrinks to fit, which would hand the scroll to the window
-                instead of to each column. Relative, for Hover grouping's overlay. */}
+                `p-1` is the gap around all three — the `GAP`s the widths are fitted around.
+
+                The rows are the columns', the REPL drawer's top edge, and the drawer, which spans
+                the Console's and the Activity table's tracks while the Detail column and its
+                divider span all three rows. The columns' row has its minimum pinned to 0 because
+                an `auto` row grows to the tallest column and never shrinks to fit, which would
+                hand the scroll to the window instead of to each column. Relative, for Hover
+                grouping's overlay. */}
             <div
-              className="relative grid h-full grid-rows-1 overflow-hidden p-1"
-              style={{ gridTemplateColumns: widths.template, minWidth: `${widths.minWidth}px` }}
+              className="relative grid h-full overflow-hidden p-1"
+              style={{
+                gridTemplateColumns: widths.template,
+                gridTemplateRows: drawer.template,
+                minWidth: `${widths.minWidth}px`,
+                minHeight: `${drawer.minHeight}px`,
+              }}
               ref={reader}
             >
               {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
@@ -359,7 +371,18 @@ export function Reader({
                 </Column>
               )}
               {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
-              <ColumnDivider name="Console" edge="right" column={widths.console} folds={widths.console} />
+              <ColumnDivider
+                name="Console"
+                edge="right"
+                size={widths.console.width}
+                column={widths.console}
+                folds={{
+                  folded: widths.console.collapsed,
+                  fold: widths.console.collapse,
+                  unfold: widths.console.expand,
+                  foldedSize: COLLAPSED,
+                }}
+              />
               <Column
                 place="activity"
                 name="Activity table"
@@ -385,12 +408,19 @@ export function Reader({
                     rows — not that a tab is showing none of the ones it holds. */}
                 {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
               </Column>
-              <ColumnDivider name="Detail column" edge="left" column={widths.detail} />
+              <ColumnDivider
+                name="Detail column"
+                edge="left"
+                size={widths.detail.width}
+                column={widths.detail}
+                className="row-span-3"
+              />
               <Column
                 place="detail"
                 name="Detail column"
                 scroll={detailScroll}
                 bodyScrolls={false}
+                className="row-span-3"
                 controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
               >
                 <DetailColumn
@@ -402,6 +432,21 @@ export function Reader({
                   scroll={detailScroll}
                 />
               </Column>
+              {/* Outside the drawer, so a drag that folds it carries on over its header. */}
+              <ColumnDivider
+                name="REPL"
+                edge="top"
+                size={drawer.height}
+                column={drawer}
+                folds={{ ...drawer, foldedSize: FOLDED }}
+                className="col-span-3 row-start-2"
+              />
+              <ReplDrawer
+                folded={drawer.folded}
+                onFold={drawer.fold}
+                onUnfold={drawer.unfold}
+                className="col-span-3 row-start-3"
+              />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's
                   gutter and lands on a row in the table beside it. `layoutKey` is everything that
                   could have moved an end without changing which two ends they are. */}
@@ -409,7 +454,7 @@ export function Reader({
                 reader={reader}
                 line={drawnFrom?.id ?? null}
                 row={drawnFrom?.owner ?? null}
-                layoutKey={`${widths.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
+                layoutKey={`${widths.template} ${drawer.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
               />
             </div>
           </div>

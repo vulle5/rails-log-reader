@@ -241,3 +241,23 @@ export function consoleCollapsed() {
 export async function expandConsole(user: UserEvent) {
   await user.click(within(column("Console")).getByRole("button", { name: /^Expand Console/ }))
 }
+
+/** The *REPL* drawer under the Console and the Activity table, open or folded. */
+export function replDrawer() {
+  return screen.getByRole("region", { name: "REPL" })
+}
+
+/** Whether the REPL drawer is open, as its fold button says. */
+export function replOpen() {
+  return within(replDrawer()).getByRole("button", { name: /^(Fold|Open) REPL$/ }).getAttribute("aria-expanded") === "true"
+}
+
+/** Opens a folded REPL drawer, by the button in its header. */
+export async function openRepl(user: UserEvent) {
+  await user.click(within(replDrawer()).getByRole("button", { name: "Open REPL" }))
+}
+
+/** Folds an open REPL drawer to its header, by the button in it. */
+export async function foldRepl(user: UserEvent) {
+  await user.click(within(replDrawer()).getByRole("button", { name: "Fold REPL" }))
+}

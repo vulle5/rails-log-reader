@@ -5,8 +5,8 @@ import { cn } from "../lib/cn"
 
 /**
  * One of the Reader's three columns: a heading, and a body that is the column's scrollport. An
- * outlined panel, floating on the backdrop behind the columns: the Console in the backdrop's
- * own fill, the other two lighter.
+ * outlined panel, floating on the backdrop behind the columns: the Console and the Activity
+ * table in the columns' own fill, the Detail column lighter.
  *
  * `data-column` says which column an element is, and `data-scrollport` marks its body: what
  * *Hover grouping* and its jump find a column and its scrollport by.
@@ -40,10 +40,11 @@ type ColumnProps = {
    * auto-scroll follows.
    */
   bodyScrolls?: boolean
+  className?: string
   children?: ReactNode
 }
 
-export function Column({ place, name, controls, action, scroll, bodyScrolls = true, children }: ColumnProps) {
+export function Column({ place, name, controls, action, scroll, bodyScrolls = true, className, children }: ColumnProps) {
   // `min-h-0` for the same reason as `min-w-0`: a grid item's automatic minimum size is its
   // content, so without it a column would overflow the track the grid constrained it to and
   // hand the overflow back to the page.
@@ -51,9 +52,10 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
     <section
       className={cn(
         "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-outline",
-        place === "console" && "bg-sunken",
+        place === "console" && "bg-background",
         place === "activity" && "bg-background",
         place === "detail" && "bg-raised",
+        className,
       )}
       role="region"
       aria-label={name}
@@ -65,7 +67,7 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
           action !== undefined && "@container",
         )}
       >
-        <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{name}</h2>
+        <ColumnHeading>{name}</ColumnHeading>
         {action === undefined ? (
           controls
         ) : (
@@ -119,4 +121,9 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
       )}
     </section>
   )
+}
+
+/** A column's name at the head of it, and the *REPL* drawer's, which is headed the same way. */
+export function ColumnHeading({ children }: { children: ReactNode }) {
+  return <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{children}</h2>
 }

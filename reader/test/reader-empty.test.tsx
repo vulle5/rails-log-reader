@@ -88,7 +88,7 @@ describe("an empty Reader says why (#28)", () => {
   test("keeps the three columns, and the table's headings, around what it says", () => {
     theReader({ kind: "idle" })
 
-    expect(screen.getAllByRole("region")).toHaveLength(3)
+    expect(screen.getAllByRole("region")).toHaveLength(4)
     expect(within(column("Activity table")).getAllByRole("columnheader").length).toBeGreaterThan(0)
   })
 })

@@ -14,6 +14,8 @@ export type PreferenceSetting =
   | "detail-width"
   | "console-collapsed"
   | "hidden-table-columns"
+  | "repl-height"
+  | "repl-open"
 
 function keyFor(setting: PreferenceSetting) {
   return `rails-log-reader.${setting}`
