@@ -809,7 +809,7 @@ function Exception({
     // The right padding keeps the message clear of the copy button, which is anchored here and
     // not to the column.
     <section
-      className="relative border-y border-border border-t-error py-2 pr-15 pl-3"
+      className="relative border-y border-border border-t-error py-2 pr-17 pl-3"
       aria-label="Exception"
     >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
