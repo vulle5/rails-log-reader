@@ -247,9 +247,9 @@ export function replDrawer() {
   return screen.getByRole("region", { name: "REPL" })
 }
 
-/** Whether the REPL drawer is open, as its fold button says. */
+/** Whether the REPL drawer is open, which is when its header offers to fold it. */
 export function replOpen() {
-  return within(replDrawer()).getByRole("button", { name: /^(Fold|Open) REPL$/ }).getAttribute("aria-expanded") === "true"
+  return within(replDrawer()).queryByRole("button", { name: "Fold REPL" }) !== null
 }
 
 /** Opens a folded REPL drawer, by the button in its header. */

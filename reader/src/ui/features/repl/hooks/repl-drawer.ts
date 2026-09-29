@@ -18,10 +18,11 @@ import { recallPreference, rememberPreference } from "../../../lib/preference"
  * starts folded. Nothing but the developer folds or opens it.
  *
  * Read synchronously on mount and measured before paint, so the first frame is already the
- * remembered layout.
+ * remembered layout. Measured again whenever the viewport changes size, which a banner above it
+ * appearing does without the window resizing.
  */
 
-export const MINIMUM = 120
+const MINIMUM = 120
 
 /** The height of the folded drawer: its header, and the border around it. */
 export const FOLDED = 32
@@ -34,7 +35,7 @@ const DEFAULT = 288
 /** The grid's padding above and under the rows, and the drawer's top edge between them. */
 const GAPS_HEIGHT = 3 * GAP
 
-export type ReplDrawer = {
+export type DrawnDrawer = {
   /** The drawer's height while it is open, which it keeps while it is folded. */
   height: number
   min: number
@@ -53,7 +54,7 @@ export type ReplDrawer = {
 }
 
 /** `viewport` is the element whose height the columns, the drawer and their gaps share. */
-export function useReplDrawer(viewport: RefObject<HTMLElement | null>): ReplDrawer {
+export function useReplDrawer(viewport: RefObject<HTMLElement | null>): DrawnDrawer {
   const [available, setAvailable] = useState(() => window.innerHeight - GAPS_HEIGHT)
   const [request, setRequest] = useState(recallHeight)
   const [folded, setFolded] = useState(recallFolded)
@@ -64,8 +65,13 @@ export function useReplDrawer(viewport: RefObject<HTMLElement | null>): ReplDraw
     const measure = () => setAvailable((viewport.current?.clientHeight || window.innerHeight) - GAPS_HEIGHT)
     measure()
 
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure)
+    if (viewport.current !== null) observer?.observe(viewport.current)
     window.addEventListener("resize", measure)
-    return () => window.removeEventListener("resize", measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener("resize", measure)
+    }
   }, [viewport])
 
   const max = Math.max(MINIMUM, available - ABOVE_MINIMUM)

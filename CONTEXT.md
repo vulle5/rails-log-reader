@@ -655,7 +655,8 @@ _Avoid_: using it for the *Column divider*.
 
 **Column divider** — the narrow gap between two of the Reader's columns, which is its own drag
 handle and wears a three-dot grip so it reads as one: one between the *Console* and the
-*Activity table*, one between the table and the *Detail column*.
+*Activity table*, one between the table and the *Detail column*. The *REPL* drawer's top edge
+is one turned on its side, setting the drawer's height the same way.
 Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
 is the view the other two serve. A width set is a *request*, remembered across reloads, and
 what is drawn is what the window can fit: a window too narrow gives width back from the
