@@ -376,8 +376,8 @@ function responseBodyMatches(search: Search, body: ResponseBody | null, raw: boo
 }
 
 /**
- * The Response tab: a strip saying the status, the content type and the size the app sent, and
- * beside it Pretty | Raw, then the body. Pretty draws it in the *Value viewer*, and Raw as the
+ * The Response tab: a strip saying the status, the content type and the size the app sent, with
+ * Pretty | Raw at its right beside Copy, then the body. Pretty draws it in the *Value viewer*, and Raw as the
  * text the app sent. Every body opens pretty, a new Selection's included. A body with no tree,
  * cut or not valid JSON or XML, is raw only, Pretty drawn struck through and disabled, with a
  * line saying why. The one Copy hands over what is showing. A response with no body has the
@@ -433,10 +433,7 @@ function Response({
   const hasTree = body.source !== null
   const caption = (
     <>
-      <div className="flex items-baseline gap-3 pb-3">
-        {stripLine}
-        <BodyView hasTree={hasTree} raw={raw} onRaw={onRaw} />
-      </div>
+      <div className="pb-3">{stripLine}</div>
       {body.cutFrom !== null ? (
         <p className="pb-3 text-faint">
           {`This response is ${bytes(body.cutFrom)}, and only the first 64 KB is shown. Because it's cut off, it can only be shown as raw text.`}
@@ -450,12 +447,13 @@ function Response({
       )}
     </>
   )
+  const view = <BodyView hasTree={hasTree} raw={raw} onRaw={onRaw} />
   return (
     <div className="px-3 py-2">
       {body.source !== null && !raw ? (
-        <ValueViewer label="Response body" source={body.source} caption={caption} />
+        <ValueViewer label="Response body" source={body.source} caption={caption} controls={view} />
       ) : (
-        <Copyable text={body.text} label="Copy response body">
+        <Copyable text={body.text} label="Copy response body" controls={view}>
           {caption}
           <RawBody text={body.text} />
         </Copyable>

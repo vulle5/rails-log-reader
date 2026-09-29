@@ -15,8 +15,8 @@ export function CopyButton({ text, label, className }: { text: string; label: st
 
   return (
     // Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
-    // beside it.
-    <ControlButton className={cn("absolute top-1.5 right-2 min-w-13", className)} title={label} aria-label={label} onClick={() => copy(text)}>
+    // beside it. Bordered, so it reads as a button beside toggles that are not pressed.
+    <ControlButton className={cn("absolute top-1.5 right-2 min-w-13 border-border", className)} title={label} aria-label={label} onClick={() => copy(text)}>
       {copied ? "Copied" : "Copy"}
     </ControlButton>
   )
