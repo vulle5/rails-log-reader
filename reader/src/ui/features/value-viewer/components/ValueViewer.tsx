@@ -1,6 +1,6 @@
 import { useCallback, useContext, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
-import { CopyButton, LineCopy } from "../../../components/CopyButton"
+import { Copyable, LineCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
 import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
@@ -37,10 +37,20 @@ import type {
  * One control copies the whole value, and each node, on hover or focus, offers a copy of its
  * value and of its path. Every text copied is the source's: the viewer only asks for it.
  *
- * A `caption` is drawn over the tree, and the copy control sits on its line rather than the
- * tree's first, so the control is in the same place whatever the viewer is placed under.
+ * A `caption` is drawn over the tree. The copy control sits at the right of the first line, the
+ * caption's or the tree's, with `controls` before it.
  */
-export function ValueViewer({ label, source, caption }: { label: string; source: ValueSource; caption?: ReactNode }) {
+export function ValueViewer({
+  label,
+  source,
+  caption,
+  controls,
+}: {
+  label: string
+  source: ValueSource
+  caption?: ReactNode
+  controls?: ReactNode
+}) {
   const value = source.tree
   const search = useContext(SearchContext)
   const inside = useMemo(() => matchesInside(search, value), [search, value])
@@ -69,20 +79,17 @@ export function ValueViewer({ label, source, caption }: { label: string; source:
 
   if (value.type === "container" && isEmpty(value)) {
     return (
-      <>
+      <Copyable text={null} label={label} controls={controls}>
         {caption}
         <p className="font-mono text-sm">
           <Empty node={value} />
         </p>
-      </>
+      </Copyable>
     )
   }
 
   return (
-    // The right padding keeps the top lines clear of the copy button, which is anchored here.
-    <div className="relative pr-15">
-      {/* Centred on the first line, the caption's or the tree's, which starts at the block's top edge. */}
-      <CopyButton className="-top-0.5 right-0" text={wholeText} label={`Copy ${label.toLowerCase()}`} />
+    <Copyable text={wholeText} label={`Copy ${label.toLowerCase()}`} controls={controls}>
       {caption}
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (
@@ -94,7 +101,7 @@ export function ValueViewer({ label, source, caption }: { label: string; source:
           </li>
         )}
       </ul>
-    </div>
+    </Copyable>
   )
 }
 

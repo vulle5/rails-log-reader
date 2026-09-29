@@ -1,35 +1,24 @@
 import { useEffect, useState, type ReactNode } from "react"
 
 import { cn } from "../lib/cn"
+import { ControlButton } from "./ControlButton"
 
 /**
- * A copy-to-clipboard control for a block whose whole point is "paste this somewhere else" —
- * always present, at reduced opacity, so it never competes with the text it copies, and
- * solidifying on hover or focus the way it is reached. A click never copies silently: the
- * label swaps to a brief confirmation, because clicking something and seeing no reaction
- * reads as "did that work?" Anchored to the top right of the nearest positioned block; a
- * caller moves it with `className`.
+ * A copy-to-clipboard control for a block whose whole point is "paste this somewhere else",
+ * drawn as the controls beside it are. A click never copies silently: the label swaps to a
+ * brief confirmation, because clicking something and seeing no reaction reads as "did that
+ * work?" Anchored to the top right of the nearest positioned block; a caller moves it with
+ * `className`.
  */
 export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
   const [copied, copy] = useCopy()
 
   return (
     // Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
-    // beside it. The opacity dims the border and background along with the label, and goes no
-    // lower than this, or "reduced" starts reading as "gone" rather than as "not yet what you're
-    // looking at".
-    <button
-      type="button"
-      className={cn(
-        "absolute top-1.5 right-2 min-w-13 cursor-pointer rounded border border-border bg-raised px-2 py-0.5 font-ui text-xs text-foreground opacity-70 hover:opacity-100 focus-visible:opacity-100",
-        className,
-      )}
-      title={label}
-      aria-label={label}
-      onClick={() => copy(text)}
-    >
+    // beside it.
+    <ControlButton className={cn("absolute top-1.5 right-2 min-w-13", className)} title={label} aria-label={label} onClick={() => copy(text)}>
       {copied ? "Copied" : "Copy"}
-    </button>
+    </ControlButton>
   )
 }
 
@@ -89,14 +78,30 @@ export function useCopy() {
 }
 
 /**
- * A block with one copy control for the whole of it, placed as the *Value viewer* places its
- * own: centred on the block's first line, which the right padding keeps clear of it. No text,
- * no control.
+ * A block with one copy control for the whole of it, on its first line at its right edge, with
+ * `controls` before it. The block's first lines wrap short of them, and the lines under them
+ * run the block's whole width. No text, no copy control.
  */
-export function Copyable({ text, label, children }: { text: string | null; label: string; children: ReactNode }) {
+export function Copyable({
+  text,
+  label,
+  controls,
+  children,
+}: {
+  text: string | null
+  label: string
+  controls?: ReactNode
+  children: ReactNode
+}) {
   return (
-    <div className="relative pr-15">
-      {text !== null && <CopyButton className="-top-0.5 right-0" text={text} label={label} />}
+    <div className="flow-root">
+      {(text !== null || controls !== undefined) && (
+        // Centred on the block's first line.
+        <div className="float-right -mt-0.5 ml-3 flex gap-0.5">
+          {controls}
+          {text !== null && <CopyButton className="static" text={text} label={label} />}
+        </div>
+      )}
       {children}
     </div>
   )

@@ -37,8 +37,8 @@ export function EvaluationResult({ outcome }: { outcome: Extract<Outcome, { kind
 }
 
 /**
- * `=>` on the left and Pretty | Raw on the right, beside the copy control, so a result's
- * controls sit together whichever way it shows.
+ * `=>`, then the result beside it, with Pretty | Raw and the copy control at the right of its
+ * first line, so a result's controls sit together whichever way it shows.
  */
 function ResultView({
   source,
@@ -51,25 +51,30 @@ function ResultView({
   raw: boolean
   onRaw: (raw: boolean) => void
 }) {
-  const caption = (
-    <div className="flex items-center justify-between gap-3 pb-1">
-      <Marker>{"=>"}</Marker>
-      <ToggleGroup label="Show the result as">
-        <ToggleButton pressed={!raw} onClick={() => onRaw(false)}>
-          Pretty
-        </ToggleButton>
-        <ToggleButton pressed={raw} onClick={() => onRaw(true)}>
-          Raw
-        </ToggleButton>
-      </ToggleGroup>
-    </div>
+  const toggles = (
+    <ToggleGroup label="Show the result as">
+      <ToggleButton pressed={!raw} onClick={() => onRaw(false)}>
+        Pretty
+      </ToggleButton>
+      <ToggleButton pressed={raw} onClick={() => onRaw(true)}>
+        Raw
+      </ToggleButton>
+    </ToggleGroup>
   )
 
-  if (!raw) return <ValueViewer label="Result" source={source} caption={caption} />
   return (
-    <Copyable text={text} label="Copy result">
-      {caption}
-      <Text>{text}</Text>
-    </Copyable>
+    // The gap is a space wide, as `=> ` is before a result's text.
+    <div className="flex gap-[1ch] leading-sql">
+      <Marker>{"=>"}</Marker>
+      <div className="min-w-0 flex-1">
+        {raw ? (
+          <Copyable text={text} label="Copy result" controls={toggles}>
+            <Text>{text}</Text>
+          </Copyable>
+        ) : (
+          <ValueViewer label="Result" source={source} controls={toggles} />
+        )}
+      </div>
+    </div>
   )
 }
