@@ -54,7 +54,7 @@ export function ReplDrawer({
       <header
         className={cn(
           "flex min-h-7.5 flex-none items-center justify-between gap-3 px-3 py-1",
-          folded ? "cursor-pointer hover:bg-sunken" : "border-b border-border",
+          folded ? "cursor-pointer hover:bg-selected" : "border-b border-border",
         )}
         onClick={folded ? onUnfold : undefined}
       >
