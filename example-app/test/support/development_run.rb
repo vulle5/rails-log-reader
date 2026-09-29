@@ -86,7 +86,7 @@ class DevelopmentRun
 
   # A `bin/rails console` running the Reader's eval loop, with its fd 3 held here the way the
   # Reader holds it: frames go out and come back on it, and fds 1 and 2 are read as text.
-  class Console
+  class ConsoleProcess
     TIMEOUT = 30
 
     attr_reader :root, :ready
@@ -123,7 +123,7 @@ class DevelopmentRun
     # Everything on fd 2 so far, once it contains `expected`.
     def stderr_through(expected) = text_through(@stderr, expected)
 
-    # Closes fd 3, which ends the loop, and waits for the console to exit. One that has not
+    # Closes fd 3, which ends the loop, and waits for the process to exit. One that has not
     # exited by the timeout is killed.
     def close
       @frames.close unless @frames.closed?
@@ -138,10 +138,10 @@ class DevelopmentRun
 
     private
       def next_frame
-        raise "the console answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)
+        raise "the console process answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)
 
         line = @frames.gets
-        raise "the console closed fd 3:\n#{@streams.values.join}" if line.nil?
+        raise "the console process closed fd 3:\n#{@streams.values.join}" if line.nil?
 
         JSON.parse(line)
       end
@@ -204,7 +204,7 @@ class DevelopmentRun
 
     # `bin/rails console -- -f -r <the eval loop>` in a throwaway root, as the Reader starts it,
     # handed to the block once the loop says it is ready and closed after it.
-    def console(initializer: true, marker: true)
+    def console_process(initializer: true, marker: true)
       shared_root(initializer:, marker:) do |root|
         # Copied, not symlinked, for the reason `bin/` is left out of SYMLINKED.
         FileUtils.mkdir_p(File.join(root, "bin"))
@@ -219,12 +219,12 @@ class DevelopmentRun
         end
         [theirs, stdout_end, stderr_end].each(&:close)
 
-        console = Console.new(root:, pid:, frames: ours, stdout:, stderr:)
+        repl = ConsoleProcess.new(root:, pid:, frames: ours, stdout:, stderr:)
         begin
-          console.await_ready
-          yield console
+          repl.await_ready
+          yield repl
         ensure
-          console.close
+          repl.close
         end
       end
     end

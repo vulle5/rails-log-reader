@@ -152,10 +152,7 @@ describe("the REPL's Transcript", () => {
       transcript: [evaluation({ input: "answer = 42", output: "side effect\n", outcome: { kind: "result", text: "42", cut: false } })],
     })
 
-    const text = transcriptEntries()[0]?.textContent ?? ""
-    expect(text.indexOf("answer = 42")).toBeGreaterThan(-1)
-    expect(text.indexOf("answer = 42")).toBeLessThan(text.indexOf("side effect"))
-    expect(text.indexOf("side effect")).toBeLessThan(text.lastIndexOf("42"))
+    expect(transcriptEntries()[0]).toHaveTextContent(/answer = 42\s*side effect\s*=> 42/)
   })
 
   test("shows an evaluation that raised as its error's class and message", async () => {
@@ -196,7 +193,8 @@ describe("the REPL's Transcript", () => {
       transcript: [evaluation({ output: "x", outputCut: true, outcome: { kind: "result", text: "y", cut: true } })],
     })
 
-    expect(within(transcriptEntries()[0]!).getAllByText(/cut at 64 KB/)).toHaveLength(2)
+    expect(within(transcriptEntries()[0]!).getByText(/Output cut/)).toBeInTheDocument()
+    expect(within(transcriptEntries()[0]!).getByText(/Result cut at 64 KB/)).toBeInTheDocument()
   })
 
   test("says when the console process ended before an evaluation answered", async () => {

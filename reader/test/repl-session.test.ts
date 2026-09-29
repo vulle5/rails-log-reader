@@ -81,7 +81,7 @@ async function evaluate(listening: Listening, input: string) {
 }
 
 describe("the REPL session", () => {
-  test("starts no console for an attachment that does not ask for one", async () => {
+  test("starts no console process for an attachment that does not ask for one", async () => {
     const { root, session } = await aSession()
 
     const listening = listen(session)
@@ -103,7 +103,7 @@ describe("the REPL session", () => {
     expect(snapshot.state).toEqual({ kind: "ready", pid: expect.any(Number) })
   })
 
-  test("boots one console however many attachments ask", async () => {
+  test("boots one console process however many attachments ask", async () => {
     const { root, session } = await aSession()
     const first = listen(session)
     const second = listen(session)
@@ -162,7 +162,7 @@ describe("the REPL session", () => {
     expect(listening.snapshot.transcript).toEqual(transcript)
   })
 
-  test("refuses an input while the console is still booting", async () => {
+  test("refuses an input while the console process is still booting", async () => {
     const { session } = await aSession()
     const listening = listen(session)
 
@@ -183,7 +183,7 @@ describe("the REPL session", () => {
     expect(warned).toMatchObject({ output: "careful\n" })
   })
 
-  test("makes what the console prints outside any evaluation an entry of its own", async () => {
+  test("makes what the console process prints outside any evaluation an entry of its own", async () => {
     const { session } = await aSession()
     const listening = listen(session)
     const { transcript } = await booted(listening)
@@ -226,7 +226,7 @@ describe("the REPL session", () => {
     expect(inputs.at(-1)).toBe("100")
   })
 
-  test("says the console exited, and ends a running evaluation without an answer", async () => {
+  test("says the console process exited, and ends a running evaluation without an answer", async () => {
     const { session } = await aSession()
     const listening = listen(session)
     await booted(listening)

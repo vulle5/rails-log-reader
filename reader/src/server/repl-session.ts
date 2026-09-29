@@ -81,7 +81,7 @@ export function replSession(railsRoot: string): ReplSession {
         },
       })
     } catch (problem) {
-      printed(`${String(problem)}\n`)
+      credit(`${String(problem)}\n`)
       become({ kind: "exited", code: null })
       return
     }
@@ -92,8 +92,8 @@ export function replSession(railsRoot: string): ReplSession {
       // The console process went away mid-frame. Its exit says so.
     })
     readLines(frames, (line) => {
-      const frame = JSON.parse(line) as Frame
-      setTimeout(() => answered(frame))
+      const frame = parsedFrame(line)
+      if (frame !== null) setTimeout(() => answered(frame))
     })
     void readText(child.stdout)
     void readText(child.stderr)
@@ -125,10 +125,10 @@ export function replSession(railsRoot: string): ReplSession {
 
   async function readText(stream: ReadableStream<Uint8Array>) {
     const decoder = new TextDecoder()
-    for await (const chunk of stream) printed(decoder.decode(chunk, { stream: true }))
+    for await (const chunk of stream) credit(decoder.decode(chunk, { stream: true }))
   }
 
-  function printed(text: string) {
+  function credit(text: string) {
     if (text === "") return
 
     const state = snapshot.state
@@ -137,7 +137,7 @@ export function replSession(railsRoot: string): ReplSession {
 
     if (credited === null) {
       publish({ type: "entry", entry: { kind: "output", id: nextId++, output: "", outputCut: false } })
-      printed(text)
+      credit(text)
       return
     }
     // Past its limit an entry keeps nothing more, so there is nothing to tell a listener.
@@ -179,4 +179,13 @@ function readLines(socket: Socket, onLine: (line: string) => void) {
     received = lines.pop() ?? ""
     for (const line of lines) onLine(line)
   })
+}
+
+/** The frame on `line`, or `null` when it is not JSON, as a line cut short by a crash is not. */
+function parsedFrame(line: string) {
+  try {
+    return JSON.parse(line) as Frame
+  } catch {
+    return null
+  }
 }

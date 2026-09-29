@@ -211,7 +211,7 @@ declare global {
 }
 
 /** One console process for the Reader's lifetime, which a hot reload does not end. */
-function theReplSession() {
+function sharedReplSession() {
   if (globalThis.readerReplSession !== undefined) return globalThis.readerReplSession
 
   const session = replSession(railsRoot)
@@ -220,22 +220,17 @@ function theReplSession() {
   return session
 }
 
-const repl = replSocket(theReplSession())
+const repl = replSocket(sharedReplSession())
 
 /** Each socket's events, sent to the handler of whoever opened it. */
 const websocket: Bun.WebSocketHandler<ReaderSocket> = {
-  open(socket) {
-    if (socket.data.kind === "repl") repl.websocket.open?.(socket as Bun.ServerWebSocket<ReplSocket>)
-    else page.websocket.open?.(socket as Bun.ServerWebSocket<PageSocket>)
-  },
-  message(socket, message) {
-    if (socket.data.kind === "repl") repl.websocket.message(socket as Bun.ServerWebSocket<ReplSocket>, message)
-    else page.websocket.message(socket as Bun.ServerWebSocket<PageSocket>, message)
-  },
-  close(socket, code, reason) {
-    if (socket.data.kind === "repl") repl.websocket.close?.(socket as Bun.ServerWebSocket<ReplSocket>, code, reason)
-    else page.websocket.close?.(socket as Bun.ServerWebSocket<PageSocket>, code, reason)
-  },
+  open: (socket) => handlerOf(socket).open?.(socket),
+  message: (socket, message) => handlerOf(socket).message(socket, message),
+  close: (socket, code, reason) => handlerOf(socket).close?.(socket, code, reason),
+}
+
+function handlerOf(socket: Bun.ServerWebSocket<ReaderSocket>) {
+  return (socket.data.kind === "repl" ? repl.websocket : page.websocket) as Bun.WebSocketHandler<ReaderSocket>
 }
 
 const server = serveOrSaySo(port)

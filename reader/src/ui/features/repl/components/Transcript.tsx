@@ -1,6 +1,7 @@
-import { useLayoutEffect, useRef } from "react"
+import { useLayoutEffect, useRef, type ReactNode } from "react"
 
 import type { Outcome, TranscriptEntry } from "../../../../shared/repl"
+import { cn } from "../../../lib/cn"
 
 /** How near its end the Transcript can be scrolled and still follow what arrives. */
 const FOLLOWING_SLACK = 24
@@ -35,12 +36,10 @@ export function Transcript({ entries }: { entries: readonly TranscriptEntry[] })
         <li key={entry.id}>
           {entry.kind === "evaluation" ? (
             <>
-              <pre className="break-words whitespace-pre-wrap text-strong">
-                <span className="text-faint select-none" aria-hidden="true">
-                  {"› "}
-                </span>
+              <Text className="text-strong">
+                <Marker>{"› "}</Marker>
                 {entry.input}
-              </pre>
+              </Text>
               <Printed output={entry.output} cut={entry.outputCut} />
               {entry.outcome !== null && <Answer outcome={entry.outcome} />}
             </>
@@ -58,8 +57,8 @@ function Printed({ output, cut }: { output: string; cut: boolean }) {
 
   return (
     <>
-      <pre className="break-words whitespace-pre-wrap text-muted">{output}</pre>
-      {cut && <Cut>Output cut at 64 KB</Cut>}
+      <Text className="text-muted">{output}</Text>
+      {cut && <Cut>Output cut at 64K characters</Cut>}
     </>
   )
 }
@@ -69,24 +68,36 @@ function Answer({ outcome }: { outcome: Outcome }) {
     case "result":
       return (
         <>
-          <pre className="break-words whitespace-pre-wrap">
-            <span className="text-faint select-none" aria-hidden="true">
-              {"=> "}
-            </span>
+          <Text>
+            <Marker>{"=> "}</Marker>
             {outcome.text}
-          </pre>
+          </Text>
           {outcome.cut && <Cut>Result cut at 64 KB</Cut>}
         </>
       )
     case "error":
       return (
-        <pre className="break-words whitespace-pre-wrap text-error">
+        <Text className="text-error">
           {outcome.className}: {outcome.message}
-        </pre>
+        </Text>
       )
     case "lost":
       return <p className="font-ui text-error">The REPL exited before it answered.</p>
   }
+}
+
+/** Text as it was written, its line breaks kept and its long lines wrapped. */
+function Text({ className, children }: { className?: string; children: ReactNode }) {
+  return <pre className={cn("break-words whitespace-pre-wrap", className)}>{children}</pre>
+}
+
+/** What marks an input or a result, left out of what a screen reader reads and a copy takes. */
+function Marker({ children }: { children: string }) {
+  return (
+    <span className="text-faint select-none" aria-hidden="true">
+      {children}
+    </span>
+  )
 }
 
 function Cut({ children }: { children: string }) {

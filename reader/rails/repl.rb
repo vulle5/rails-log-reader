@@ -13,8 +13,8 @@
 #        {"type":"result","id":1,"text":"2","cut":false}
 #        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ..."}
 #
-# Fds 1 and 2 are the console's own, read by the Reader as plain text, so nothing the Host
-# app prints can corrupt a frame. The loop ends, and the console with it, when fd 3 closes.
+# Fds 1 and 2 are the console process's own, read by the Reader as plain text, so nothing the
+# Host app prints can corrupt a frame. The loop ends, and the process with it, when fd 3 closes.
 
 require "json"
 require "pp"
@@ -72,8 +72,8 @@ module RailsLogReaderRepl
 
     private
 
-    # Active Record's console hook sends every query to stderr as well. Those queries reach
-    # the Reader through the Sidecar already, so the echo is detached.
+    # Detaches the stderr logger Active Record's `console` hook adds, so no query is echoed on
+    # fd 2. Each query still reaches the Sidecar.
     def quiet_query_echo
       logger = Rails.logger
       return unless logger.respond_to?(:broadcasts)
@@ -92,10 +92,10 @@ module RailsLogReaderRepl
       end
     end
 
-    # Runs `source` the way a request runs, so the query cache is fresh and a reload is safe.
+    # Runs `source` the way a request runs, so the query cache is fresh and a reload is safe. The
+    # result is inspected inside too, since inspecting a relation runs its query.
     def evaluate(id, source)
-      value = Rails.application.executor.wrap { @binding.eval(source, "(repl)", 1) }
-      text, cut = inspected(value)
+      text, cut = Rails.application.executor.wrap { inspected(@binding.eval(source, "(repl)", 1)) }
       send_frame("type" => "result", "id" => id, "text" => text, "cut" => cut)
     rescue SystemExit
       raise
