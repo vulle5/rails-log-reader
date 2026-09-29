@@ -58,8 +58,10 @@ function heading() {
   return within(replDrawer()).getByRole("heading", { name: "REPL" })
 }
 
-/** What the drawer's body holds until the REPL itself is put in it. */
-const BODY = /^The REPL/
+/** The drawer's body: the REPL's prompt, which a folded drawer drops. */
+function prompt() {
+  return within(replDrawer()).queryByRole("textbox", { name: "Ruby" })
+}
 
 /** Drags the drawer's top edge `by` pixels — downwards when positive. */
 async function drag(user: UserEvent, by: number) {
@@ -105,7 +107,7 @@ describe("the REPL drawer", () => {
     openTheReader()
 
     expect(replOpen()).toBe(false)
-    expect(within(replDrawer()).queryByText(BODY)).not.toBeInTheDocument()
+    expect(prompt()).not.toBeInTheDocument()
     expect(drawn()).toBe(32)
   })
 
@@ -113,7 +115,7 @@ describe("the REPL drawer", () => {
     await openedTheReader()
 
     expect(within(replDrawer()).getByRole("button", { name: "Fold REPL" })).toHaveAttribute("aria-expanded", "true")
-    expect(within(replDrawer()).getByText(BODY)).toBeInTheDocument()
+    expect(prompt()).toBeInTheDocument()
     expect(drawn()).toBe(288)
   })
 
@@ -126,7 +128,7 @@ describe("the REPL drawer", () => {
 
     await foldRepl(user)
     expect(heading()).toBe(header)
-    expect(within(replDrawer()).queryByText(BODY)).not.toBeInTheDocument()
+    expect(prompt()).not.toBeInTheDocument()
   })
 
   test("opens by a click anywhere on its folded header", async () => {

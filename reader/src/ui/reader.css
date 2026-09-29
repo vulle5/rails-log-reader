@@ -46,6 +46,8 @@
 
   --color-warn: #9a6700;
   --color-error: #cf222e;
+  /* A console process that is up and waiting for input. */
+  --color-ready: #1a7f37;
 
   /* HTTP methods and status classes, coloured independently of each other and of `warn` and
      `error` above, so a 404 is never visually identical to a logged `.error` call and DELETE
@@ -137,6 +139,7 @@
 
     --color-warn: #e3b341;
     --color-error: #ff7b72;
+    --color-ready: #3fb950;
 
     --color-method-post: #3fb950;
     --color-method-put-patch: #56d4dd;

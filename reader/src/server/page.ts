@@ -7,7 +7,13 @@ import index from "../ui/index.html"
 type Development = Bun.Serve.Options<undefined>["development"]
 
 /** A browser's WebSocket held open to the page server's own, and what it sent before that opened. */
-export type PageSocket = { path: string; protocols: string[]; upstream?: WebSocket; queued: (string | Uint8Array<ArrayBuffer>)[] }
+export type PageSocket = {
+  kind: "page"
+  path: string
+  protocols: string[]
+  upstream?: WebSocket
+  queued: (string | Uint8Array<ArrayBuffer>)[]
+}
 
 /**
  * The HTML bundle, served on a unix socket of its own and reached only through the Reader's
@@ -33,7 +39,7 @@ export function servePage(development: Development) {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       if (!hmr || url.pathname !== "/_bun/hmr") return new Response(null, { status: 404 })
       const protocols = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((each) => each.trim()).filter(Boolean)
-      const data = { path, protocols, queued: [] }
+      const data: PageSocket = { kind: "page", path, protocols, queued: [] }
       const upgraded =
         protocols[0] === undefined
           ? server.upgrade(request, { data })

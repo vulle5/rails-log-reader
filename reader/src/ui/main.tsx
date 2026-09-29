@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client"
 
 import { resolveAppName } from "../shared/app-name"
 import { detectEmptyState, detectMismatch } from "../shared/initializer-status"
+import { useReplSession } from "./features/repl/hooks/repl-session"
 import { useInitializerFileStatus, useInitializerRepair } from "./features/setup-status/lib/initializer-repair"
 import { useActsOnlyFrom } from "./hooks/acting"
 import { useAppNameOverride } from "./hooks/app-name"
@@ -18,7 +19,7 @@ if (container === null) throw new Error("index.html is missing its #root element
  * `detectMismatch` folds the file status together with whatever `v` the live Sidecar last
  * reported into the one thing `Reader` actually renders. `detectEmptyState` folds the same
  * file status, with whether the Sidecar's history has all arrived, into why an empty Reader
- * is empty.
+ * is empty. `useReplSession` owns the `/repl` WebSocket, on a page that may act.
  */
 function LiveReader() {
   const { rows, lines, evictedRows, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier } =
@@ -27,6 +28,7 @@ function LiveReader() {
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
   const appNameOverride = useAppNameOverride()
   const actsOnlyFrom = useActsOnlyFrom()
+  const repl = useReplSession(actsOnlyFrom === null)
 
   async function onRepair() {
     const copied = await repair()
@@ -54,6 +56,7 @@ function LiveReader() {
       emptyState={detectEmptyState(fileStatus, historyLoaded)}
       appName={resolveAppName(appNameOverride, identity?.appName ?? null)}
       railsRoot={identity?.railsRoot ?? null}
+      repl={repl}
     />
   )
 }

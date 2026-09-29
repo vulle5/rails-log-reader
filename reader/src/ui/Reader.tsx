@@ -24,6 +24,7 @@ import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/deta
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { ReplDrawer } from "./features/repl/components/ReplDrawer"
 import { FOLDED, useReplDrawer } from "./features/repl/hooks/repl-drawer"
+import { DETACHED_REPL, type ReplHandle } from "./features/repl/hooks/repl-session"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"
 import type { RepairState } from "./features/setup-status/lib/initializer-repair"
@@ -106,6 +107,8 @@ type ReaderProps = {
    * has been observed, which `isHostFrame` reads as "never guessed".
    */
   railsRoot?: string | null
+  /** The *REPL* session, from `useReplSession`: what it holds, and what can be asked of it. */
+  repl?: ReplHandle
 }
 
 export function Reader({
@@ -124,6 +127,7 @@ export function Reader({
   emptyState = null,
   appName = null,
   railsRoot = null,
+  repl = DETACHED_REPL,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -445,6 +449,8 @@ export function Reader({
                 folded={drawer.folded}
                 onFold={drawer.fold}
                 onUnfold={drawer.unfold}
+                repl={repl}
+                actsOnlyFrom={actsOnlyFrom}
                 className="col-span-3 row-start-3"
               />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's

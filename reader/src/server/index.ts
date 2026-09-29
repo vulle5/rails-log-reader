@@ -7,6 +7,8 @@ import { initializerFileStatus, repairInitializerFile } from "./initializer-file
 import { servePage, type PageSocket } from "./page"
 import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
+import { replSession, type ReplSession } from "./repl-session"
+import { replSocket, type ReplSocket } from "./repl-socket"
 import { openSidecar, readEarlier, type Sidecar } from "./sidecar"
 
 const detectedRailsRoot = findRailsRoot(process.cwd())
@@ -174,11 +176,14 @@ async function repairInitializer() {
 }
 
 /** The bound port, which the page cannot read off its own address once a tunnel is in front. */
-function readerPort(_request: Request, server: Bun.Server<PageSocket>) {
+function readerPort(_request: Request, server: Bun.Server<ReaderSocket>) {
   return Response.json({ port: server.port })
 }
 
-type Handler = (request: Request, server: Bun.Server<PageSocket>) => Response | undefined | Promise<Response | undefined>
+/** Whose WebSocket this is: the development page's HMR socket, or a tab's REPL. */
+type ReaderSocket = PageSocket | ReplSocket
+
+type Handler = (request: Request, server: Bun.Server<ReaderSocket>) => Response | undefined | Promise<Response | undefined>
 
 /**
  * `handler`, run only for a request `refusal` lets through. A refused one gets a bare `403`,
@@ -186,7 +191,7 @@ type Handler = (request: Request, server: Bun.Server<PageSocket>) => Response | 
  * name to add to `RAILS_LOG_READER_ALLOWED_HOSTS`.
  */
 function gated(kind: RouteKind, handler: Handler) {
-  return (request: Request, server: Bun.Server<PageSocket>) => {
+  return (request: Request, server: Bun.Server<ReaderSocket>) => {
     const refused = refusal(request, kind, allowedHosts)
     if (refused === null) return handler(request, server)
 
@@ -199,6 +204,39 @@ const view = (handler: Handler) => gated("view", handler)
 const act = (handler: Handler) => gated("act", handler)
 
 const page = servePage(process.env.NODE_ENV === "production" ? false : { hmr: true, console: true })
+
+declare global {
+  /** The REPL session, kept on `globalThis` because `bun --hot` runs this module again. */
+  var readerReplSession: ReplSession | undefined
+}
+
+/** One console process for the Reader's lifetime, which a hot reload does not end. */
+function theReplSession() {
+  if (globalThis.readerReplSession !== undefined) return globalThis.readerReplSession
+
+  const session = replSession(railsRoot)
+  process.on("exit", () => session.close())
+  globalThis.readerReplSession = session
+  return session
+}
+
+const repl = replSocket(theReplSession())
+
+/** Each socket's events, sent to the handler of whoever opened it. */
+const websocket: Bun.WebSocketHandler<ReaderSocket> = {
+  open(socket) {
+    if (socket.data.kind === "repl") repl.websocket.open?.(socket as Bun.ServerWebSocket<ReplSocket>)
+    else page.websocket.open?.(socket as Bun.ServerWebSocket<PageSocket>)
+  },
+  message(socket, message) {
+    if (socket.data.kind === "repl") repl.websocket.message(socket as Bun.ServerWebSocket<ReplSocket>, message)
+    else page.websocket.message(socket as Bun.ServerWebSocket<PageSocket>, message)
+  },
+  close(socket, code, reason) {
+    if (socket.data.kind === "repl") repl.websocket.close?.(socket as Bun.ServerWebSocket<ReplSocket>, code, reason)
+    else page.websocket.close?.(socket as Bun.ServerWebSocket<PageSocket>, code, reason)
+  },
+}
 
 const server = serveOrSaySo(port)
 
@@ -216,7 +254,7 @@ console.log(`Rails root        ${railsRoot}`)
  */
 function serveOrSaySo(port: number) {
   try {
-    return Bun.serve<PageSocket>({
+    return Bun.serve<ReaderSocket>({
       port,
       hostname: "127.0.0.1",
       // Every route is a view or an act, and passes the gate before it runs. The page, its
@@ -237,9 +275,10 @@ function serveOrSaySo(port: number) {
         "/reader-port": { GET: view(readerPort) },
         "/initializer-status": { GET: view(initializerStatus) },
         "/initializer-repair": { POST: act(repairInitializer) },
+        "/repl": { GET: act(repl.upgrade) },
       },
       fetch: view(page.fetch),
-      websocket: page.websocket,
+      websocket,
     })
   } catch (problem) {
     if ((problem as { code?: string }).code !== "EADDRINUSE") throw problem

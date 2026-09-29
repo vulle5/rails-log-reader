@@ -81,6 +81,82 @@ class DevelopmentRun
     def finish(status) = DevelopmentRun.result_for(root:, output_path:, status:)
   end
 
+  # The Reader's eval loop, a sibling of the Initializer's master copy. It is never copied.
+  REPL_LOOP = File.expand_path("../../../reader/rails/repl.rb", __dir__)
+
+  # A `bin/rails console` running the Reader's eval loop, with its fd 3 held here the way the
+  # Reader holds it: frames go out and come back on it, and fds 1 and 2 are read as text.
+  class Console
+    TIMEOUT = 30
+
+    attr_reader :root, :ready
+
+    def initialize(root:, pid:, frames:, stdout:, stderr:)
+      @root = root
+      @pid = pid
+      @frames = frames
+      @streams = { stdout => +"", stderr => +"" }
+      @stdout = stdout
+      @stderr = stderr
+      @readers = @streams.keys.map { |io| Thread.new { io.each_line { |line| @streams[io] << line } } }
+      @next_id = 0
+    end
+
+    # The `ready` frame the loop sends once it is running.
+    def await_ready
+      @ready = next_frame
+    end
+
+    # The frame that answers `input`: its result or its error.
+    def evaluate(input)
+      id = (@next_id += 1)
+      @frames.write("#{JSON.generate(type: "eval", id:, input:)}\n")
+      frame = next_frame
+      raise "expected an answer to #{id}, got #{frame.inspect}" unless frame["id"] == id
+
+      frame
+    end
+
+    # Everything on fd 1 so far, once it contains `expected`.
+    def stdout_through(expected) = text_through(@stdout, expected)
+
+    # Everything on fd 2 so far, once it contains `expected`.
+    def stderr_through(expected) = text_through(@stderr, expected)
+
+    # Closes fd 3, which ends the loop, and waits for the console to exit. One that has not
+    # exited by the timeout is killed.
+    def close
+      @frames.close unless @frames.closed?
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TIMEOUT
+      until (status = Process.wait2(@pid, Process::WNOHANG)&.last)
+        Process.kill("KILL", @pid) if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        sleep 0.05
+      end
+      @readers.each(&:join)
+      status
+    end
+
+    private
+      def next_frame
+        raise "the console answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)
+
+        line = @frames.gets
+        raise "the console closed fd 3:\n#{@streams.values.join}" if line.nil?
+
+        JSON.parse(line)
+      end
+
+      def text_through(io, expected)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TIMEOUT
+        until @streams[io].include?(expected)
+          raise "never printed #{expected.inspect}, only #{@streams[io].inspect}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+          sleep 0.05
+        end
+        @streams[io].dup
+      end
+  end
+
   class << self
     # `script` is Ruby evaluated after boot, in the booted Run. The block, if given, gets the
     # root before the Run starts, for tests that need to shape it further.
@@ -124,6 +200,33 @@ class DevelopmentRun
       end
 
       Spawned.new(root:, pid:, output_path:)
+    end
+
+    # `bin/rails console -- -f -r <the eval loop>` in a throwaway root, as the Reader starts it,
+    # handed to the block once the loop says it is ready and closed after it.
+    def console(initializer: true, marker: true)
+      shared_root(initializer:, marker:) do |root|
+        # Copied, not symlinked, for the reason `bin/` is left out of SYMLINKED.
+        FileUtils.mkdir_p(File.join(root, "bin"))
+        FileUtils.cp(File.join(EXAMPLE_APP, "bin/rails"), File.join(root, "bin/rails"))
+
+        ours, theirs = UNIXSocket.pair
+        stdout, stdout_end = IO.pipe
+        stderr, stderr_end = IO.pipe
+        pid = Bundler.with_unbundled_env do
+          Process.spawn(base_env(root:, env: "development"), RbConfig.ruby, "bin/rails", "console", "--", "-f", "-r", REPL_LOOP,
+            chdir: root, in: File::NULL, out: stdout_end, err: stderr_end, 3 => theirs)
+        end
+        [theirs, stdout_end, stderr_end].each(&:close)
+
+        console = Console.new(root:, pid:, frames: ours, stdout:, stderr:)
+        begin
+          console.await_ready
+          yield console
+        ensure
+          console.close
+        end
+      end
     end
 
     # A real Puma server, booted from the root's own config/puma.rb on an ephemeral port and

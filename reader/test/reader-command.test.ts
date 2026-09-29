@@ -2,12 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { networkInterfaces, tmpdir } from "node:os"
 import { join } from "node:path"
+import { WebSocket } from "ws"
 
 import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "../src/server/allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "../src/server/app-name"
 import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
+import { EMPTY_SNAPSHOT, type ReplCommand, type ReplMessage } from "../src/shared/repl"
 import type { Envelope } from "../src/shared/wire"
+import { stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
 
 const SERVER = Bun.fileURLToPath(new URL("../src/server/index.ts", import.meta.url))
@@ -542,7 +545,7 @@ describe("who the Reader answers", () => {
         },
       })
 
-    expect((await upgrade("/repl")).status).toBe(404)
+    expect((await upgrade("/nowhere")).status).toBe(404)
     expect((await upgrade("/_bun/hmr")).status).toBe(101)
   })
 
@@ -570,6 +573,118 @@ describe("who the Reader answers", () => {
     const response = await Bun.fetch(new URL("reader-port", url))
 
     expect(await response.json()).toEqual({ port: Number(new URL(url).port) })
+  })
+})
+
+/**
+ * The page's side of `/repl`: a WebSocket that is sent every message as it arrives and hands
+ * back the first one after a given point that `holds` is true of.
+ */
+function replSocket(url: string, origin: string) {
+  const socket = new WebSocket(url.replace(/^http/, "ws") + "repl", { headers: { origin } })
+  const received: ReplMessage[] = []
+  let arrived = () => {}
+  socket.on("message", (data) => {
+    received.push(JSON.parse(String(data)) as ReplMessage)
+    arrived()
+  })
+  const opened = new Promise<void>((resolve, reject) => {
+    socket.on("open", resolve)
+    socket.on("error", reject)
+  })
+
+  return {
+    async send(command: ReplCommand) {
+      await opened
+      socket.send(JSON.stringify(command))
+    },
+    async next(holds: (message: ReplMessage) => boolean, from = 0) {
+      const deadline = Date.now() + 10_000
+      while (true) {
+        const found = received.slice(from).find(holds)
+        if (found !== undefined) return found
+        if (Date.now() > deadline) throw new Error(`no such message, only ${JSON.stringify(received)}`)
+        await new Promise<void>((resolve) => {
+          arrived = resolve
+          setTimeout(resolve, 100)
+        })
+      }
+    },
+    received,
+    close: () => socket.close(),
+  }
+}
+
+describe("the REPL socket", () => {
+  async function aReaderOverTheStubConsole() {
+    const root = await stubConsoleRoot()
+    temporary.push(root)
+    const url = await readerUrl(run(root))
+    return { root, url, origin: `http://${new URL(url).host}` }
+  }
+
+  test("opens on the session's snapshot, and runs Ruby in the console process end to end", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+
+    expect(await repl.next((message) => message.type === "snapshot")).toEqual({ type: "snapshot", snapshot: EMPTY_SNAPSHOT })
+
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+    await repl.send({ type: "submit", input: "1 + 1" })
+
+    expect(await repl.next((message) => message.type === "finished")).toEqual({
+      type: "finished",
+      id: expect.any(Number),
+      outcome: { kind: "result", text: "1 + 1", cut: false },
+    })
+    repl.close()
+  })
+
+  test("shows a tab that opens later the whole Transcript, and refuses its input only to it", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const first = replSocket(url, origin)
+    await first.send({ type: "boot" })
+    await first.next((message) => message.type === "state" && message.state.kind === "ready")
+    await first.send({ type: "submit", input: "sleep 500" })
+    await first.next((message) => message.type === "state" && message.state.kind === "busy")
+
+    const second = replSocket(url, origin)
+    const snapshot = await second.next((message) => message.type === "snapshot")
+    await second.send({ type: "submit", input: "1 + 1" })
+
+    expect(snapshot).toMatchObject({ snapshot: { state: { kind: "busy" }, transcript: [{ kind: "output" }, { input: "sleep 500" }] } })
+    expect(await second.next((message) => message.type === "refused")).toEqual({
+      type: "refused",
+      reason: "Already running. Wait for it to finish.",
+      input: "1 + 1",
+    })
+    await first.next((message) => message.type === "finished")
+    await second.next((message) => message.type === "finished")
+    expect(first.received.some((message) => message.type === "refused")).toBe(false)
+    first.close()
+    second.close()
+  })
+
+  test("refuses the upgrade with a bare 403 for a foreign, other-port, missing or null Origin", async () => {
+    const { root, url } = await aReaderOverTheStubConsole()
+    const host = new URL(url).host
+
+    for (const origin of ["http://attacker.example", "http://localhost:3000", `https://${host}`, "null", undefined]) {
+      const headers: Record<string, string> = {
+        host,
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+      }
+      if (origin !== undefined) headers.origin = origin
+      const refused = await Bun.fetch(new URL("/repl", url), { headers })
+
+      expect(refused.status).toBe(403)
+      expect(await refused.text()).toBe("")
+    }
+    expect(await stubConsoleStarts(root)).toEqual([])
   })
 })
 

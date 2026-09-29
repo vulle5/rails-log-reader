@@ -4,8 +4,10 @@ import userEvent, { type UserEvent } from "@testing-library/user-event"
 
 import { activityTable, type ActivityRow } from "../src/shared/activity"
 import { consoleStream } from "../src/shared/console"
+import { EMPTY_SNAPSHOT, submitRefusal, type ReplSnapshot } from "../src/shared/repl"
 import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
 import type { Envelope } from "../src/shared/wire"
+import type { ReplHandle } from "../src/ui/features/repl/hooks/repl-session"
 import { Reader } from "../src/ui/Reader"
 
 /**
@@ -84,6 +86,28 @@ export function openTheReaderOver(fold: Folded, props: ReaderProps = {}) {
   const user = userEvent.setup()
   const view = render(<Reader {...fold.props} {...props} />)
   return { user, fold, ...view }
+}
+
+/**
+ * A *REPL* session for `Reader`'s `repl` prop, holding `snapshot` and remembering what was asked
+ * of it. It refuses an input by the rule the real session keeps.
+ */
+export function aReplSession(snapshot: Partial<ReplSnapshot> = {}, refusal: ReplHandle["refusal"] = null) {
+  const asked = { boots: 0, submitted: [] as string[] }
+  const held = { ...EMPTY_SNAPSHOT, ...snapshot }
+  const repl: ReplHandle = {
+    snapshot: held,
+    refusal,
+    boot: () => {
+      asked.boots++
+    },
+    submit: (input) => {
+      const refused = submitRefusal(held.state)
+      if (refused === null) asked.submitted.push(input)
+      return refused
+    },
+  }
+  return { repl, asked }
 }
 
 // ---- finding things -----------------------------------------------------------------
