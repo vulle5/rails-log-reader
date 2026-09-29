@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 
 import { cn } from "../../../lib/cn"
 import type { ReplHandle } from "../hooks/repl-session"
+import { RubyCode } from "./RubyCode"
 
 const HINTS = "Enter to run · Shift+Enter for a new line"
 
@@ -12,10 +13,11 @@ const BUSY_HINTS = "Ctrl-C to interrupt"
 const REFUSAL_SHOWN_MS = 3_000
 
 /**
- * The *REPL*'s input: a textarea that runs what is typed on Enter and empties, and a hint row
- * under it. Enter on an input `check` says is incomplete, such as an open `do`, takes a new line
- * at the caret instead, and Shift+Enter always does. An Enter whose check answers after the
- * input has changed, or after a later Enter, does nothing.
+ * The *REPL*'s input: a textarea that runs what is typed on Enter and empties, drawn over its
+ * own text highlighted as Ruby, and a hint row under it. Enter on an input `check` says is
+ * incomplete, such as an open `do`, takes a new line at the caret instead, and Shift+Enter always
+ * does. An Enter whose check answers after the input has changed, or after a later Enter, does
+ * nothing.
  *
  * The row is always there at one height, holding the key hints, or for a moment why an input
  * was refused, with `actions` at its end. A refused input stays in the textarea. One the server
@@ -39,6 +41,7 @@ export function ReplPrompt({
   const typed = useRef(input)
   typed.current = input
   const box = useRef<HTMLTextAreaElement>(null)
+  const highlighted = useRef<HTMLPreElement>(null)
   const enters = useRef(0)
   // Where the caret goes once a new line Enter took is in the textarea.
   const caret = useRef<number | null>(null)
@@ -47,6 +50,11 @@ export function ReplPrompt({
     if (caret.current === null) return
     box.current?.setSelectionRange(caret.current, caret.current)
     caret.current = null
+  }, [input])
+
+  // A value that shrinks can clamp the textarea's scroll without a scroll event.
+  useLayoutEffect(() => {
+    if (highlighted.current !== null && box.current !== null) highlighted.current.scrollTop = box.current.scrollTop
   }, [input])
 
   useEffect(() => {
@@ -108,17 +116,37 @@ export function ReplPrompt({
 
   return (
     <div className="flex flex-none flex-col border-t border-border">
-      <textarea
-        className="h-14 w-full resize-none bg-transparent px-3 py-1.5 font-mono text-sm text-strong outline-none"
-        ref={box}
-        aria-label="Ruby"
-        spellCheck={false}
-        autoCapitalize="off"
-        autoComplete="off"
-        value={input}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={keyDown}
-      />
+      <div className="relative h-14">
+        {/* The input's highlighting, under a textarea whose own text is transparent. The two share
+            their box, font and wrapping, so each glyph drawn here sits under the one it colours.
+            The trailing space gives a final empty line a height, as the textarea gives it one, and
+            the stable gutter keeps the wrap width the same whether or not the textarea scrolls. */}
+        <pre
+          className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
+          ref={highlighted}
+          aria-hidden="true"
+        >
+          <RubyCode source={input} />{" "}
+        </pre>
+        <textarea
+          className={cn(
+            "absolute inset-0 resize-none overflow-y-auto bg-transparent px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap outline-none [scrollbar-gutter:stable]",
+            // The caret and a selection's text are the textarea's own; the rest of its text is drawn under it.
+            "text-transparent caret-strong selection:text-strong",
+          )}
+          ref={box}
+          aria-label="Ruby"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoComplete="off"
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={keyDown}
+          onScroll={(event) => {
+            if (highlighted.current !== null) highlighted.current.scrollTop = event.currentTarget.scrollTop
+          }}
+        />
+      </div>
       <div className="flex h-5 flex-none items-center gap-3 px-3">
         <p className={cn("min-w-0 flex-auto truncate text-xs", refused === null ? "text-faint" : "text-error")} role="status">
           {refused?.reason ?? (busy ? BUSY_HINTS : HINTS)}

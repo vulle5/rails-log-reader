@@ -2,14 +2,16 @@ import { useLayoutEffect, useRef, type ReactNode } from "react"
 
 import type { Outcome, TranscriptEntry } from "../../../../shared/repl"
 import { cn } from "../../../lib/cn"
+import { RubyCode } from "./RubyCode"
 
 /** How near its end the Transcript can be scrolled and still follow what arrives. */
 const FOLLOWING_SLACK = 24
 
 /**
- * The *REPL*'s *Transcript*: each evaluation's input, then what it printed, then its result or
- * its error, with what the console process printed outside any evaluation as entries of their
- * own. Scrolled to its end as entries arrive and grow, unless it was scrolled up away from it.
+ * The *REPL*'s *Transcript*: each evaluation's input highlighted as Ruby, then what it printed,
+ * then its result or its error, with what the console process printed outside any evaluation as
+ * entries of their own. Scrolled to its end as entries arrive and grow, unless it was scrolled up
+ * away from it.
  */
 export function Transcript({ entries }: { entries: readonly TranscriptEntry[] }) {
   const list = useRef<HTMLOListElement>(null)
@@ -38,7 +40,7 @@ export function Transcript({ entries }: { entries: readonly TranscriptEntry[] })
             <>
               <Text className="text-strong">
                 <Marker>{"› "}</Marker>
-                {entry.input}
+                <RubyCode source={entry.input} />
               </Text>
               <Printed output={entry.output} cut={entry.outputCut} />
               {entry.outcome !== null && <Answer outcome={entry.outcome} />}

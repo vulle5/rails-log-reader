@@ -249,6 +249,34 @@ describe("the REPL's prompt", () => {
   })
 })
 
+describe("the REPL's prompt's highlighting", () => {
+  test("highlights Ruby as it is typed", async () => {
+    const { user } = await openedOver({ state: READY })
+
+    await user.type(prompt(), "Post.find(42) # the answer")
+
+    expect(within(replDrawer()).getByText("Post")).toHaveAttribute("data-token", "constant")
+    expect(within(replDrawer()).getByText("find")).toHaveAttribute("data-token", "identifier")
+    expect(within(replDrawer()).getByText("42")).toHaveAttribute("data-token", "number")
+    expect(within(replDrawer()).getByText("# the answer")).toHaveAttribute("data-token", "comment")
+  })
+
+  test("follows an edit in the middle of the input, and leaves the input the textarea's", async () => {
+    const { user } = await openedOver({ state: READY })
+    await user.type(prompt(), "puts x")
+
+    await user.type(prompt(), ":sym, ", { initialSelectionStart: 5, initialSelectionEnd: 5 })
+
+    expect(prompt()).toHaveValue("puts :sym, x")
+    expect(within(replDrawer()).getByText(":sym")).toHaveAttribute("data-token", "symbol")
+
+    await user.type(prompt(), "{Backspace}", { initialSelectionStart: 5, initialSelectionEnd: 11 })
+
+    expect(prompt()).toHaveValue("puts x")
+    expect(within(replDrawer()).queryByText(":sym")).not.toBeInTheDocument()
+  })
+})
+
 describe("the REPL's prompt on Enter with the multi-line check", () => {
   test("runs a complete input", async () => {
     const { user, asked } = await openedOver({ state: READY, capabilities: ["check"] })
@@ -354,6 +382,16 @@ describe("the REPL's Transcript", () => {
     })
 
     expect(transcriptEntries()[0]).toHaveTextContent(/answer = 42\s*side effect\s*=> 42/)
+  })
+
+  test("highlights each evaluation's input", async () => {
+    await openedOver({ state: READY, transcript: [evaluation({ input: 'Post.where(title: "hi") # mine' })] })
+
+    const entry = within(transcriptEntries()[0]!)
+    expect(entry.getByText("Post")).toHaveAttribute("data-token", "constant")
+    expect(entry.getByText("title:")).toHaveAttribute("data-token", "symbol")
+    expect(entry.getByText('"hi"')).toHaveAttribute("data-token", "string")
+    expect(entry.getByText("# mine")).toHaveAttribute("data-token", "comment")
   })
 
   test("shows an evaluation that raised as its error's class and message", async () => {
