@@ -207,7 +207,8 @@ indistinguishable from a broken one.
 **Collapsed Console** — the *Console rail* folded down to a narrow vertical strip carrying its
 name and its *Unseen count*, so it takes no room while it isn't needed. Folded by its own
 collapse control, or by dragging its *Column divider* past its minimum; remembered across
-reloads. A window too narrow to keep it open without narrowing the *Detail column* folds it
+reloads. The strip reopens it at the width it had; its divider reopens it at its minimum, so a
+drag opens the edge under the pointer rather than throwing it across the Reader. A window too narrow to keep it open without narrowing the *Detail column* folds it
 too, but only for as long as the window stays that narrow: that fold is the window's, not the developer's, so it is
 never remembered and the Console reopens the moment there is room. Unfolded inside that fold,
 it opens at its minimum and the Reader scrolls sideways, until the window next has room.

@@ -20,9 +20,11 @@ import { cn } from "../lib/cn"
  * A divider whose column `folds` snaps it shut: a drag that takes it under half its minimum
  * folds it, and one taking the folded strip back out past that unfolds it. By keyboard, an
  * arrow press that would take it under its minimum stops it there, the next folds it, and
- * arrowing the folded strip outward unfolds it. Folding never touches the column's request, so it always reopens at
- * the last size it had at or above its minimum. A fold or an unfold mid-drag restarts the
- * drag from the size the column now has, so the pointer moves on from there.
+ * arrowing the folded strip outward unfolds it. Folding never touches the column's request, so
+ * the column's own button reopens it at the last size it had at or above its minimum. The
+ * divider unfolds it at its minimum instead, so the edge opens under the pointer: a drag goes on
+ * from the strip, holding the column at its minimum until the pointer passes it and following
+ * the pointer from there. A fold mid-drag restarts the drag from the strip.
  */
 
 const STEP = 16
@@ -103,7 +105,7 @@ export function ColumnDivider({ name, edge, size, column, folds, className }: Co
     else if (folded) {
       if (to < foldsBelow) return
       folds.unfold()
-      drag.current = { from: at, size }
+      column.resize(to)
     } else if (to < foldsBelow) {
       folds.fold()
       drag.current = { from: at, size: folds.foldedSize }
@@ -123,7 +125,10 @@ export function ColumnDivider({ name, edge, size, column, folds, className }: Co
 
       if (folds === undefined) column.resize(size + by)
       else if (folded) {
-        if (by > 0) folds.unfold()
+        if (by > 0) {
+          folds.unfold()
+          column.resize(column.min)
+        }
       } else if (size === column.min && by < 0) folds.fold()
       else column.resize(size + by)
     } else if (event.key === "Enter") {

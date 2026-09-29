@@ -177,7 +177,7 @@ describe("the REPL drawer's top edge", () => {
     expect(drawn()).toBe(728)
   })
 
-  test("folds the drawer when dragged under half its minimum, and opens it dragged back out", async () => {
+  test("folds the drawer when dragged under half its minimum, and opens it at its minimum dragged back out", async () => {
     const { user } = await openedTheReader()
     await drag(user, -60)
 
@@ -185,9 +185,42 @@ describe("the REPL drawer's top edge", () => {
     expect(replOpen()).toBe(false)
     expect(drawn()).toBe(32)
 
-    await drag(user, -100)
+    // From the 32px header to 92px: past half the minimum, short of the minimum itself.
+    await drag(user, -60)
     expect(replOpen()).toBe(true)
-    expect(drawn()).toBe(348)
+    expect(drawn()).toBe(120)
+  })
+
+  test("follows the pointer from the folded header once the drag is past the minimum", async () => {
+    const { user } = await openedTheReader()
+    await drag(user, -100)
+    await foldRepl(user)
+
+    // From the 32px header: 32 + 168.
+    await drag(user, -168)
+
+    expect(drawn()).toBe(200)
+  })
+
+  test("leaves the height the button reopens at alone until a drag opens it", async () => {
+    const { user } = await openedTheReader()
+    await drag(user, -100)
+    await drag(user, 400)
+
+    await openRepl(user)
+
+    expect(drawn()).toBe(388)
+  })
+
+  test("opens the drawer at its minimum by an arrow press", async () => {
+    const { user } = await openedTheReader()
+    await drag(user, -100)
+    await foldRepl(user)
+
+    await press(user, "{ArrowUp}")
+
+    expect(replOpen()).toBe(true)
+    expect(drawn()).toBe(120)
   })
 
   test("moves 16px an arrow press", async () => {
