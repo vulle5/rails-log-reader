@@ -10,7 +10,7 @@ import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/i
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
 import { EMPTY_SNAPSHOT, type ReplCommand, type ReplMessage } from "../src/shared/repl"
 import type { Envelope } from "../src/shared/wire"
-import { stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
+import { stubConsoleHeard, stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
 
 const SERVER = Bun.fileURLToPath(new URL("../src/server/index.ts", import.meta.url))
@@ -664,6 +664,39 @@ describe("the REPL socket", () => {
     expect(first.received.some((message) => message.type === "refused")).toBe(false)
     first.close()
     second.close()
+  })
+
+  test("restarts the console process, sandboxed when asked", async () => {
+    const { root, url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+    const from = repl.received.length
+
+    await repl.send({ type: "restart", sandbox: true })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready", from)
+
+    expect((await stubConsoleStarts(root)).at(-1)).toContain("--sandbox")
+    repl.close()
+  })
+
+  test("closes the console process's stdin and then sends it SIGTERM when the Reader is stopped by a signal", async () => {
+    for (const signal of ["SIGTERM", "SIGINT"] as const) {
+      const { root, url, origin } = await aReaderOverTheStubConsole()
+      const reader = started.at(-1)!
+      const repl = replSocket(url, origin)
+      await repl.send({ type: "boot" })
+      await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+      await repl.send({ type: "submit", input: "sleep 60000" })
+      await repl.next((message) => message.type === "state" && message.state.kind === "busy")
+
+      reader.kill(signal)
+      await reader.exited
+      const deadline = Date.now() + 2_000
+      while ((await stubConsoleHeard(root)).length < 2 && Date.now() < deadline) await Bun.sleep(50)
+
+      expect(await stubConsoleHeard(root)).toEqual(["stdin closed", "SIGTERM"])
+    }
   })
 
   test("refuses the upgrade with a bare 403 for a foreign, other-port, missing or null Origin", async () => {

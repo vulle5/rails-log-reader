@@ -9,6 +9,7 @@ import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
 import { replSession, type ReplSession } from "./repl-session"
 import { replSocket, type ReplSocket } from "./repl-socket"
+import { onShutdown } from "./shutdown"
 import { openSidecar, readEarlier, type Sidecar } from "./sidecar"
 
 const detectedRailsRoot = findRailsRoot(process.cwd())
@@ -215,7 +216,7 @@ function sharedReplSession() {
   if (globalThis.readerReplSession !== undefined) return globalThis.readerReplSession
 
   const session = replSession(railsRoot)
-  process.on("exit", () => session.close())
+  onShutdown(() => session.close())
   globalThis.readerReplSession = session
   return session
 }

@@ -14,7 +14,7 @@
 #        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ..."}
 #
 # Fds 1 and 2 are the console process's own, read by the Reader as plain text, so nothing the
-# Host app prints can corrupt a frame. The loop ends, and the process with it, when fd 3 closes.
+# Host app prints can corrupt a frame. The process ends when fd 3 closes, even mid-evaluation.
 
 require "json"
 require "pp"
@@ -62,15 +62,31 @@ module RailsLogReaderRepl
       define_reload
       @binding = TOPLEVEL_BINDING.eval("binding")
 
+      inbox = read_frames(input)
       send_frame("type" => "ready", "pid" => Process.pid, "capabilities" => [])
 
-      while (line = input.gets)
+      while (line = inbox.pop)
         frame = JSON.parse(line)
         evaluate(frame["id"], frame["input"]) if frame["type"] == "eval"
       end
     end
 
     private
+
+    # A queue of the lines fd 3 receives, read on a thread of its own so that fd 3 closing is
+    # heard while an evaluation runs. It ends the main thread then, wherever it is, the way
+    # `exit` would, so `at_exit` hooks still run. The queue itself never ends, so that raise is
+    # the only way out of the loop.
+    def read_frames(input)
+      inbox = Queue.new
+      Thread.new do
+        while (line = input.gets)
+          inbox << line
+        end
+        Thread.main.raise(SystemExit)
+      end
+      inbox
+    end
 
     # Detaches the stderr logger Active Record's `console` hook adds, so no query is echoed on
     # fd 2. Each query still reaches the Sidecar.
@@ -94,12 +110,17 @@ module RailsLogReaderRepl
 
     # Runs `source` the way a request runs, so the query cache is fresh and a reload is safe. The
     # result is inspected inside too, since inspecting a relation runs its query.
+    #
+    # `exit` and a signal such as SIGTERM end the process rather than the evaluation, except
+    # Ctrl-C's `Interrupt`, which is the evaluation's answer.
     def evaluate(id, source)
       text, cut = Rails.application.executor.wrap { inspected(@binding.eval(source, "(repl)", 1)) }
       send_frame("type" => "result", "id" => id, "text" => text, "cut" => cut)
     rescue SystemExit
       raise
     rescue Exception => error
+      raise if error.is_a?(SignalException) && !error.is_a?(Interrupt)
+
       send_frame("type" => "error", "id" => id, "class" => class_name(error), "message" => utf8(error.message))
     end
 

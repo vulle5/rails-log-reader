@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { rm } from "node:fs/promises"
+import { chmod, rm } from "node:fs/promises"
+import { join } from "node:path"
 
 import { REPL_LOOP, replSession, type ReplSession } from "../src/server/repl-session"
-import { applyReplUpdate, TRANSCRIPT_LIMIT, type ReplMessage, type ReplSnapshot } from "../src/shared/repl"
-import { stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
+import { applyReplUpdate, isReplUpdate, TRANSCRIPT_LIMIT, type ReplMessage, type ReplSnapshot, type ReplState } from "../src/shared/repl"
+import { stubConsoleFailsToBoot, stubConsoleHeard, stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
 
 /**
  * The server's *REPL* session, driven through its interface over the stub console in
@@ -37,7 +38,7 @@ function listen(session: ReplSession) {
   const attachment = session.attach((message) => {
     heard.push(message)
     if (message.type === "snapshot") snapshot = message.snapshot
-    else if (message.type !== "refused" && snapshot !== null) snapshot = applyReplUpdate(snapshot, message)
+    else if (isReplUpdate(message) && snapshot !== null) snapshot = applyReplUpdate(snapshot, message)
   })
 
   return {
@@ -62,8 +63,15 @@ function listen(session: ReplSession) {
 type Listening = ReturnType<typeof listen>
 
 const isReady = (snapshot: ReplSnapshot) => snapshot.state.kind === "ready"
+const isExited = (snapshot: ReplSnapshot) => snapshot.state.kind === "exited"
 const isEvaluated = (id: number) => (snapshot: ReplSnapshot) =>
   snapshot.state.kind === "ready" && snapshot.transcript.some((entry) => entry.id === id && entry.kind === "evaluation" && entry.outcome !== null)
+
+/** The pid of a console process that has said it is ready. */
+function pidOf(state: ReplState) {
+  if (state.kind !== "ready" && state.kind !== "busy") throw new Error(`the session is ${state.kind}, with no pid`)
+  return state.pid
+}
 
 async function booted(listening: Listening) {
   listening.boot()
@@ -127,7 +135,7 @@ describe("the REPL session", () => {
     if (busy.kind !== "busy") throw new Error(`submitted, but the session is ${busy.kind}`)
     const { transcript } = await listening.until(isEvaluated(busy.id))
 
-    expect(busy).toEqual({ kind: "busy", pid: (ready as { pid: number }).pid, id: expect.any(Number), since: expect.any(Number) })
+    expect(busy).toEqual({ kind: "busy", pid: pidOf(ready), id: expect.any(Number), since: expect.any(Number) })
     expect(busy.since).toBeGreaterThanOrEqual(before)
     expect(transcript.at(-1)).toEqual({
       kind: "evaluation",
@@ -226,18 +234,6 @@ describe("the REPL session", () => {
     expect(inputs.at(-1)).toBe("100")
   })
 
-  test("says the console process exited, and ends a running evaluation without an answer", async () => {
-    const { session } = await aSession()
-    const listening = listen(session)
-    await booted(listening)
-
-    listening.submit("exit 3")
-    const snapshot = await listening.until((snapshot) => snapshot.state.kind === "exited")
-
-    expect(snapshot.state).toEqual({ kind: "exited", code: 3 })
-    expect(snapshot.transcript.at(-1)).toMatchObject({ input: "exit 3", outcome: { kind: "lost" } })
-  })
-
   test("stops hearing about the session once detached", async () => {
     const { session } = await aSession()
     const listening = listen(session)
@@ -247,5 +243,152 @@ describe("the REPL session", () => {
     await Bun.sleep(200)
 
     expect(listening.heard.map((message) => message.type)).toEqual(["snapshot"])
+  })
+})
+
+describe("the REPL session's console process ending", () => {
+  test("says it exited, with its code and what it printed on stderr, and ends a running evaluation without an answer", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+    await evaluate(listening, "warn about to go")
+
+    listening.submit("exit 3")
+    const snapshot = await listening.until(isExited)
+
+    expect(snapshot.state).toEqual({ kind: "exited", code: 3, signal: null, stderr: "about to go\n" })
+    expect(snapshot.transcript.at(-1)).toMatchObject({ input: "exit 3", outcome: { kind: "lost" } })
+  })
+
+  test("says which signal ended it", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    listening.submit("signal SIGKILL")
+
+    expect((await listening.until(isExited)).state).toMatchObject({ kind: "exited", code: null, signal: "SIGKILL" })
+  })
+
+  test("says a failed boot exited, with what it printed on stderr, and never starts it again", async () => {
+    const { root, session } = await aSession()
+    await stubConsoleFailsToBoot(root, "config/application.rb:1: boom (RuntimeError)\n")
+    const listening = listen(session)
+
+    listening.boot()
+    const snapshot = await listening.until(isExited)
+    await Bun.sleep(300)
+    listen(session).boot()
+    await Bun.sleep(200)
+
+    expect(snapshot.state).toEqual({ kind: "exited", code: 1, signal: null, stderr: "config/application.rb:1: boom (RuntimeError)\n" })
+    expect(listening.snapshot.state.kind).toBe("exited")
+    expect(await stubConsoleStarts(root)).toHaveLength(1)
+  })
+
+  test("says a console process that could not be started exited, and why", async () => {
+    const { root, session } = await aSession()
+    await chmod(join(root, "bin", "rails"), 0o644)
+    const listening = listen(session)
+
+    listening.boot()
+
+    expect(listening.snapshot.state).toEqual({ kind: "exited", code: null, signal: null, stderr: expect.stringContaining("bin/rails") })
+  })
+
+  test("tells every listener it exited, with its pid", async () => {
+    const { session } = await aSession()
+    const first = listen(session)
+    const second = listen(session)
+    const pid = pidOf((await booted(first)).state)
+
+    first.submit("exit 3")
+    await first.until(isExited)
+
+    for (const listening of [first, second]) expect(listening.heard.filter((message) => message.type === "exit")).toEqual([{ type: "exit", pid }])
+  })
+
+  test("closes its stdin, then sends it SIGTERM, when the session closes", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    session.close()
+    await listening.until(isExited)
+
+    expect(await stubConsoleHeard(root)).toEqual(["stdin closed", "SIGTERM"])
+    expect(listening.snapshot.state).toMatchObject({ signal: "SIGTERM" })
+  })
+})
+
+describe("the REPL session's Restart", () => {
+  const isRestarted = (pid: number) => (snapshot: ReplSnapshot) => snapshot.state.kind === "ready" && snapshot.state.pid !== pid
+
+  test("starts a fresh console process and empties the Transcript", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    await evaluate(listening, "answer = 42")
+
+    listening.restart(false)
+    const snapshot = await listening.until(isRestarted(pid))
+
+    expect(await stubConsoleStarts(root)).toHaveLength(2)
+    expect(snapshot.transcript).toEqual([{ kind: "output", id: expect.any(Number), output: "Loading development environment (stub)\n", outputCut: false }])
+  })
+
+  test("stops the console process it replaces, which tells every listener it exited and changes nothing else", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    listening.submit("sleep 300")
+
+    listening.restart(false)
+    await listening.until(isRestarted(pid))
+    await Bun.sleep(400)
+
+    expect(listening.heard.filter((message) => message.type === "exit")).toEqual([{ type: "exit", pid }])
+    expect(await stubConsoleHeard(root)).toEqual(["stdin closed", "SIGTERM"])
+    expect(listening.snapshot.state.kind).toBe("ready")
+    expect(listening.snapshot.transcript.map((entry) => entry.kind)).toEqual(["output"])
+  })
+
+  test("starts a console process that had exited", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+    listening.submit("exit 3")
+    await listening.until(isExited)
+
+    listening.restart(false)
+
+    expect((await listening.until(isReady)).transcript.map((entry) => entry.kind)).toEqual(["output"])
+  })
+
+  test("starts it sandboxed when asked, and holds that choice until a Restart asks otherwise", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+
+    listening.restart(true)
+    const sandboxed = await listening.until(isRestarted(pid))
+    const late = listen(session)
+    listening.restart(false)
+    await listening.until((snapshot) => isReady(snapshot) && !snapshot.sandbox)
+
+    expect(listening.snapshot.sandbox).toBe(false)
+    expect(sandboxed.sandbox).toBe(true)
+    expect(late.heard[0]).toMatchObject({ type: "snapshot", snapshot: { sandbox: true } })
+    expect(await stubConsoleStarts(root)).toEqual([
+      ["console", "--", "-f", "-r", REPL_LOOP],
+      ["console", "--sandbox", "--", "-f", "-r", REPL_LOOP],
+      ["console", "--", "-f", "-r", REPL_LOOP],
+    ])
+  })
+
+  test("is not sandboxed before any Restart asks", async () => {
+    const { session } = await aSession()
+
+    expect(listen(session).snapshot.sandbox).toBe(false)
   })
 })

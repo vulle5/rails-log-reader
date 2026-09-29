@@ -93,7 +93,7 @@ export function openTheReaderOver(fold: Folded, props: ReaderProps = {}) {
  * of it. It refuses an input by the rule the real session keeps.
  */
 export function aReplSession(snapshot: Partial<ReplSnapshot> = {}, refusal: ReplHandle["refusal"] = null) {
-  const asked = { boots: 0, submitted: [] as string[] }
+  const asked = { boots: 0, submitted: [] as string[], restarts: [] as boolean[] }
   const held = { ...EMPTY_SNAPSHOT, ...snapshot }
   const repl: ReplHandle = {
     snapshot: held,
@@ -105,6 +105,9 @@ export function aReplSession(snapshot: Partial<ReplSnapshot> = {}, refusal: Repl
       const refused = submitRefusal(held.state)
       if (refused === null) asked.submitted.push(input)
       return refused
+    },
+    restart: (sandbox) => {
+      asked.restarts.push(sandbox)
     },
   }
   return { repl, asked }

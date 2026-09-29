@@ -1,7 +1,8 @@
 /**
  * The *REPL* session as the server holds it and every tab is shown it: the console process's
- * state, and the *Transcript*. The server sends a snapshot when a tab attaches, then updates,
- * and both sides fold an update with `applyReplUpdate`, so the Transcript they hold is the same.
+ * state, whether it is sandboxed, and the *Transcript*. The server sends a snapshot when a tab
+ * attaches, then updates, and both sides fold an update with `applyReplUpdate`, so the
+ * Transcript they hold is the same.
  */
 
 /** The most entries the Transcript holds. The oldest drop first. */
@@ -20,8 +21,14 @@ export type ReplState =
   | { kind: "ready"; pid: number }
   /** Running evaluation `id`, sent at `since`, in milliseconds since the epoch. */
   | { kind: "busy"; pid: number; id: number; since: number }
-  /** `code` is `null` when the process was never started or ended on a signal. */
-  | { kind: "exited"; code: number | null }
+  | ExitedState
+
+/**
+ * The console process ended, or never started. `code` is its exit code and `signal` the signal
+ * that ended it, and both are `null` when it never started. `stderr` is the latest of what it
+ * printed on fd 2, or why it could not start.
+ */
+export type ExitedState = { kind: "exited"; code: number | null; signal: string | null; stderr: string }
 
 export type Outcome =
   /** Its value's `pretty_inspect`, cut to 64 KB when `cut`. */
@@ -38,6 +45,8 @@ export type TranscriptEntry =
 
 export type ReplSnapshot = {
   state: ReplState
+  /** Whether the console process was started with `--sandbox`: the choice the latest Restart made. */
+  sandbox: boolean
   /** What the eval loop said it can do besides evaluate, when it was ready. */
   capabilities: readonly string[]
   transcript: readonly TranscriptEntry[]
@@ -49,14 +58,32 @@ export type ReplUpdate =
   | { type: "entry"; entry: TranscriptEntry }
   | { type: "output"; id: number; text: string }
   | { type: "finished"; id: number; outcome: Outcome }
+  /** A Restart: the Transcript is emptied, and the console process it starts is sandboxed when `sandbox`. */
+  | { type: "restarted"; sandbox: boolean }
 
-/** What the server sends a tab. A refusal goes only to the tab whose input was refused. */
-export type ReplMessage = { type: "snapshot"; snapshot: ReplSnapshot } | ReplUpdate | { type: "refused"; reason: string; input: string }
+/**
+ * What the server sends a tab. A refusal goes only to the tab whose input was refused. The
+ * exit notice goes to every tab, once for each console process that ends, including one a
+ * Restart replaced, and changes nothing the session holds.
+ */
+export type ReplMessage =
+  | { type: "snapshot"; snapshot: ReplSnapshot }
+  | ReplUpdate
+  | { type: "refused"; reason: string; input: string }
+  | { type: "exit"; pid: number }
 
-/** What a tab sends the server. `boot` starts the console process unless one has been started. */
-export type ReplCommand = { type: "boot" } | { type: "submit"; input: string }
+/**
+ * What a tab sends the server. `boot` starts the console process unless one has been started.
+ * `restart` stops the one running, if any, and starts a fresh one.
+ */
+export type ReplCommand = { type: "boot" } | { type: "submit"; input: string } | { type: "restart"; sandbox: boolean }
 
-export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, capabilities: [], transcript: [] }
+export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, sandbox: false, capabilities: [], transcript: [] }
+
+/** Whether `message` is an update `applyReplUpdate` folds, rather than a snapshot, a refusal or an exit notice. */
+export function isReplUpdate(message: ReplMessage): message is ReplUpdate {
+  return message.type !== "snapshot" && message.type !== "refused" && message.type !== "exit"
+}
 
 /** `snapshot` with `update` applied. Never changes `snapshot` itself. */
 export function applyReplUpdate(snapshot: ReplSnapshot, update: ReplUpdate): ReplSnapshot {
@@ -69,6 +96,8 @@ export function applyReplUpdate(snapshot: ReplSnapshot, update: ReplUpdate): Rep
       return replacing(snapshot, update.id, (entry) => printed(entry, update.text))
     case "finished":
       return replacing(snapshot, update.id, (entry) => (entry.kind === "evaluation" ? { ...entry, outcome: update.outcome } : entry))
+    case "restarted":
+      return { ...snapshot, sandbox: update.sandbox, transcript: [] }
   }
 }
 

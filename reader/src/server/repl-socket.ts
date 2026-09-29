@@ -27,6 +27,7 @@ export function replSocket(session: ReplSession) {
       if (attachment === undefined || command === null) return
 
       if (command.type === "boot") attachment.boot()
+      else if (command.type === "restart") attachment.restart(command.sandbox)
       else {
         const refusal = attachment.submit(command.input)
         if (refusal !== null) socket.send(JSON.stringify({ type: "refused", reason: refusal, input: command.input }))
@@ -46,6 +47,7 @@ function parsed(received: string | Buffer): ReplCommand | null {
     const command = JSON.parse(String(received)) as Partial<ReplCommand> | null
     if (command?.type === "boot") return { type: "boot" }
     if (command?.type === "submit" && typeof command.input === "string") return { type: "submit", input: command.input }
+    if (command?.type === "restart" && typeof command.sandbox === "boolean") return { type: "restart", sandbox: command.sandbox }
   } catch {
     // Not JSON, which no page of the Reader's sends.
   }

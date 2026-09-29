@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   applyReplUpdate,
   EMPTY_SNAPSHOT,
+  isReplUpdate,
   submitRefusal,
   type ReplCommand,
   type ReplMessage,
@@ -16,6 +17,8 @@ export type ReplHandle = {
   boot: () => void
   /** Sends `input` to run, or says why it will not: `null` when it was sent. */
   submit: (input: string) => string | null
+  /** Starts a fresh console process, sandboxed when `sandbox`, in place of the one there is. */
+  restart: (sandbox: boolean) => void
   /** The latest input the server refused from this tab, and why. A new object for each. */
   refusal: { reason: string; input: string } | null
 }
@@ -25,6 +28,7 @@ export const DETACHED_REPL: ReplHandle = {
   snapshot: EMPTY_SNAPSHOT,
   boot: () => {},
   submit: () => submitRefusal(EMPTY_SNAPSHOT.state),
+  restart: () => {},
   refusal: null,
 }
 
@@ -64,7 +68,7 @@ export function useReplSession(mayAct: boolean): ReplHandle {
         const message = JSON.parse(String(event.data)) as ReplMessage
         if (message.type === "snapshot") setSnapshot(message.snapshot)
         else if (message.type === "refused") setRefusal({ reason: message.reason, input: message.input })
-        else setSnapshot((held) => applyReplUpdate(held, message))
+        else if (isReplUpdate(message)) setSnapshot((held) => applyReplUpdate(held, message))
       }
       opened.onclose = () => {
         if (socket.current === opened) socket.current = null
@@ -96,7 +100,12 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     return null
   }
 
-  return { snapshot, boot, submit, refusal }
+  function restart(sandbox: boolean) {
+    const open = socket.current
+    if (open?.readyState === WebSocket.OPEN) send(open, { type: "restart", sandbox })
+  }
+
+  return { snapshot, boot, submit, restart, refusal }
 }
 
 function send(socket: WebSocket, command: ReplCommand) {

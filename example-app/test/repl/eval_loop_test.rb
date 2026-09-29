@@ -85,4 +85,59 @@ class EvalLoopTest < ActiveSupport::TestCase
       assert_equal "true", inspected_inside["text"]
     end
   end
+
+  test "answers an evaluation Ctrl-C interrupted as an error, and keeps going" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate("raise Interrupt")
+
+      assert_equal "Interrupt", answer["class"]
+      assert_equal "2", repl.evaluate("1 + 1")["text"]
+    end
+  end
+
+  test "ends on SIGTERM during an evaluation, answering nothing, and its Run gets its run_end" do
+    DevelopmentRun.console_process do |repl|
+      repl.submit("sleep 60")
+      sleep 0.5
+      repl.signal("TERM")
+
+      assert repl.exited_within(5), "the console process outlived SIGTERM"
+      assert_equal [], repl.remaining_frames
+      assert_equal "run_end", repl.sidecar_events.last["type"]
+    end
+  end
+
+  test "ends when fd 3 closes during an evaluation, and its Run gets its run_end" do
+    DevelopmentRun.console_process do |repl|
+      repl.submit("sleep 60")
+      sleep 0.5
+      repl.close_frames
+
+      assert repl.exited_within(2), "the console process outlived fd 3"
+      assert_equal "run_end", repl.sidecar_events.last["type"]
+    end
+  end
+
+  test "ends when fd 3 closes between evaluations" do
+    DevelopmentRun.console_process do |repl|
+      repl.close_frames
+
+      assert repl.exited_within(2), "the console process outlived fd 3"
+      assert_equal "run_end", repl.sidecar_events.last["type"]
+    end
+  end
+
+  test "keeps a sandboxed console process's writes across evaluations, and rolls them back when it ends" do
+    email = "sandbox-#{SecureRandom.hex(4)}@example.test"
+    written = %(Author.where(email: #{email.inspect}).count)
+
+    DevelopmentRun.console_process(sandbox: true) do |repl|
+      repl.evaluate(%(Author.create!(name: "Sandboxed", email: #{email.inspect})))
+
+      assert_equal "1", repl.evaluate(written)["text"]
+    end
+    DevelopmentRun.console_process do |repl|
+      assert_equal "0", repl.evaluate(written)["text"]
+    end
+  end
 end

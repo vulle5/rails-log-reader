@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs"
+import { appendFileSync, existsSync, readFileSync } from "node:fs"
 import { connect } from "node:net"
 
 /**
@@ -6,20 +6,44 @@ import { connect } from "node:net"
  * and never boots Rails. Installed as a Rails root's `bin/rails` by `stubConsoleRoot`.
  *
  * It notes each start in `log/stub-console.log`, as its arguments, then prints a boot line and
- * says it is ready. An input is a canned command:
+ * says it is ready. When `log/stub-console.fails` is there, it prints that file on fd 2 instead
+ * and exits 1, as a failed boot does. It notes its stdin closing and a SIGTERM in the same log,
+ * and dies of the SIGTERM. An input is a canned command:
  *
  * - `puts TEXT` prints TEXT on fd 1, `warn TEXT` on fd 2, and each answers `nil`.
  * - `raise CLASS: MESSAGE` answers with that error.
  * - `sleep MS` answers `1` after MS milliseconds.
  * - `later TEXT` answers `nil`, then prints TEXT on fd 1 after the answer.
  * - `exit CODE` exits with CODE without answering.
+ * - `signal NAME` sends itself signal NAME without answering.
  * - Anything else answers with itself as the result's text.
  */
 
 type Frame = { type: string; id: number; input: string }
 
-appendFileSync("log/stub-console.log", `${JSON.stringify(process.argv.slice(2))}\n`)
+const note = (entry: object) => appendFileSync("log/stub-console.log", `${JSON.stringify(entry)}\n`)
+
+note({ started: process.argv.slice(2) })
 process.stdout.write("Loading development environment (stub)\n")
+
+if (existsSync("log/stub-console.fails")) {
+  process.stderr.write(readFileSync("log/stub-console.fails"))
+  process.exit(1)
+}
+
+const stdinClosed = new Promise<void>((resolve) => {
+  process.stdin.on("end", () => {
+    note({ heard: "stdin closed" })
+    resolve()
+  })
+})
+process.stdin.resume()
+process.once("SIGTERM", async () => {
+  // A stdin closed just before the signal can be read after it.
+  await Promise.race([stdinClosed, Bun.sleep(100)])
+  note({ heard: "SIGTERM" })
+  process.kill(process.pid, "SIGTERM")
+})
 
 const channel = connect({ fd: 3 } as never)
 const send = (frame: object) => channel.write(`${JSON.stringify(frame)}\n`)
@@ -35,7 +59,8 @@ channel.on("data", (chunk: string) => {
   received = lines.pop() ?? ""
   for (const line of lines) void evaluate(JSON.parse(line) as Frame)
 })
-channel.on("end", () => process.exit(0))
+// A moment late, so a signal the Reader sent before it went away is heard first.
+channel.on("end", () => setTimeout(() => process.exit(0), 100))
 
 async function evaluate({ id, input }: Frame) {
   const [command = "", ...rest] = input.split(" ")
@@ -62,6 +87,9 @@ async function evaluate({ id, input }: Frame) {
       return
     case "exit":
       process.exit(Number(argument))
+    case "signal":
+      process.kill(process.pid, argument)
+      return
     default:
       return answer(id, input)
   }

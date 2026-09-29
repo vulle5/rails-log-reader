@@ -100,6 +100,7 @@ class DevelopmentRun
       @stderr = stderr
       @readers = @streams.keys.map { |io| Thread.new { io.each_line { |line| @streams[io] << line } } }
       @next_id = 0
+      @status = nil
     end
 
     # The `ready` frame the loop sends once it is running.
@@ -107,10 +108,16 @@ class DevelopmentRun
       @ready = next_frame
     end
 
-    # The frame that answers `input`: its result or its error.
-    def evaluate(input)
+    # Sends `input` to run and hands back its id, without waiting for the answer.
+    def submit(input)
       id = (@next_id += 1)
       @frames.write("#{JSON.generate(type: "eval", id:, input:)}\n")
+      id
+    end
+
+    # The frame that answers `input`: its result or its error.
+    def evaluate(input)
+      id = submit(input)
       frame = next_frame
       raise "expected an answer to #{id}, got #{frame.inspect}" unless frame["id"] == id
 
@@ -123,20 +130,53 @@ class DevelopmentRun
     # Everything on fd 2 so far, once it contains `expected`.
     def stderr_through(expected) = text_through(@stderr, expected)
 
+    # Sends the console process the signal `name`, such as "TERM".
+    def signal(name) = Process.kill(name, @pid)
+
+    # Closes fd 3 at this end, as a Reader that died would.
+    def close_frames
+      @frames.close unless @frames.closed?
+    end
+
+    # The frames sent after the last one read, once fd 3 has closed at the other end.
+    def remaining_frames
+      raise "fd 3 stayed open for #{TIMEOUT}s" unless @frames.wait_readable(TIMEOUT)
+
+      @frames.read.each_line.map { |line| JSON.parse(line) }
+    end
+
+    # The process's exit status once it has exited, or nil when it is still running after
+    # `seconds`.
+    def exited_within(seconds)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+      until (status = reaped)
+        return nil if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        sleep 0.05
+      end
+      status
+    end
+
+    # The events this root's Sidecar holds, in append order.
+    def sidecar_events
+      File.readlines(File.join(root, SIDECAR)).map { |line| JSON.parse(line) }
+    end
+
     # Closes fd 3, which ends the loop, and waits for the process to exit. One that has not
     # exited by the timeout is killed.
     def close
-      @frames.close unless @frames.closed?
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TIMEOUT
-      until (status = Process.wait2(@pid, Process::WNOHANG)&.last)
-        Process.kill("KILL", @pid) if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-        sleep 0.05
-      end
+      close_frames
+      Process.kill("KILL", @pid) unless (status = exited_within(TIMEOUT))
+      status ||= exited_within(TIMEOUT)
       @readers.each(&:join)
       status
     end
 
     private
+      def reaped
+        @status ||= Process.wait2(@pid, Process::WNOHANG)&.last
+      end
+
       def next_frame
         raise "the console process answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)
 
@@ -203,8 +243,9 @@ class DevelopmentRun
     end
 
     # `bin/rails console -- -f -r <the eval loop>` in a throwaway root, as the Reader starts it,
-    # handed to the block once the loop says it is ready and closed after it.
-    def console_process(initializer: true, marker: true)
+    # with `--sandbox` when `sandbox`, handed to the block once the loop says it is ready and
+    # closed after it.
+    def console_process(initializer: true, marker: true, sandbox: false)
       shared_root(initializer:, marker:) do |root|
         # Copied, not symlinked, for the reason `bin/` is left out of SYMLINKED.
         FileUtils.mkdir_p(File.join(root, "bin"))
@@ -214,8 +255,8 @@ class DevelopmentRun
         stdout, stdout_end = IO.pipe
         stderr, stderr_end = IO.pipe
         pid = Bundler.with_unbundled_env do
-          Process.spawn(base_env(root:, env: "development"), RbConfig.ruby, "bin/rails", "console", "--", "-f", "-r", REPL_LOOP,
-            chdir: root, in: File::NULL, out: stdout_end, err: stderr_end, 3 => theirs)
+          Process.spawn(base_env(root:, env: "development"), RbConfig.ruby, "bin/rails", "console", *("--sandbox" if sandbox),
+            "--", "-f", "-r", REPL_LOOP, chdir: root, in: File::NULL, out: stdout_end, err: stderr_end, 3 => theirs)
         end
         [theirs, stdout_end, stderr_end].each(&:close)
 

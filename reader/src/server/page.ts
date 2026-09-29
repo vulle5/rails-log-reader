@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import index from "../ui/index.html"
+import { onShutdown } from "./shutdown"
 
 type Development = Bun.Serve.Options<undefined>["development"]
 
@@ -106,16 +107,7 @@ function pageSocket(development: Development) {
 
   const directory = mkdtempSync(join(tmpdir(), "rails-log-reader-"))
   const socket = join(directory, "page.sock")
-  const remove = () => rmSync(directory, { recursive: true, force: true })
-  process.on("exit", remove)
-  // A signal ends the process without `exit` listeners, so it removes the socket itself and
-  // is raised again, to end the process as it would have.
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
-    process.once(signal, () => {
-      remove()
-      process.kill(process.pid, signal)
-    })
-  }
+  onShutdown(() => rmSync(directory, { recursive: true, force: true }))
 
   Bun.serve({ unix: socket, routes: { "/*": index }, development })
   globalThis.readerPageSocket = socket

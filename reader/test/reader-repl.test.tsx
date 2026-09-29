@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
-import type { ReplState, TranscriptEntry } from "../src/shared/repl"
+import type { ReplSnapshot, ReplState, TranscriptEntry } from "../src/shared/repl"
 import { Reader } from "../src/ui/Reader"
 import { aReplSession, openRepl, openTheReader, replDrawer, type ReaderProps } from "./reader.harness"
 
@@ -16,6 +16,7 @@ afterEach(() => {
 
 const PID = 48213
 const READY: ReplState = { kind: "ready", pid: PID }
+const EXITED: ReplState = { kind: "exited", code: 1, signal: null, stderr: "" }
 
 /** The Reader with its drawer open, over a session holding `snapshot`. */
 async function openedOver(...args: Parameters<typeof aReplSession>) {
@@ -31,6 +32,14 @@ function prompt() {
 
 function hintRow() {
   return within(replDrawer()).getByRole("status")
+}
+
+function sandboxToggle() {
+  return within(replDrawer()).getByRole("checkbox", { name: "Sandbox" })
+}
+
+function restartButton() {
+  return within(replDrawer()).getByRole("button", { name: "Restart" })
 }
 
 function transcriptEntries() {
@@ -54,7 +63,9 @@ describe("the REPL drawer's header", () => {
       [READY, `pid ${PID}`],
       [{ kind: "busy", pid: PID, id: 1, since: Date.now() - 42_000 }, `running 0:42 · pid ${PID}`],
       [{ kind: "busy", pid: PID, id: 1, since: Date.now() - 125_000 }, `running 2:05 · pid ${PID}`],
-      [{ kind: "exited", code: 1 }, "exited 1"],
+      [EXITED, "exited 1"],
+      [{ kind: "exited", code: null, signal: "SIGKILL", stderr: "" }, "exited SIGKILL"],
+      [{ kind: "exited", code: null, signal: null, stderr: "" }, "exited"],
     ]
 
     for (const [state, says] of states) {
@@ -69,6 +80,90 @@ describe("the REPL drawer's header", () => {
     openTheReader([], { repl: aReplSession({ state: READY }).repl })
 
     expect(within(replDrawer()).getByText(`pid ${PID}`)).toBeInTheDocument()
+  })
+
+  test("wears a sandbox tag whenever the running console process is sandboxed", () => {
+    const shows: [Partial<ReplSnapshot>, boolean][] = [
+      [{ state: { kind: "booting" }, sandbox: true }, true],
+      [{ state: READY, sandbox: true }, true],
+      [{ state: { kind: "busy", pid: PID, id: 1, since: Date.now() }, sandbox: true }, true],
+      [{ state: EXITED, sandbox: true }, false],
+      [{ state: READY, sandbox: false }, false],
+    ]
+
+    for (const [snapshot, tagged] of shows) {
+      const { unmount } = openTheReader([], { repl: aReplSession(snapshot).repl })
+
+      if (tagged) expect(within(replDrawer()).getByText("sandbox")).toBeInTheDocument()
+      else expect(within(replDrawer()).queryByText("sandbox")).not.toBeInTheDocument()
+      unmount()
+    }
+  })
+})
+
+describe("a REPL whose console process exited", () => {
+  test("shows its exit status and what it printed on stderr", async () => {
+    await openedOver({ state: { kind: "exited", code: 1, signal: null, stderr: "config/application.rb:1: boom (RuntimeError)\n" } })
+
+    expect(within(replDrawer()).getByText("The REPL exited with status 1.")).toBeInTheDocument()
+    expect(within(replDrawer()).getByText("config/application.rb:1: boom (RuntimeError)")).toBeInTheDocument()
+    expect(restartButton()).toBeInTheDocument()
+  })
+
+  test("says which signal ended it", async () => {
+    await openedOver({ state: { kind: "exited", code: null, signal: "SIGKILL", stderr: "" } })
+
+    expect(within(replDrawer()).getByText("The REPL was ended by SIGKILL.")).toBeInTheDocument()
+  })
+
+  test("says why one that could not be started never started", async () => {
+    await openedOver({ state: { kind: "exited", code: null, signal: null, stderr: "EACCES: permission denied, posix_spawn 'bin/rails'" } })
+
+    expect(within(replDrawer()).getByText("The REPL could not start.")).toBeInTheDocument()
+    expect(within(replDrawer()).getByText("EACCES: permission denied, posix_spawn 'bin/rails'")).toBeInTheDocument()
+  })
+
+  test("is started again by Restart", async () => {
+    const { user, asked } = await openedOver({ state: EXITED })
+
+    await user.click(restartButton())
+
+    expect(asked.restarts).toEqual([false])
+  })
+})
+
+describe("the REPL's Restart", () => {
+  test("asks for a fresh console process while one is running", async () => {
+    const { user, asked } = await openedOver({ state: READY })
+
+    await user.click(restartButton())
+
+    expect(asked.restarts).toEqual([false])
+  })
+
+  test("has its sandbox toggle off by default, and asks for a sandboxed console process once it is on", async () => {
+    const { user, asked } = await openedOver({ state: READY })
+    expect(sandboxToggle()).not.toBeChecked()
+
+    await user.click(sandboxToggle())
+    await user.click(restartButton())
+
+    expect(asked.restarts).toEqual([true])
+  })
+
+  test("leaves the running console process alone when the toggle changes", async () => {
+    const { user, asked } = await openedOver({ state: READY })
+
+    await user.click(sandboxToggle())
+
+    expect(asked.restarts).toEqual([])
+    expect(within(replDrawer()).queryByText("sandbox")).not.toBeInTheDocument()
+  })
+
+  test("starts its toggle at the session's choice", async () => {
+    await openedOver({ state: READY, sandbox: true })
+
+    expect(sandboxToggle()).toBeChecked()
   })
 })
 
@@ -198,7 +293,7 @@ describe("the REPL's Transcript", () => {
   })
 
   test("says when the console process ended before an evaluation answered", async () => {
-    await openedOver({ state: { kind: "exited", code: null }, transcript: [evaluation({ outcome: { kind: "lost" } })] })
+    await openedOver({ state: EXITED, transcript: [evaluation({ outcome: { kind: "lost" } })] })
 
     expect(transcriptEntries()[0]).toHaveTextContent("The REPL exited before it answered.")
   })

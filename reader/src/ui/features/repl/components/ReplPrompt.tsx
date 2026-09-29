@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 
 import { cn } from "../../../lib/cn"
 import type { ReplHandle } from "../hooks/repl-session"
@@ -11,10 +11,11 @@ const REFUSAL_SHOWN_MS = 3_000
 /**
  * The *REPL*'s input: a textarea that runs what is typed on Enter and empties, and a hint row
  * under it. The row is always there at one height, holding the key hints, or for a moment why
- * an input was refused. A refused input stays in the textarea. One the server refused after
- * the textarea emptied is put back, unless something new has been typed since.
+ * an input was refused, with `actions` at its end. A refused input stays in the textarea. One
+ * the server refused after the textarea emptied is put back, unless something new has been
+ * typed since.
  */
-export function ReplPrompt({ submit, refusal }: Pick<ReplHandle, "submit" | "refusal">) {
+export function ReplPrompt({ submit, refusal, actions }: Pick<ReplHandle, "submit" | "refusal"> & { actions?: ReactNode }) {
   const [input, setInput] = useState("")
   // An object, so a second refusal for the same reason shows for its own moment.
   const [refused, setRefused] = useState<{ reason: string } | null>(null)
@@ -57,9 +58,12 @@ export function ReplPrompt({ submit, refusal }: Pick<ReplHandle, "submit" | "ref
         onChange={(event) => setInput(event.target.value)}
         onKeyDown={keyDown}
       />
-      <p className={cn("h-5 flex-none truncate px-3 text-xs", refused === null ? "text-faint" : "text-error")} role="status">
-        {refused?.reason ?? HINTS}
-      </p>
+      <div className="flex h-5 flex-none items-center gap-3 px-3">
+        <p className={cn("min-w-0 flex-auto truncate text-xs", refused === null ? "text-faint" : "text-error")} role="status">
+          {refused?.reason ?? HINTS}
+        </p>
+        {actions}
+      </div>
     </div>
   )
 }
