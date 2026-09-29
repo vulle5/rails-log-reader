@@ -4,11 +4,53 @@ require "support/development_run"
 # The Reader's eval loop, run by a real `bin/rails console` the way the Reader runs it: frames
 # on fd 3, and whatever the evaluated code prints on fds 1 and 2.
 class EvalLoopTest < ActiveSupport::TestCase
-  test "says it is ready, with the console process's pid and no capabilities yet" do
+  test "says it is ready, with the console process's pid and the multi-line check among its capabilities" do
     DevelopmentRun.console_process do |repl|
       assert_equal "ready", repl.ready["type"]
       assert_operator repl.ready["pid"], :>, 0
+      assert_equal ["check"], repl.ready["capabilities"]
+    end
+  end
+
+  test "checks a complete input as complete, tied to its id" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal({ "type" => "checked", "id" => 1, "complete" => true }, repl.check("1 + 1"))
+      assert_equal true, repl.check("[1, 2].each do |x|\n  x\nend")["complete"]
+      assert_equal true, repl.check("1 +)")["complete"], "a syntax error no line could fix runs, to show its error"
+    end
+  end
+
+  test "checks an open block, a def with no end and an open string as incomplete" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal false, repl.check("[1, 2].each do |x|")["complete"]
+      assert_equal false, repl.check("def greet")["complete"]
+      assert_equal false, repl.check(%("open))["complete"]
+    end
+  end
+
+  test "checks with the locals evaluations have defined" do
+    DevelopmentRun.console_process do |repl|
+      # `a /b` is a division when `a` is a local, and an open regexp otherwise.
+      assert_equal false, repl.check("a /b")["complete"]
+      repl.evaluate("a = 4")
+
+      assert_equal true, repl.check("a /b")["complete"]
+    end
+  end
+
+  test "answers a check while an evaluation is running" do
+    DevelopmentRun.console_process do |repl|
+      running = repl.submit("sleep 1; 1")
+
+      assert_equal "checked", repl.check("1 + 1")["type"]
+      assert_equal running, repl.next_frame["id"]
+    end
+  end
+
+  test "has no multi-line check without IRB's lexer, and checks every input as complete" do
+    DevelopmentRun.console_process(script: "IRB.send(:remove_const, :RubyLex)") do |repl|
       assert_equal [], repl.ready["capabilities"]
+      assert_equal true, repl.check("[1, 2].each do |x|")["complete"]
     end
   end
 

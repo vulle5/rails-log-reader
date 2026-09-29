@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 
 import { cn } from "../../../lib/cn"
 import type { ReplHandle } from "../hooks/repl-session"
@@ -13,25 +13,41 @@ const REFUSAL_SHOWN_MS = 3_000
 
 /**
  * The *REPL*'s input: a textarea that runs what is typed on Enter and empties, and a hint row
- * under it. The row is always there at one height, holding the key hints, or for a moment why
- * an input was refused, with `actions` at its end. A refused input stays in the textarea. One
- * the server refused after the textarea emptied is put back, unless something new has been
- * typed since.
+ * under it. Enter on an input `check` says is incomplete, such as an open `do`, takes a new line
+ * at the caret instead, and Shift+Enter always does. An Enter whose check answers after the
+ * input has changed, or after a later Enter, does nothing.
+ *
+ * The row is always there at one height, holding the key hints, or for a moment why an input
+ * was refused, with `actions` at its end. A refused input stays in the textarea. One the server
+ * refused after the textarea emptied is put back, unless something new has been typed since.
  *
  * Ctrl-C does what it does in a terminal: with a selection it copies it, while `busy` it
  * interrupts the running evaluation, and otherwise it clears the textarea.
  */
 export function ReplPrompt({
   submit,
+  check,
   interrupt,
   refusal,
   busy,
   actions,
-}: Pick<ReplHandle, "submit" | "interrupt" | "refusal"> & { busy: boolean; actions?: ReactNode }) {
+}: Pick<ReplHandle, "submit" | "check" | "interrupt" | "refusal"> & { busy: boolean; actions?: ReactNode }) {
   const [input, setInput] = useState("")
   // An object, so a second refusal for the same reason shows for its own moment.
   const [refused, setRefused] = useState<{ reason: string } | null>(null)
   const seen = useRef(refusal)
+  const typed = useRef(input)
+  typed.current = input
+  const box = useRef<HTMLTextAreaElement>(null)
+  const enters = useRef(0)
+  // Where the caret goes once a new line Enter took is in the textarea.
+  const caret = useRef<number | null>(null)
+
+  useLayoutEffect(() => {
+    if (caret.current === null) return
+    box.current?.setSelectionRange(caret.current, caret.current)
+    caret.current = null
+  }, [input])
 
   useEffect(() => {
     if (refused === null) return
@@ -57,9 +73,24 @@ export function ReplPrompt({
     event.preventDefault()
     if (input.trim() === "") return
 
+    const { selectionStart, selectionEnd } = event.currentTarget
+    const enter = ++enters.current
+    void check(input).then((complete) => {
+      if (enter !== enters.current || typed.current !== input) return
+      if (complete) run()
+      else newLine(selectionStart, selectionEnd)
+    })
+  }
+
+  function run() {
     const reason = submit(input)
     if (reason === null) setInput("")
     else setRefused({ reason })
+  }
+
+  function newLine(start: number, end: number) {
+    caret.current = start + 1
+    setInput(`${input.slice(0, start)}\n${input.slice(end)}`)
   }
 
   // A selection is left to the browser's own copy as well, which the clipboard, missing outside
@@ -79,6 +110,7 @@ export function ReplPrompt({
     <div className="flex flex-none flex-col border-t border-border">
       <textarea
         className="h-14 w-full resize-none bg-transparent px-3 py-1.5 font-mono text-sm text-strong outline-none"
+        ref={box}
         aria-label="Ruby"
         spellCheck={false}
         autoCapitalize="off"

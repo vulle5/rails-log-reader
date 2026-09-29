@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { REPL_LOOP, replSession, type ReplSession } from "../src/server/repl-session"
 import { applyReplUpdate, isReplUpdate, TRANSCRIPT_LIMIT, type ReplMessage, type ReplSnapshot, type ReplState } from "../src/shared/repl"
-import { stubConsoleFailsToBoot, stubConsoleHeard, stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
+import { stubConsoleFailsToBoot, stubConsoleHeard, stubConsoleRoot, stubConsoleStarts, stubConsoleUncheckable } from "./repl.fixtures"
 
 /**
  * The server's *REPL* session, driven through its interface over the stub console in
@@ -174,7 +174,6 @@ describe("the REPL session", () => {
     expect(state).toEqual(ready)
   })
 
-
   test("sends no signal when interrupted with nothing running", async () => {
     const { root, session } = await aSession()
     const listening = listen(session)
@@ -185,7 +184,6 @@ describe("the REPL session", () => {
 
     expect(await stubConsoleHeard(root)).toEqual([])
   })
-
 
   test("runs one evaluation at a time, refusing a second with a reason and leaving the Transcript alone", async () => {
     const { session } = await aSession()
@@ -420,5 +418,55 @@ describe("the REPL session's Restart", () => {
     const { session } = await aSession()
 
     expect(listen(session).snapshot.sandbox).toBe(false)
+  })
+})
+
+describe("the REPL session's multi-line check", () => {
+  test("says the console process has it once it is ready", async () => {
+    const { session } = await aSession()
+
+    expect((await booted(listen(session))).capabilities).toEqual(["check"])
+  })
+
+  test("checks a complete input as complete, and one with an open block as incomplete", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    expect(await listening.check("1 + 1")).toBe(true)
+    expect(await listening.check("[1, 2].each do |x|")).toBe(false)
+    expect(await listening.check("[1, 2].each do |x|\n  x\nend")).toBe(true)
+  })
+
+  test("checks while an evaluation runs", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    listening.submit("sleep 500")
+
+    expect(await listening.check("def greet")).toBe(false)
+    expect(listening.snapshot.state.kind).toBe("busy")
+  })
+
+  test("checks every input as complete when the console process has no check", async () => {
+    const { root, session } = await aSession()
+    await stubConsoleUncheckable(root)
+    const listening = listen(session)
+
+    expect((await booted(listening)).capabilities).toEqual([])
+    expect(await listening.check("[1, 2].each do |x|")).toBe(true)
+  })
+
+  test("checks every input as complete before the console process is ready, and once it has exited", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+
+    expect(await listening.check("def greet")).toBe(true)
+    await booted(listening)
+    listening.submit("exit 0")
+    await listening.until(isExited)
+
+    expect(await listening.check("def greet")).toBe(true)
   })
 })

@@ -680,6 +680,22 @@ describe("the REPL socket", () => {
     repl.close()
   })
 
+  test("checks whether an input is complete, answering only the tab that asked", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    const other = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+
+    await repl.send({ type: "check", id: 7, text: "[1, 2].each do |x|" })
+    await repl.send({ type: "check", id: 8, text: "1 + 1" })
+
+    expect(await repl.next((message) => message.type === "checked" && message.id === 7)).toEqual({ type: "checked", id: 7, complete: false })
+    expect(await repl.next((message) => message.type === "checked" && message.id === 8)).toEqual({ type: "checked", id: 8, complete: true })
+    expect(other.received.some((message) => message.type === "checked")).toBe(false)
+    repl.close()
+    other.close()
+  })
 
   test("restarts the console process, sandboxed when asked", async () => {
     const { root, url, origin } = await aReaderOverTheStubConsole()

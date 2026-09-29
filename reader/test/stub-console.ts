@@ -1,6 +1,8 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs"
 import { connect } from "node:net"
 
+import { stubComplete } from "./repl.fixtures"
+
 /**
  * A stand-in for `bin/rails console` running the eval loop: it speaks the loop's fd 3 frames
  * and never boots Rails. Installed as a Rails root's `bin/rails` by `stubConsoleRoot`.
@@ -19,9 +21,12 @@ import { connect } from "node:net"
  * - `exit CODE` exits with CODE without answering.
  * - `signal NAME` sends itself signal NAME without answering.
  * - Anything else answers with itself as the result's text.
+ *
+ * It answers a check at once, even while an evaluation runs, by `stubComplete`. When
+ * `log/stub-console.uncheckable` is there, it says it has no multi-line check, and answers none.
  */
 
-type Frame = { type: string; id: number; input: string }
+type Frame = { type: "eval"; id: number; input: string } | { type: "check"; id: number; text: string }
 
 const note = (entry: object) => appendFileSync("log/stub-console.log", `${JSON.stringify(entry)}\n`)
 
@@ -58,7 +63,8 @@ const channel = connect({ fd: 3 } as never)
 const send = (frame: object) => channel.write(`${JSON.stringify(frame)}\n`)
 const answer = (id: number, text: string) => send({ type: "result", id, text, cut: false })
 
-send({ type: "ready", pid: process.pid, capabilities: [] })
+const checkable = !existsSync("log/stub-console.uncheckable")
+send({ type: "ready", pid: process.pid, capabilities: checkable ? ["check"] : [] })
 
 let received = ""
 channel.setEncoding("utf8")
@@ -66,12 +72,16 @@ channel.on("data", (chunk: string) => {
   received += chunk
   const lines = received.split("\n")
   received = lines.pop() ?? ""
-  for (const line of lines) void evaluate(JSON.parse(line) as Frame)
+  for (const line of lines) {
+    const frame = JSON.parse(line) as Frame
+    if (frame.type === "eval") void evaluate(frame)
+    else if (checkable) send({ type: "checked", id: frame.id, complete: stubComplete(frame.text) })
+  }
 })
 // A moment late, so a signal the Reader sent before it went away is heard first.
 channel.on("end", () => setTimeout(() => process.exit(0), 100))
 
-async function evaluate({ id, input }: Frame) {
+async function evaluate({ id, input }: { id: number; input: string }) {
   const [command = "", ...rest] = input.split(" ")
   const argument = rest.join(" ")
 

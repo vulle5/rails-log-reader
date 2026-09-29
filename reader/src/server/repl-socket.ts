@@ -7,7 +7,8 @@ export type ReplSocket = { kind: "repl"; attachment?: ReplAttachment }
 /**
  * `/repl`, one WebSocket per tab: each is an attachment to `session`, sent its snapshot and
  * then its updates as JSON, and each message it sends is a `ReplCommand`. A refusal is sent
- * back to the socket whose input was refused and to no other.
+ * back to the socket whose input was refused and to no other, and a check's answer to the socket
+ * that asked.
  *
  * The route is an act, and its upgrade passes the gate in the Reader's own handler before it
  * gets here: Bun would accept a foreign `Origin` on the upgrade by itself.
@@ -28,6 +29,9 @@ export function replSocket(session: ReplSession) {
 
       if (command.type === "boot") attachment.boot()
       else if (command.type === "interrupt") attachment.interrupt()
+      else if (command.type === "check") {
+        void attachment.check(command.text).then((complete) => socket.send(JSON.stringify({ type: "checked", id: command.id, complete })))
+      }
       else if (command.type === "restart") attachment.restart(command.sandbox)
       else {
         const refusal = attachment.submit(command.input)
@@ -48,6 +52,9 @@ function parsed(received: string | Buffer): ReplCommand | null {
     const command = JSON.parse(String(received)) as Partial<ReplCommand> | null
     if (command?.type === "boot") return { type: "boot" }
     if (command?.type === "submit" && typeof command.input === "string") return { type: "submit", input: command.input }
+    if (command?.type === "check" && typeof command.id === "number" && typeof command.text === "string") {
+      return { type: "check", id: command.id, text: command.text }
+    }
     if (command?.type === "interrupt") return { type: "interrupt" }
     if (command?.type === "restart" && typeof command.sandbox === "boolean") return { type: "restart", sandbox: command.sandbox }
   } catch {

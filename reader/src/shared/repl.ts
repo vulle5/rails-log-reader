@@ -62,32 +62,35 @@ export type ReplUpdate =
   | { type: "restarted"; sandbox: boolean }
 
 /**
- * What the server sends a tab. A refusal goes only to the tab whose input was refused. The
- * exit notice goes to every tab, once for each console process that ends, including one a
- * Restart replaced, and changes nothing the session holds.
+ * What the server sends a tab. A refusal goes only to the tab whose input was refused, and a
+ * check's answer only to the tab that asked, under the id it asked with. The exit notice goes
+ * to every tab, once for each console process that ends, including one a Restart replaced, and
+ * changes nothing the session holds.
  */
 export type ReplMessage =
   | { type: "snapshot"; snapshot: ReplSnapshot }
   | ReplUpdate
   | { type: "refused"; reason: string; input: string }
+  | { type: "checked"; id: number; complete: boolean }
   | { type: "exit"; pid: number }
 
 /**
  * What a tab sends the server. `boot` starts the console process unless one has been started.
- * `interrupt` interrupts the running evaluation, if any. `restart` stops the one running, if any,
- * and starts a fresh one.
+ * `check` asks whether `text` is a whole input or needs more lines. `interrupt` interrupts the
+ * running evaluation, if any. `restart` stops the one running, if any, and starts a fresh one.
  */
 export type ReplCommand =
   | { type: "boot" }
   | { type: "submit"; input: string }
+  | { type: "check"; id: number; text: string }
   | { type: "interrupt" }
   | { type: "restart"; sandbox: boolean }
 
 export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, sandbox: false, capabilities: [], transcript: [] }
 
-/** Whether `message` is an update `applyReplUpdate` folds, rather than a snapshot, a refusal or an exit notice. */
+/** Whether `message` is an update `applyReplUpdate` folds, rather than a snapshot, a refusal, a check's answer or an exit notice. */
 export function isReplUpdate(message: ReplMessage): message is ReplUpdate {
-  return message.type !== "snapshot" && message.type !== "refused" && message.type !== "exit"
+  return message.type !== "snapshot" && message.type !== "refused" && message.type !== "checked" && message.type !== "exit"
 }
 
 /** `snapshot` with `update` applied. Never changes `snapshot` itself. */

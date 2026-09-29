@@ -124,6 +124,26 @@ class DevelopmentRun
       frame
     end
 
+    # The frame that answers a check of whether `text` is a complete input.
+    def check(text)
+      id = (@next_id += 1)
+      @frames.write("#{JSON.generate(type: "check", id:, text:)}\n")
+      frame = next_frame
+      raise "expected a check of #{id}, got #{frame.inspect}" unless frame["id"] == id
+
+      frame
+    end
+
+    # The next frame the loop sends.
+    def next_frame
+      raise "the console process answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)
+
+      line = @frames.gets
+      raise "the console process closed fd 3:\n#{@streams.values.join}" if line.nil?
+
+      JSON.parse(line)
+    end
+
     # Everything on fd 1 so far, once it contains `expected`.
     def stdout_through(expected) = text_through(@stdout, expected)
 
@@ -175,15 +195,6 @@ class DevelopmentRun
     private
       def reaped
         @status ||= Process.wait2(@pid, Process::WNOHANG)&.last
-      end
-
-      def next_frame
-        raise "the console process answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)
-
-        line = @frames.gets
-        raise "the console process closed fd 3:\n#{@streams.values.join}" if line.nil?
-
-        JSON.parse(line)
       end
 
       def text_through(io, expected)
@@ -244,19 +255,25 @@ class DevelopmentRun
 
     # `bin/rails console -- -f -r <the eval loop>` in a throwaway root, as the Reader starts it,
     # with `--sandbox` when `sandbox`, handed to the block once the loop says it is ready and
-    # closed after it.
-    def console_process(initializer: true, marker: true, sandbox: false)
+    # closed after it. `script` is Ruby IRB loads just before the loop.
+    def console_process(initializer: true, marker: true, sandbox: false, script: nil)
       shared_root(initializer:, marker:) do |root|
         # Copied, not symlinked, for the reason `bin/` is left out of SYMLINKED.
         FileUtils.mkdir_p(File.join(root, "bin"))
         FileUtils.cp(File.join(EXAMPLE_APP, "bin/rails"), File.join(root, "bin/rails"))
+
+        prelude = []
+        if script
+          File.write(File.join(root, "prelude.rb"), script)
+          prelude = ["-r", File.join(root, "prelude.rb")]
+        end
 
         ours, theirs = UNIXSocket.pair
         stdout, stdout_end = IO.pipe
         stderr, stderr_end = IO.pipe
         pid = Bundler.with_unbundled_env do
           Process.spawn(base_env(root:, env: "development"), RbConfig.ruby, "bin/rails", "console", *("--sandbox" if sandbox),
-            "--", "-f", "-r", REPL_LOOP, chdir: root, in: File::NULL, out: stdout_end, err: stderr_end, 3 => theirs)
+            "--", "-f", *prelude, "-r", REPL_LOOP, chdir: root, in: File::NULL, out: stdout_end, err: stderr_end, 3 => theirs)
         end
         [theirs, stdout_end, stderr_end].each(&:close)
 

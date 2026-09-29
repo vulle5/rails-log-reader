@@ -9,6 +9,7 @@ import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
 import type { Envelope } from "../src/shared/wire"
 import type { ReplHandle } from "../src/ui/features/repl/hooks/repl-session"
 import { Reader } from "../src/ui/Reader"
+import { stubComplete } from "./repl.fixtures"
 
 /**
  * The Reader's UI tests, mounted through one seam: `Reader` over folds seeded from envelopes,
@@ -90,10 +91,11 @@ export function openTheReaderOver(fold: Folded, props: ReaderProps = {}) {
 
 /**
  * A *REPL* session for `Reader`'s `repl` prop, holding `snapshot` and remembering what was asked
- * of it. It refuses an input by the rule the real session keeps.
+ * of it. It refuses an input by the rule the real session keeps, and checks every input as
+ * complete unless its capabilities include "check", then by `stubComplete`.
  */
 export function aReplSession(snapshot: Partial<ReplSnapshot> = {}, refusal: ReplHandle["refusal"] = null) {
-  const asked = { boots: 0, submitted: [] as string[], interrupts: 0, restarts: [] as boolean[] }
+  const asked = { boots: 0, submitted: [] as string[], checked: [] as string[], interrupts: 0, restarts: [] as boolean[] }
   const held = { ...EMPTY_SNAPSHOT, ...snapshot }
   const repl: ReplHandle = {
     snapshot: held,
@@ -105,6 +107,10 @@ export function aReplSession(snapshot: Partial<ReplSnapshot> = {}, refusal: Repl
       const refused = submitRefusal(held.state)
       if (refused === null) asked.submitted.push(input)
       return refused
+    },
+    check: async (text) => {
+      asked.checked.push(text)
+      return !held.capabilities.includes("check") || stubComplete(text)
     },
     interrupt: () => {
       asked.interrupts++

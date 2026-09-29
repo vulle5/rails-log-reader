@@ -24,6 +24,11 @@ export type ReplAttachment = {
   boot: () => void
   /** Runs `input`, or says why it will not: `null` when it was sent. */
   submit: (input: string) => string | null
+  /**
+   * Whether `text` is a whole input, rather than one that needs more lines, such as an open
+   * `do`. Always true when the console process has no multi-line check, or is not running.
+   */
+  check: (text: string) => Promise<boolean>
   /** Interrupts the running evaluation, as Ctrl-C does, which ends it as raising `Interrupt`. Nothing when none is running. */
   interrupt: () => void
   /**
@@ -46,6 +51,7 @@ type Frame =
   | { type: "ready"; pid: number; capabilities: string[] }
   | { type: "result"; id: number; text: string; cut: boolean }
   | { type: "error"; id: number; class: string; message: string }
+  | { type: "checked"; id: number; complete: boolean }
 
 /** How long a stopped console process has to end on SIGTERM before it is sent SIGKILL. */
 const STOP_GRACE_MS = 5_000
@@ -64,6 +70,8 @@ type ConsoleProcess = {
   stderr: string
   /** The SIGKILL that follows a SIGTERM it has not yet ended on. */
   forced?: ReturnType<typeof setTimeout>
+  /** Its unanswered checks, by id, each resolved with whether the text is complete. */
+  checks: Map<number, (complete: boolean) => void>
 }
 
 /**
@@ -89,6 +97,7 @@ export function replSession(railsRoot: string): ReplSession {
   const listeners = new Set<ReplListener>()
   let running: ConsoleProcess | null = null
   let nextId = 1
+  let nextCheck = 1
 
   function send(message: ReplMessage) {
     for (const listener of listeners) listener(message)
@@ -130,7 +139,7 @@ export function replSession(railsRoot: string): ReplSession {
     }
 
     const frames = connect({ fd: child.stdio[3] } as never)
-    const started: ConsoleProcess = { child, frames, stderr: "" }
+    const started: ConsoleProcess = { child, frames, stderr: "", checks: new Map() }
     running = started
 
     frames.setEncoding("utf8")
@@ -139,7 +148,8 @@ export function replSession(railsRoot: string): ReplSession {
     })
     readLines(frames, (line) => {
       const frame = parsedFrame(line)
-      if (frame !== null) setTimeout(() => running === started && answered(frame))
+      if (frame?.type === "checked") started.checks.get(frame.id)?.(frame.complete)
+      else if (frame !== null) setTimeout(() => running === started && answered(frame))
     })
     const printed = Promise.all([readText(child.stdout, (text) => printedBy(started, text)), readText(child.stderr, (text) => warnedBy(started, text))])
     void child.exited.then(async () => {
@@ -156,7 +166,7 @@ export function replSession(railsRoot: string): ReplSession {
     stopping.forced.unref()
   }
 
-  function answered(frame: Frame) {
+  function answered(frame: Exclude<Frame, { type: "checked" }>) {
     const state = snapshot.state
 
     if (frame.type === "ready") {
@@ -176,6 +186,7 @@ export function replSession(railsRoot: string): ReplSession {
   function exited(ended: ConsoleProcess) {
     clearTimeout(ended.forced)
     ended.frames.destroy()
+    for (const resolve of ended.checks.values()) resolve(true)
 
     if (running === ended) {
       running = null
@@ -225,6 +236,23 @@ export function replSession(railsRoot: string): ReplSession {
     return null
   }
 
+  function check(text: string) {
+    const checking = running
+    const state = snapshot.state
+    if (checking === null || (state.kind !== "ready" && state.kind !== "busy") || !snapshot.capabilities.includes("check")) {
+      return Promise.resolve(true)
+    }
+
+    const id = nextCheck++
+    return new Promise<boolean>((resolve) => {
+      checking.checks.set(id, (complete) => {
+        checking.checks.delete(id)
+        resolve(complete)
+      })
+      checking.frames.write(`${JSON.stringify({ type: "check", id, text })}\n`)
+    })
+  }
+
   function interrupt() {
     if (snapshot.state.kind === "busy") running?.child.kill("SIGINT")
   }
@@ -233,7 +261,7 @@ export function replSession(railsRoot: string): ReplSession {
     attach(listener) {
       listeners.add(listener)
       listener({ type: "snapshot", snapshot })
-      return { boot, submit, interrupt, restart, detach: () => listeners.delete(listener) }
+      return { boot, submit, check, interrupt, restart, detach: () => listeners.delete(listener) }
     },
     close() {
       if (running !== null) stop(running)

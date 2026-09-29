@@ -17,6 +17,11 @@ export type ReplHandle = {
   boot: () => void
   /** Sends `input` to run, or says why it will not: `null` when it was sent. */
   submit: (input: string) => string | null
+  /**
+   * Whether `text` is a whole input, rather than one that needs more lines. True when the
+   * console process has no multi-line check, or the page is not connected.
+   */
+  check: (text: string) => Promise<boolean>
   /** Interrupts the running evaluation, as Ctrl-C does. */
   interrupt: () => void
   /** Starts a fresh console process, sandboxed when `sandbox`, in place of the one there is. */
@@ -30,6 +35,7 @@ export const DETACHED_REPL: ReplHandle = {
   snapshot: EMPTY_SNAPSHOT,
   boot: () => {},
   submit: () => submitRefusal(EMPTY_SNAPSHOT.state),
+  check: async () => true,
   interrupt: () => {},
   restart: () => {},
   refusal: null,
@@ -52,6 +58,9 @@ export function useReplSession(mayAct: boolean): ReplHandle {
   const [refusal, setRefusal] = useState<ReplHandle["refusal"]>(null)
   const socket = useRef<WebSocket | null>(null)
   const booting = useRef(false)
+  // The checks this tab has asked and not yet been answered, by id.
+  const checks = useRef(new Map<number, (complete: boolean) => void>())
+  const nextCheck = useRef(1)
 
   useEffect(() => {
     if (!mayAct) return
@@ -71,10 +80,12 @@ export function useReplSession(mayAct: boolean): ReplHandle {
         const message = JSON.parse(String(event.data)) as ReplMessage
         if (message.type === "snapshot") setSnapshot(message.snapshot)
         else if (message.type === "refused") setRefusal({ reason: message.reason, input: message.input })
+        else if (message.type === "checked") answered(message.id, message.complete)
         else if (isReplUpdate(message)) setSnapshot((held) => applyReplUpdate(held, message))
       }
       opened.onclose = () => {
         if (socket.current === opened) socket.current = null
+        for (const id of checks.current.keys()) answered(id, true)
         if (!stopped) reconnect = setTimeout(open, RECONNECT_MS)
       }
     }
@@ -103,6 +114,22 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     return null
   }
 
+  function answered(id: number, complete: boolean) {
+    checks.current.get(id)?.(complete)
+    checks.current.delete(id)
+  }
+
+  function check(text: string) {
+    const open = socket.current
+    if (open?.readyState !== WebSocket.OPEN) return Promise.resolve(true)
+
+    const id = nextCheck.current++
+    return new Promise<boolean>((resolve) => {
+      checks.current.set(id, resolve)
+      send(open, { type: "check", id, text })
+    })
+  }
+
   function interrupt() {
     const open = socket.current
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "interrupt" })
@@ -113,7 +140,7 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "restart", sandbox })
   }
 
-  return { snapshot, boot, submit, interrupt, restart, refusal }
+  return { snapshot, boot, submit, check, interrupt, restart, refusal }
 }
 
 function send(socket: WebSocket, command: ReplCommand) {

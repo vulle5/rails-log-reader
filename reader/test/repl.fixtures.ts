@@ -26,6 +26,20 @@ export async function stubConsoleFailsToBoot(root: string, stderr: string) {
   await writeFile(join(root, "log", "stub-console.fails"), stderr)
 }
 
+/**
+ * The stand-ins' multi-line check, the stub console's and the Reader harness's: a text is
+ * incomplete while it opens more `do`s and `def`s than it `end`s.
+ */
+export function stubComplete(text: string) {
+  const count = (word: RegExp) => text.match(word)?.length ?? 0
+  return count(/\b(do|def)\b/g) <= count(/\bend\b/g)
+}
+
+/** Makes every start of the stub console in `root` say it has no multi-line check. */
+export async function stubConsoleUncheckable(root: string) {
+  await writeFile(join(root, "log", "stub-console.uncheckable"), "")
+}
+
 type Noted = { started: string[] } | { heard: string }
 
 async function stubConsoleLog(root: string): Promise<Noted[]> {

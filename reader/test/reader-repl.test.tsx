@@ -201,6 +201,15 @@ describe("the REPL's prompt", () => {
     expect(asked.submitted).toEqual(["[1,\n2]"])
   })
 
+  test("takes a new line on Shift+Enter even when what is typed is complete", async () => {
+    const { user, asked } = await openedOver({ state: READY, capabilities: ["check"] })
+
+    await user.type(prompt(), "1 + 1{Shift>}{Enter}{/Shift}")
+
+    expect(asked.submitted).toEqual([])
+    expect(prompt()).toHaveValue("1 + 1\n")
+  })
+
   test("runs nothing when nothing is typed", async () => {
     const { user, asked } = await openedOver({ state: READY })
 
@@ -237,6 +246,62 @@ describe("the REPL's prompt", () => {
 
     expect(await within(hintRow()).findByText("Already running. Wait for it to finish.")).toBeInTheDocument()
     expect(prompt()).toHaveValue("2 + 2")
+  })
+})
+
+describe("the REPL's prompt on Enter with the multi-line check", () => {
+  test("runs a complete input", async () => {
+    const { user, asked } = await openedOver({ state: READY, capabilities: ["check"] })
+
+    await user.type(prompt(), "1 + 1{Enter}")
+
+    expect(asked.submitted).toEqual(["1 + 1"])
+    expect(asked.checked).toEqual(["1 + 1"])
+  })
+
+  test("takes a new line on an incomplete input without running, and runs it once it is complete", async () => {
+    const { user, asked } = await openedOver({ state: READY, capabilities: ["check"] })
+
+    await user.type(prompt(), "[[1, 2].each do |x|{Enter}")
+
+    expect(asked.submitted).toEqual([])
+    expect(prompt()).toHaveValue("[1, 2].each do |x|\n")
+
+    await user.type(prompt(), "  x{Enter}end{Enter}")
+
+    expect(asked.submitted).toEqual(["[1, 2].each do |x|\n  x\nend"])
+  })
+
+  test("takes the new line at the caret, and leaves the caret after it", async () => {
+    const { user } = await openedOver({ state: READY, capabilities: ["check"] })
+    await user.type(prompt(), "posts.each do |post| post.save")
+
+    await user.type(prompt(), "{Enter}", { initialSelectionStart: 20, initialSelectionEnd: 21 })
+    await user.keyboard("  ")
+
+    expect(prompt()).toHaveValue("posts.each do |post|\n  post.save")
+  })
+
+  test("takes a new line on an incomplete input while an evaluation runs, and refuses a complete one", async () => {
+    const { user, asked } = await openedOver({ state: { kind: "busy", pid: PID, id: 1, since: Date.now() }, capabilities: ["check"] })
+
+    await user.type(prompt(), "def greet{Enter}")
+
+    expect(prompt()).toHaveValue("def greet\n")
+
+    await user.type(prompt(), "end{Enter}")
+
+    expect(asked.submitted).toEqual([])
+    expect(hintRow()).toHaveTextContent("Already running. Wait for it to finish.")
+    expect(prompt()).toHaveValue("def greet\nend")
+  })
+
+  test("always runs when the console process has no multi-line check", async () => {
+    const { user, asked } = await openedOver({ state: READY, capabilities: [] })
+
+    await user.type(prompt(), "[[1, 2].each do |x|{Enter}")
+
+    expect(asked.submitted).toEqual(["[1, 2].each do |x|"])
   })
 })
 
@@ -308,7 +373,6 @@ describe("the REPL's Transcript", () => {
 
     expect(within(transcriptEntries()[0]!).getByText("Interrupt")).toBeInTheDocument()
   })
-
 
   test("shows what the console process printed outside any evaluation as an entry of its own", async () => {
     await openedOver({

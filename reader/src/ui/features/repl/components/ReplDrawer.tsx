@@ -86,6 +86,7 @@ export function ReplDrawer({
               {repl.snapshot.state.kind === "exited" && <ExitNotice state={repl.snapshot.state} />}
               <ReplPrompt
                 submit={repl.submit}
+                check={repl.check}
                 interrupt={repl.interrupt}
                 refusal={repl.refusal}
                 busy={repl.snapshot.state.kind === "busy"}

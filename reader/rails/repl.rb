@@ -9,9 +9,15 @@
 # Frames travel on fd 3 as one JSON object per line, each tied to the id the Reader gave it:
 #
 #   in:  {"type":"eval","id":1,"input":"1 + 1"}
-#   out: {"type":"ready","pid":48213,"capabilities":[]}
+#        {"type":"check","id":2,"text":"[1, 2].each do |x|"}
+#   out: {"type":"ready","pid":48213,"capabilities":["check"]}
 #        {"type":"result","id":1,"text":"2","cut":false}
 #        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ..."}
+#        {"type":"checked","id":2,"complete":false}
+#
+# `check` asks whether a text is a whole input or needs more lines, and is answered even while
+# an evaluation runs. It uses IRB's lexer, and `ready` lists "check" among its capabilities
+# only when that lexer is one the loop knows how to call. Without it, every text is complete.
 #
 # Fds 1 and 2 are the console process's own, read by the Reader as plain text, so nothing the
 # Host app prints can corrupt a frame. The process ends when fd 3 closes, even mid-evaluation.
@@ -49,6 +55,8 @@ module RailsLogReaderRepl
       input = IO.new(3, "r", autoclose: false)
       @frames = IO.new(3, "w", autoclose: false)
       @frames.sync = true
+      # Both threads send frames.
+      @sending = Mutex.new
       # A command the Host app's code runs does not inherit fd 3.
       input.close_on_exec = true
       # Flushed as well: while anything the boot printed is still buffered, a synced IO keeps
@@ -63,30 +71,56 @@ module RailsLogReaderRepl
       trap_interrupt
       @binding = TOPLEVEL_BINDING.eval("binding")
 
+      @lexer = lexer
       inbox = read_frames(input)
-      send_frame("type" => "ready", "pid" => Process.pid, "capabilities" => [])
+      send_frame("type" => "ready", "pid" => Process.pid, "capabilities" => @lexer ? ["check"] : [])
 
-      while (line = inbox.pop)
-        frame = JSON.parse(line)
+      while (frame = inbox.pop)
         evaluate(frame["id"], frame["input"]) if frame["type"] == "eval"
       end
     end
 
     private
 
-    # A queue of the lines fd 3 receives, read on a thread of its own so that fd 3 closing is
+    # A queue of the frames fd 3 receives, read on a thread of its own so that fd 3 closing is
     # heard while an evaluation runs. It ends the main thread then, wherever it is, the way
     # `exit` would, so `at_exit` hooks still run. The queue itself never ends, so that raise is
-    # the only way out of the loop.
+    # the only way out of the loop. A check is answered on this thread and never queued.
     def read_frames(input)
       inbox = Queue.new
       Thread.new do
         while (line = input.gets)
-          inbox << line
+          frame = JSON.parse(line)
+          if frame["type"] == "check"
+            send_frame("type" => "checked", "id" => frame["id"], "complete" => complete?(frame["text"]))
+          else
+            inbox << frame
+          end
         end
+      ensure
         Thread.main.raise(SystemExit)
       end
       inbox
+    end
+
+    # IRB's lexer, when it is the one whose `check_code_state` takes the locals by keyword.
+    def lexer
+      return unless defined?(IRB::RubyLex)
+      return unless IRB::RubyLex.instance_method(:initialize).arity.zero?
+      return unless IRB::RubyLex.instance_method(:check_code_state).parameters.include?([:keyreq, :local_variables])
+
+      IRB::RubyLex.new
+    end
+
+    # Whether `text` is a whole input: nothing left open, and no syntax error another line could
+    # fix. A text the lexer cannot read is complete, so running it shows what is wrong.
+    def complete?(text)
+      return true unless @lexer
+
+      _, _, terminated = @lexer.check_code_state(text.to_s, local_variables: @binding.local_variables)
+      terminated
+    rescue StandardError
+      true
     end
 
     # Detaches the stderr logger Active Record's `console` hook adds, so no query is echoed on
@@ -160,7 +194,8 @@ module RailsLogReaderRepl
     end
 
     def send_frame(frame)
-      @frames.write("#{JSON.generate(frame)}\n")
+      line = "#{JSON.generate(frame)}\n"
+      @sending.synchronize { @frames.write(line) }
     end
   end
 end
