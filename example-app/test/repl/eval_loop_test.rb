@@ -146,6 +146,179 @@ class EvalLoopTest < ActiveSupport::TestCase
     end
   end
 
+  test "lays a Set out as items reached by no step" do
+    DevelopmentRun.console_process do |repl|
+      tree = repl.evaluate("Set[1, :a]")["tree"]
+
+      assert_equal "set", tree["type"]
+      assert_equal "Set", tree["class"]
+      assert_equal [{ "type" => "integer", "inspect" => "1" }, { "type" => "symbol", "inspect" => ":a" }], tree["items"]
+    end
+  end
+
+  test "lays a Struct out as its members, each reached by its [] step" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate("Point = Struct.new(:x, :y)")
+      tree = repl.evaluate("Point.new(1, [2])")["tree"]
+
+      assert_equal "struct", tree["type"]
+      assert_equal "Point", tree["class"]
+      assert_equal "#<struct Point x=1, y=[2]>", tree["inspect"]
+      (x_name, x), (y_name, y) = tree["fields"]
+      assert_equal ["x", { "type" => "integer", "inspect" => "1", "step" => "[:x]" }], [x_name, x]
+      assert_equal "y", y_name
+      assert_equal "array", y["type"]
+      assert_equal "[:y]", y["step"]
+    end
+  end
+
+  test "lays a Data out as its members, reached by no step, where Ruby has Data" do
+    DevelopmentRun.console_process do |repl|
+      skip "this Ruby has no Data" unless repl.evaluate("defined?(Data.define) ? 1 : 0")["text"] == "1"
+
+      repl.evaluate("Coord = Data.define(:lat, :lng)")
+      tree = repl.evaluate("Coord.new(lat: 1, lng: 2)")["tree"]
+
+      assert_equal "data", tree["type"]
+      assert_equal "Coord", tree["class"]
+      assert_equal [["lat", { "type" => "integer", "inspect" => "1" }], ["lng", { "type" => "integer", "inspect" => "2" }]], tree["fields"]
+    end
+  end
+
+  test "lays a record out as its attributes, each reached by its [] step, labelled with its class" do
+    DevelopmentRun.console_process do |repl|
+      tree = repl.evaluate(%(Comment.new(body: "Hi")))["tree"]
+
+      assert_equal "record", tree["type"]
+      assert_equal "Comment", tree["class"]
+      assert_equal %w[id author_id body created_at post_id updated_at].sort, tree["fields"].map(&:first).sort
+      _, body = tree["fields"].assoc("body")
+      assert_equal({ "type" => "string", "inspect" => %("Hi"), "step" => "[:body]" }, body)
+    end
+  end
+
+  test "marks a record's filtered attribute as filtered, as the app's filter_attributes say" do
+    DevelopmentRun.console_process do |repl|
+      tree = repl.evaluate(%(Author.new(name: "Ada", email: "ada@example.test")))["tree"]
+
+      _, email = tree["fields"].assoc("email")
+      assert_equal({ "type" => "filtered", "inspect" => "[FILTERED]", "step" => "[:email]" }, email)
+      _, name = tree["fields"].assoc("name")
+      assert_equal %("Ada"), name["inspect"]
+    end
+  end
+
+  test "lays a Relation out as its first ten records, with more when there are more" do
+    DevelopmentRun.console_process do |repl|
+      tree = repl.evaluate("Post.all")["tree"]
+      few = repl.evaluate("Post.limit(2)")["tree"]
+
+      assert_equal "relation", tree["type"]
+      assert_equal "ActiveRecord::Relation", tree["class"]
+      assert_equal 10, tree["items"].size
+      assert_equal %w[record], tree["items"].map { |item| item["type"] }.uniq
+      assert_equal "[9]", tree["items"].last["step"]
+      assert tree.key?("more"), "a Relation of more than ten records says it has more"
+      assert_nil tree["more"], "without counting how many"
+      assert_equal 2, few["items"].size
+      assert_equal false, few.key?("more")
+    end
+  end
+
+  test "shows a Relation, as a tree and as text, with one query" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(<<~RUBY)
+        $queries = []
+        ActiveSupport::Notifications.subscribe("sql.active_record") { |*, payload| $queries << payload[:sql] if payload[:sql].include?('FROM "posts"') }
+      RUBY
+      answer = repl.evaluate("$queries.clear; Post.all")
+      queries = repl.evaluate("$queries.dup")["tree"]["items"].map { |query| query["inspect"] }
+
+      assert_equal 1, queries.size, queries.inspect
+      assert_match(/LIMIT/, queries.first)
+      assert_match(/\A\[#<Post:.*"\.\.\."\]\z/m, answer["text"])
+      assert_match(/\A#<ActiveRecord::Relation \[#<Post id: /, answer["tree"]["inspect"])
+    end
+  end
+
+  test "shows a Relation inside another value with one query" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(<<~RUBY)
+        $queries = []
+        ActiveSupport::Notifications.subscribe("sql.active_record") { |*, payload| $queries << payload[:sql] if payload[:sql].include?('FROM "posts"') }
+      RUBY
+      answer = repl.evaluate("$queries.clear; {posts: Post.all}")
+      count = repl.evaluate("$queries.size")["text"]
+
+      assert_equal "1", count
+      assert_equal "relation", answer["tree"]["pairs"][0][1]["type"]
+    end
+  end
+
+  test "lays an object with Ruby's own inspect out as its ivars, reached by no step" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(%(class Money; def initialize(cents, currency) = (@cents, @currency = cents, currency); end))
+      tree = repl.evaluate(%(Money.new(100, "EUR")))["tree"]
+
+      assert_equal "object", tree["type"]
+      assert_equal "Money", tree["class"]
+      assert_equal [["@cents", { "type" => "integer", "inspect" => "100" }], ["@currency", { "type" => "string", "inspect" => %("EUR") }]], tree["fields"]
+    end
+  end
+
+  test "leaves an object with its own inspect as a leaf of that text" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(%(class Tagged; def initialize = @tag = 1; def inspect = "tagged"; end))
+      tree = repl.evaluate("Tagged.new")["tree"]
+
+      assert_equal({ "type" => "object", "inspect" => "tagged" }, tree)
+    end
+  end
+
+  test "marks a value that contains itself as a cycle, and repeats a shared one that does not" do
+    DevelopmentRun.console_process do |repl|
+      cyclic = repl.evaluate("h = {a: 1}; h[:self] = h; h")["tree"]
+      shared = repl.evaluate("s = [1]; [s, s]")["tree"]
+
+      assert_equal({ "type" => "cycle", "inspect" => "{...}", "step" => "[:self]" }, cyclic["pairs"][1][1])
+      assert_equal [[{ "type" => "integer", "inspect" => "1", "step" => "[0]" }]] * 2, shared["items"].map { |item| item["items"] }
+    end
+  end
+
+  test "marks an object that reaches itself through an ivar as a cycle" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(%(class Node; def initialize = @parent = self; end))
+      tree = repl.evaluate("Node.new")["tree"]
+
+      assert_equal [["@parent", { "type" => "cycle", "inspect" => "#<Node ...>" }]], tree["fields"]
+    end
+  end
+
+  test "answers a BasicObject as a result, labelled with its class" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate("[BasicObject.new]")
+
+      assert_equal "result", answer["type"]
+      assert_equal({ "type" => "object", "inspect" => "#<BasicObject>", "step" => "[0]" }, answer["tree"]["items"][0])
+    end
+  end
+
+  test "answers a Relation whose query raises as a result, not laid out, noting what its inspect raised, with one query" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(<<~RUBY)
+        $queries = []
+        ActiveSupport::Notifications.subscribe("sql.active_record") { |*, payload| $queries << payload[:sql] if payload[:sql].include?('FROM "posts"') }
+      RUBY
+      answer = repl.evaluate(%($queries.clear; Post.where("nope =")))
+      count = repl.evaluate("$queries.size")["text"]
+
+      assert_equal "result", answer["type"]
+      assert_equal({ "type" => "relation", "inspect" => "#<ActiveRecord::Relation>" }, answer["tree"])
+      assert_match(/\AActiveRecord::StatementInvalid: /, answer["inspect_error"])
+      assert_equal "1", count
+    end
+  end
+
   test "wraps a result at 80 columns and cuts it at 64 KB" do
     DevelopmentRun.console_process do |repl|
       wrapped = repl.evaluate("Array.new(30) { |i| i * 1000 }")

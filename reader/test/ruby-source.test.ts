@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 import type { RubyNode } from "../src/shared/repl"
 import { rubySource } from "../src/ui/features/repl/lib/ruby-source"
 import type { ValueNode } from "../src/ui/features/value-viewer/lib/value-tree"
-import { RUBY_HASH as HASH } from "./repl.fixtures"
+import { RUBY_HASH as HASH, RUBY_RECORD } from "./repl.fixtures"
 
 function sourceOf(tree: RubyNode) {
   const source = rubySource(tree)
@@ -87,6 +87,91 @@ describe("a REPL result as a value tree", () => {
 
     expect(source.pathText([{ key: '"b"', in: "hash" }, { key: "2", in: "list" }])).toBe('["b"][2]')
     expect(source.pathText([{ key: "a", in: "hash" }])).toBe("[:a]")
+  })
+
+  test("lays a record out under its attribute names, labelled with its class and counting attributes", () => {
+    const { tree } = sourceOf(RUBY_RECORD)
+
+    expect(tree).toMatchObject({ type: "container", kind: "hash", label: "Author", nouns: ["attribute", "attributes"] })
+    expect(tree.type === "container" && tree.children.map((each) => [each.key, each.keyType])).toEqual([
+      ["id", undefined],
+      ["name", undefined],
+      ["email", undefined],
+    ])
+  })
+
+  test("draws a record's filtered attribute as the filtered marker", () => {
+    expect(child(sourceOf(RUBY_RECORD).tree, "email")).toEqual({ type: "filtered" })
+  })
+
+  test("labels a Relation with its class, counting records, and says it has more without saying how many", () => {
+    const { tree } = sourceOf({
+      type: "relation",
+      class: "ActiveRecord::Relation",
+      inspect: "#<ActiveRecord::Relation [...]>",
+      items: [RUBY_RECORD],
+      more: null,
+    })
+
+    expect(tree).toMatchObject({ kind: "list", label: "#<ActiveRecord::Relation>", nouns: ["record", "records"], cut: { more: null } })
+    expect(child(tree, "0")).toMatchObject({ label: "Author" })
+  })
+
+  test("labels a Set, a Struct, a Data and a plain object each as Ruby writes its class", () => {
+    const member = { type: "integer", inspect: "1" } as const
+
+    expect(sourceOf({ type: "set", class: "Set", inspect: "#<Set: {1}>", items: [member] }).tree).toMatchObject({
+      kind: "list",
+      label: "#<Set>",
+    })
+    expect(sourceOf({ type: "struct", class: "Point", inspect: "#<struct Point x=1>", fields: [["x", member]] }).tree).toMatchObject({
+      kind: "hash",
+      label: "#<struct Point>",
+      nouns: ["member", "members"],
+    })
+    expect(sourceOf({ type: "data", class: "Coord", inspect: "#<data Coord x=1>", fields: [["x", member]] }).tree).toMatchObject({
+      label: "#<data Coord>",
+      nouns: ["member", "members"],
+    })
+    expect(sourceOf({ type: "object", class: "Money", inspect: "#<Money:0x0 @cents=1>", fields: [["@cents", member]] }).tree).toMatchObject({
+      label: "#<Money>",
+      nouns: ["ivar", "ivars"],
+    })
+  })
+
+  test("labels a value of an anonymous class without a name", () => {
+    const member = { type: "integer", inspect: "1" } as const
+
+    expect(sourceOf({ type: "struct", inspect: "#<struct x=1>", fields: [["x", member]] }).tree).toMatchObject({ label: "#<struct>" })
+    expect(sourceOf({ type: "object", inspect: "#<#<Class:0x0> @a=1>", fields: [["@a", member]] }).tree).toMatchObject({
+      label: "#<anonymous>",
+    })
+  })
+
+  test("draws a cycle as the text Ruby gives the repeat", () => {
+    const { tree } = sourceOf({
+      type: "hash",
+      inspect: "{self: {...}}",
+      pairs: [[{ type: "symbol", inspect: ":self" }, { type: "cycle", inspect: "{...}", step: "[:self]" }]],
+    })
+
+    expect(child(tree, "self")).toEqual({ type: "cycle", text: "{...}" })
+  })
+
+  test("has no path for a node reached through a Set member or an ivar", () => {
+    const source = sourceOf({
+      type: "object",
+      class: "Money",
+      inspect: "#<Money>",
+      fields: [["@parts", { type: "array", inspect: "[1]", items: [{ type: "integer", inspect: "1", step: "[0]" }] }]],
+    })
+
+    expect(source.pathText([{ key: "@parts", in: "hash" }])).toBeNull()
+    expect(source.pathText([{ key: "@parts", in: "hash" }, { key: "0", in: "list" }])).toBeNull()
+  })
+
+  test("copies a record attribute's path as its step", () => {
+    expect(sourceOf(RUBY_RECORD).pathText([{ key: "name", in: "hash" }])).toBe("[:name]")
   })
 
   test("has no structure for a scalar, or an empty container", () => {

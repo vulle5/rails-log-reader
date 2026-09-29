@@ -17,10 +17,17 @@
 #
 # A result's `tree` is its value laid out, and `inspect_error` says what an `inspect` raised while
 # it was built, when one did. A node carries its own `inspect` text, `cut` when that was cut, and
-# its type class: `hash` and `array`, which are laid out, or a leaf's, such as `symbol`, `float`
-# or `time`. Under the whole value, each node carries the `[…]` step that reaches it from its
-# container. A Hash's `pairs` are `[key, value]`, the key a leaf that is never laid out. An
-# Array's are `items`. A container cut short carries how many it left out as `more`:
+# its type class: one that is laid out, or a leaf's, such as `symbol`, `float` or `time`. Under
+# the whole value, each node carries the `[…]` step that reaches it from its container, when one
+# does: a Set's member, a Data's member and an ivar have none. A Hash's entries are `pairs` of
+# `[key, value]`, the key a leaf that is never laid out. An Array's, a Set's and a Relation's are
+# `items`, a Relation's being the ten records its `inspect` shows. A record's attributes, a
+# Struct's or a Data's members and an `object`'s ivars are `fields` of `[name, value]`. An
+# `object` is laid out only when Ruby's own `inspect` writes it, and is a leaf of its own
+# `inspect` otherwise. Each of these but a Hash and an Array carries its class's `class` name. A
+# record's filtered attribute is a `filtered` leaf, and a value met again inside itself a
+# `cycle` leaf. A container cut short carries how many it left out as `more`, which is null for a
+# Relation with more records than it shows:
 #
 #   {"type":"hash","inspect":"{a: [1, 2]}","pairs":[
 #     [{"type":"symbol","inspect":":a"},
@@ -52,6 +59,26 @@ module RailsLogReaderRepl
   # The width `pretty_inspect` wraps a result at.
   WIDTH = 80
 
+  # The most records of a Relation laid out. It loads one more, to tell whether it has more.
+  RELATION_LIMIT = 10
+
+  # Where each type class that is laid out keeps its entries.
+  ENTRIES = {
+    "hash" => "pairs", "array" => "items", "set" => "items", "relation" => "items",
+    "struct" => "fields", "data" => "fields", "record" => "fields", "object" => "fields"
+  }.freeze
+
+  # A record's filtered attribute, laid out in place of its value.
+  FILTERED = Object.new.freeze
+
+  # `Data`, on a Ruby that has it.
+  DATA = (::Data if defined?(::Data) && ::Data.respond_to?(:define))
+
+  # Kernel's own, bound to a value, so a value whose class redefines them is still read.
+  METHOD = Kernel.instance_method(:method)
+  IVARS = Kernel.instance_method(:instance_variables)
+  IVAR = Kernel.instance_method(:instance_variable_get)
+
   # A buffer for `PP` that stops it once it holds more than `limit` bytes.
   class Bounded
     attr_reader :text
@@ -68,7 +95,40 @@ module RailsLogReaderRepl
     end
   end
 
+  # Prepended to a Relation, which loads its records afresh each time it is inspected or
+  # pretty-printed. While a result is built, one that is not loaded stands in a loaded copy
+  # instead, which loads what `inspect` shows once for the node, its records and the text,
+  # wherever the Relation sits in the result.
+  module LoadedOnce
+    def inspect
+      shown = RailsLogReaderRepl.shown(self)
+      shown ? shown.inspect : super
+    end
+
+    def pretty_print(printer)
+      shown = RailsLogReaderRepl.shown(self)
+      shown ? shown.pretty_print(printer) : super
+    end
+  end
+
   class << self
+    # The loaded copy that stands in for `relation` while a result is built, or nil when none
+    # is being built or `relation` is loaded itself. A load that raised raises again, without
+    # trying the query again.
+    def shown(relation)
+      return if @shown.nil? || relation.loaded?
+
+      shown = @shown[relation] ||=
+        begin
+          relation.annotate("loading for inspect").limit([relation.limit_value, RELATION_LIMIT + 1].compact.min).load
+        rescue *INSPECT_FAILURES => error
+          error
+        end
+      raise shown if shown.is_a?(Exception)
+
+      shown
+    end
+
     def run
       # Two IOs on the one socket: a single read-write IO drops what it has read ahead
       # whenever it writes.
@@ -87,6 +147,7 @@ module RailsLogReaderRepl
       end
 
       quiet_query_echo
+      ::ActiveRecord::Relation.prepend(LoadedOnce) if defined?(::ActiveRecord::Relation)
       define_reload
       trap_interrupt
       @binding = TOPLEVEL_BINDING.eval("binding")
@@ -193,14 +254,18 @@ module RailsLogReaderRepl
     end
 
     # A result frame's fields for `value`. An `inspect` that raises, the value's own or one
-    # inside it, leaves its node's label in place of its text, and the first one is noted.
+    # inside it, leaves its node's label in place of its text, and the first one is noted. A
+    # Relation is loaded once for all of it: see `LoadedOnce`.
     def result(value)
       @inspect_error = nil
+      @shown = {}.compare_by_identity
       tree = tree(value)
       text, cut = pretty(value) { tree["inspect"] }
       frame = { "text" => text, "cut" => cut, "tree" => tree }
       frame["inspect_error"] = @inspect_error if @inspect_error
       frame
+    ensure
+      @shown = nil
     end
 
     # `value`'s `pretty_inspect`, or what `fallback` gives when it raises.
@@ -218,55 +283,132 @@ module RailsLogReaderRepl
       [yield, false]
     end
 
-    # `value` laid out breadth-first, until `NODE_LIMIT` nodes have been spent. A key is part of
-    # its pair's node, not one of its own.
+    # `value` laid out breadth-first, until `NODE_LIMIT` nodes have been spent. A key or a name
+    # is part of its entry's node, not one of its own. A value inside itself is a cycle, which
+    # is not laid out again. One reached twice, but not from inside itself, is laid out twice.
     def tree(value)
       root = node(value)
       budget = NODE_LIMIT - 1
       queue = []
-      queue << [value, root] if laid_out?(root)
+      queue << [value, root, [value]] if laid_out?(value, root["type"])
       until queue.empty?
-        container, parent = queue.shift
-        children = parent[parent["type"] == "hash" ? "pairs" : "items"] = []
-        each_entry(container) do |item, step, key|
+        container, parent, ancestors = queue.shift
+        children = parent[ENTRIES.fetch(parent["type"])] = []
+        each_entry(container, parent["type"]) do |item, step, key|
           break if budget.zero?
 
           budget -= 1
-          child = node(item).merge("step" => step)
+          child = ancestors.any? { |each| each.equal?(item) } ? cycle(item) : node(item)
+          child["step"] = step if step
           children << (key ? [key, child] : child)
-          queue << [item, child] if laid_out?(child)
+          queue << [item, child, ancestors + [item]] if laid_out?(item, child["type"])
         end
-        parent["more"] = container.size - children.size if children.size < container.size
+        size = size(container, parent["type"])
+        parent["more"] = size && size - children.size if size.nil? || children.size < size
       end
       root
     end
 
-    # Yields each item of a Hash or an Array with the `[…]` step that reaches it, and a Hash
-    # item's key node. A key cut at `INSPECT_LIMIT` gives a step cut with it.
-    def each_entry(container)
-      if container.is_a?(Hash)
-        container.each_pair do |key, item|
+    # Yields each entry of a laid-out `value` of type class `type`: its value, the `[…]` step
+    # that reaches it, when there is one, and its key. A Hash's key is its key's node, cut at
+    # `INSPECT_LIMIT` with the step. A record's attribute, a member and an ivar are keyed by
+    # name.
+    def each_entry(value, type)
+      case type
+      when "hash"
+        value.each_pair do |key, item|
           key_node = node(key)
           yield item, "[#{key_node['inspect']}]", key_node
         end
-      else
-        container.each_with_index { |item, index| yield item, "[#{index}]", nil }
+      when "array" then value.each_with_index { |item, index| yield item, "[#{index}]", nil }
+      when "relation" then records(value).first(RELATION_LIMIT).each_with_index { |item, index| yield item, "[#{index}]", nil }
+      when "set" then value.each { |item| yield item, nil, nil }
+      when "struct" then value.each_pair { |name, item| yield item, "[#{name.inspect}]", name.to_s }
+      when "data" then value.to_h.each { |name, item| yield item, nil, name.to_s }
+      when "record"
+        # An attribute is filtered when the filter changes even an empty value.
+        filter = ActiveSupport::ParameterFilter.new(value.class.filter_attributes)
+        value.attribute_names.each do |name|
+          item = filter.filter_param(name, "") == "" ? value[name] : FILTERED
+          yield item, "[#{name.to_sym.inspect}]", name
+        end
+      when "object" then ivars(value).each { |name| yield IVAR.bind(value).call(name), nil, name.to_s }
       end
     end
 
-    def laid_out?(node)
-      node["type"] == "hash" || node["type"] == "array"
+    # How many entries a laid-out `value` of type class `type` has, or nil for a Relation with
+    # more than `RELATION_LIMIT` records, which is never counted.
+    def size(value, type)
+      case type
+      when "relation" then records(value).size > RELATION_LIMIT ? nil : records(value).size
+      when "data" then value.class.members.size
+      when "record" then value.attribute_names.size
+      when "object" then ivars(value).size
+      else value.size
+      end
     end
 
+    # The records a Relation's `inspect` shows, one more than `RELATION_LIMIT` at most.
+    def records(relation)
+      (shown(relation) || relation).records.take([relation.limit_value, RELATION_LIMIT + 1].compact.min)
+    end
+
+    def ivars(value)
+      IVARS.bind(value).call
+    end
+
+    # Whether `value`, of type class `type`, is laid out: a container, a record, a Relation
+    # whose records load, or an object Ruby's own `inspect` writes, which shows its ivars.
+    def laid_out?(value, type)
+      case type
+      when "object" then METHOD.bind(value).call(:inspect).owner == Kernel
+      when "relation" then loads?(value)
+      else ENTRIES.key?(type)
+      end
+    rescue TypeError, NameError
+      false
+    end
+
+    def loads?(relation)
+      records(relation)
+      true
+    rescue *INSPECT_FAILURES => error
+      noted(error)
+      false
+    end
+
+    # A node of `value`. One laid out, beyond a Hash or an Array, carries its class's name,
+    # when its class has one.
     def node(value)
+      return { "type" => "filtered", "inspect" => ActiveSupport::ParameterFilter::FILTERED } if FILTERED.equal?(value)
+
       text, cut = inspect_text(value)
-      node = { "type" => type_class(value), "inspect" => text }
+      type = type_class(value)
+      node = { "type" => type, "inspect" => text }
       node["cut"] = true if cut
+      if type != "hash" && type != "array" && laid_out?(value, type)
+        name = class_of(value).name
+        node["class"] = name if name
+      end
       node
     end
 
-    # What kind of value `value` is, told by `===` alone, which a BasicObject answers too.
+    # A value met again inside itself, which is Ruby's own `inspect` of it there.
+    def cycle(value)
+      text =
+        case value
+        when Hash then "{...}"
+        when Array then "[...]"
+        else "#{label(value).chomp('>')} ...>"
+        end
+      { "type" => "cycle", "inspect" => text }
+    end
+
+    # What kind of value `value` is, told by `===`. A BasicObject, which lacks the `is_a?`
+    # Active Support's `Time.===` asks, is an object.
     def type_class(value)
+      return "object" unless Kernel === value
+
       case value
       when nil then "nil"
       when true, false then "boolean"
@@ -279,9 +421,14 @@ module RailsLogReaderRepl
       when Hash then "hash"
       when Array then "array"
       when Time then "time"
+      when Struct then "struct"
       else
         if defined?(::Date) && ::Date === value then "time"
         elsif defined?(::BigDecimal) && ::BigDecimal === value then "decimal"
+        elsif defined?(::Set) && ::Set === value then "set"
+        elsif DATA && DATA === value then "data"
+        elsif defined?(::ActiveRecord::Base) && ::ActiveRecord::Base === value then "record"
+        elsif defined?(::ActiveRecord::Relation) && ::ActiveRecord::Relation === value then "relation"
         else "object"
         end
       end
@@ -299,15 +446,17 @@ module RailsLogReaderRepl
       [label(value), false]
     end
 
-    # `#<Post>`: the value's class, which a BasicObject, with no `class` of its own, answers too.
+    # `#<Post>`: the value's class.
     def label(value)
-      klass =
-        begin
-          Kernel.instance_method(:class).bind(value).call
-        rescue TypeError
-          (class << value; self; end).superclass
-        end
+      klass = class_of(value)
       "#<#{klass.name || klass.inspect}>"
+    end
+
+    # The value's class, which a BasicObject, with no `class` of its own, answers too.
+    def class_of(value)
+      Kernel.instance_method(:class).bind(value).call
+    rescue TypeError
+      (class << value; self; end).superclass
     end
 
     def noted(error)

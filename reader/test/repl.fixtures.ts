@@ -83,3 +83,15 @@ export const RUBY_HASH: RubyNode = {
     ],
   ],
 }
+
+/** `Author.new(id: 1, name: "Ada", email: "ada@example.test")` as the eval loop lays it out, its email filtered. */
+export const RUBY_RECORD: RubyNode = {
+  type: "record",
+  class: "Author",
+  inspect: '#<Author id: 1, name: "Ada", email: [FILTERED]>',
+  fields: [
+    ["id", { type: "integer", inspect: "1", step: "[:id]" }],
+    ["name", { type: "string", inspect: '"Ada"', step: "[:name]" }],
+    ["email", { type: "filtered", inspect: "[FILTERED]", step: "[:email]" }],
+  ],
+}

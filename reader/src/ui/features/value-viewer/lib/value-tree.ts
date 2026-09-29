@@ -18,6 +18,8 @@ export type ContainerNode = {
   kind: ContainerKind
   /** Drawn before the summary, saying what the container is: `Comment` in `Comment {…} 6 attributes`. */
   label?: string
+  /** What its summary counts, one and many, when not its kind's own: `attribute`, `attributes`. */
+  nouns?: readonly [string, string]
   /** In the order they are drawn, which is the order the source had them in. */
   children: readonly ValueChild[]
   /**
@@ -69,8 +71,8 @@ export type ValueSource = {
   tree: ValueNode
   /** What copying `node` hands over: the value it stands for, written the source's way. The whole value's copy is `copyText(tree)`. */
   copyText(node: ValueNode): string
-  /** How the source reaches the node down `path` from the whole value. */
-  pathText(path: readonly PathStep[]): string
+  /** How the source reaches the node down `path` from the whole value, or `null` when nothing in the source can. */
+  pathText(path: readonly PathStep[]): string | null
 }
 
 /** One step down a path: a child's key, and the kind of container it is a key of. */

@@ -41,13 +41,24 @@ export type Outcome =
   | { kind: "lost" }
 
 /**
- * What kind of Ruby value a node is: `hash` or `array`, which the eval loop lays out, or a
- * leaf's type class. `time` is a Time or a Date, `decimal` a BigDecimal, and `object` anything
- * with no class of its own here.
+ * What kind of Ruby value a node is: one the eval loop lays out, or a leaf's type class.
+ *
+ * Laid out: a `hash`, an `array`, a `set`, a `struct`, a `data`, a `record` (an Active Record
+ * model's instance) and a `relation`. An `object` is laid out as its ivars when Ruby's own
+ * `inspect` writes it, and is a leaf of its own `inspect` otherwise.
+ *
+ * A leaf: `time` is a Time or a Date, `decimal` a BigDecimal, `filtered` a record's attribute
+ * the app's `filter_attributes` hide, and `cycle` a value met again inside itself, as Ruby's
+ * `inspect` writes the repeat, such as `{...}`.
  */
 export type RubyTypeClass =
   | "hash"
   | "array"
+  | "set"
+  | "struct"
+  | "data"
+  | "record"
+  | "relation"
   | "nil"
   | "boolean"
   | "string"
@@ -59,6 +70,8 @@ export type RubyTypeClass =
   | "decimal"
   | "time"
   | "object"
+  | "filtered"
+  | "cycle"
 
 /**
  * A node of a result's value as the eval loop laid it out, breadth-first, until its node budget
@@ -69,14 +82,24 @@ export type RubyNode = {
   /** Its own `inspect`, cut to 4 KB when `cut`. */
   inspect: string
   cut?: true
-  /** The `[…]` that reaches it from its container. The whole value has none. */
+  /** The name of its class, on a laid-out value other than a Hash or an Array. Absent for an anonymous class. */
+  class?: string
+  /**
+   * The `[…]` that reaches it from its container. The whole value has none, and neither has a
+   * Set's member, a Data's member or an ivar, which no `[…]` reaches.
+   */
   step?: string
   /** A Hash's `[key, value]` pairs, in its order. A key is a leaf, never laid out. */
   pairs?: [RubyNode, RubyNode][]
-  /** An Array's items. */
+  /** An Array's, a Set's or a Relation's items. A Relation's are its first ten records. */
   items?: RubyNode[]
-  /** How many pairs or items the budget left out. Absent for a container carried whole. */
-  more?: number
+  /** A record's attributes, a Struct's or a Data's members, or an object's ivars, by name. */
+  fields?: [string, RubyNode][]
+  /**
+   * How many entries the budget left out, or `null` when a Relation has more records than it
+   * holds, which the loop never counts. Absent for a value carried whole.
+   */
+  more?: number | null
 }
 
 export type TranscriptEntry =

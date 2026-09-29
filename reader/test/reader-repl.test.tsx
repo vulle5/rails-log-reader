@@ -4,7 +4,7 @@ import { within } from "@testing-library/react"
 import type { Outcome, ReplSnapshot, ReplState, RubyNode, TranscriptEntry } from "../src/shared/repl"
 import { Reader } from "../src/ui/Reader"
 import { aReplSession, openRepl, openTheReader, replDrawer, type ReaderProps } from "./reader.harness"
-import { RUBY_HASH } from "./repl.fixtures"
+import { RUBY_HASH, RUBY_RECORD } from "./repl.fixtures"
 
 /**
  * The *REPL* in its drawer, through the rendered Reader over a stand-in session: the console
@@ -521,6 +521,62 @@ describe("a REPL result", () => {
     await openedOver({ state: READY, transcript: [evaluation({ outcome: result("[0, 1, …]", tree) })] })
 
     expect(within(resultTree()).getByText("…4998 more items")).toBeInTheDocument()
+  })
+
+  test("reads a Relation's records each as its class and attribute count, and says it has more", async () => {
+    const relation: RubyNode = { type: "relation", class: "ActiveRecord::Relation", inspect: "#<ActiveRecord::Relation [...]>", items: [RUBY_RECORD], more: null }
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result(relation.inspect, relation) })] })
+
+    expect(within(resultTree()).getByRole("treeitem", { name: "0: Author {…} 3 attributes" })).toBeInTheDocument()
+    expect(within(resultTree()).getByText("…more")).toBeInTheDocument()
+  })
+
+  test("shows a record's filtered attribute as a FILTERED marker", async () => {
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result(RUBY_RECORD.inspect, RUBY_RECORD) })] })
+
+    const email = within(resultTree()).getByRole("treeitem", { name: "email: FILTERED" })
+    expect(within(email).getByText("FILTERED")).toHaveAttribute("data-filtered")
+  })
+
+  test("reads a plain object as its class and ivar count", async () => {
+    const money: RubyNode = {
+      type: "object",
+      class: "Money",
+      inspect: '#<Money:0x0 @cents=100, @currency="EUR">',
+      step: "[0]",
+      fields: [
+        ["@cents", { type: "integer", inspect: "100" }],
+        ["@currency", { type: "string", inspect: '"EUR"' }],
+      ],
+    }
+    const tree: RubyNode = { type: "array", inspect: `[${money.inspect}]`, items: [money] }
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result(tree.inspect, tree) })] })
+
+    expect(within(resultTree()).getByRole("treeitem", { name: "0: #<Money> {…} 2 ivars" })).toBeInTheDocument()
+  })
+
+  test("marks a cycle", async () => {
+    const tree: RubyNode = {
+      type: "hash",
+      inspect: "{a: 1, self: {...}}",
+      pairs: [
+        [{ type: "symbol", inspect: ":a" }, { type: "integer", inspect: "1", step: "[:a]" }],
+        [{ type: "symbol", inspect: ":self" }, { type: "cycle", inspect: "{...}", step: "[:self]" }],
+      ],
+    }
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result(tree.inspect, tree) })] })
+
+    const cycle = within(resultTree()).getByRole("treeitem", { name: "self: {...}" })
+    expect(within(cycle).getByText("{...}")).toHaveAttribute("data-cycle")
+  })
+
+  test("offers no path to copy for a Set's member, only its value", async () => {
+    const tree: RubyNode = { type: "set", class: "Set", inspect: "#<Set: {1}>", items: [{ type: "integer", inspect: "1" }] }
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result(tree.inspect, tree) })] })
+
+    const member = within(resultTree()).getByRole("treeitem", { name: "0: 1" })
+    expect(within(member).getByRole("button", { name: "Copy value" })).toBeInTheDocument()
+    expect(within(member).queryByRole("button", { name: "Copy path" })).not.toBeInTheDocument()
   })
 
   test("shows a value whose inspect raised as a result, noting what inspect raised", async () => {

@@ -259,6 +259,7 @@ function Item({
 /**
  * A node's copies of its value and of its path, drawn when its line is hovered or one of them
  * is focused. Each is described by the node's line, so a screen reader says which node it copies.
+ * A node the source has no path to offers only its value.
  */
 function NodeCopies({
   node,
@@ -271,10 +272,11 @@ function NodeCopies({
   source: ValueSource
   line?: string
 }) {
+  const pathText = source.pathText(path)
   return (
     <>
       <LineCopy label="Copy value" idle="value" text={() => source.copyText(node)} line={line} />
-      <LineCopy label="Copy path" idle="path" text={() => source.pathText(path)} line={line} />
+      {pathText !== null && <LineCopy label="Copy path" idle="path" text={() => pathText} line={line} />}
     </>
   )
 }
@@ -330,11 +332,14 @@ function Summary({ node }: { node: ContainerNode }) {
 }
 
 function noun(node: ContainerNode, count: number) {
-  const [one, many] = DRAWN[node.kind].nouns
+  const [one, many] = node.nouns ?? DRAWN[node.kind].nouns
   return count === 1 ? one : many
 }
 
-/** A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app sent. */
+/**
+ * A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app
+ * sent. A cycle is marked as one, faint, so it never reads as the value it repeats.
+ */
 function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path: readonly PathStep[] } & ViewState) {
   const matches = search.find(leafText(leaf))
   if (leaf.type === "filtered") {
@@ -349,7 +354,7 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
   }
   if (leaf.type === "cycle") {
     return (
-      <Token>
+      <Token className="text-faint italic" cycle>
         <Marked text={leaf.text} matches={matches} />
       </Token>
     )
@@ -388,12 +393,14 @@ function Token({
   token,
   sourceType,
   cut = false,
+  cycle = false,
   className,
   children,
 }: {
   token?: TokenClass
   sourceType?: string
   cut?: boolean
+  cycle?: boolean
   className?: string
   children: ReactNode
 }) {
@@ -411,6 +418,7 @@ function Token({
       data-token={token}
       data-source-type={sourceType}
       data-cut={cut || undefined}
+      data-cycle={cycle || undefined}
     >
       {children}
     </span>
