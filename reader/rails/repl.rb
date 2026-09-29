@@ -60,6 +60,7 @@ module RailsLogReaderRepl
 
       quiet_query_echo
       define_reload
+      trap_interrupt
       @binding = TOPLEVEL_BINDING.eval("binding")
 
       inbox = read_frames(input)
@@ -108,13 +109,19 @@ module RailsLogReaderRepl
       end
     end
 
+    # SIGINT raises `Interrupt` inside the running evaluation, as Ctrl-C does in a terminal, and
+    # does nothing between evaluations.
+    def trap_interrupt
+      trap("INT") { raise Interrupt, "" if @evaluating }
+    end
+
     # Runs `source` the way a request runs, so the query cache is fresh and a reload is safe. The
     # result is inspected inside too, since inspecting a relation runs its query.
     #
     # `exit` and a signal such as SIGTERM end the process rather than the evaluation, except
     # Ctrl-C's `Interrupt`, which is the evaluation's answer.
     def evaluate(id, source)
-      text, cut = Rails.application.executor.wrap { inspected(@binding.eval(source, "(repl)", 1)) }
+      text, cut = interruptible { Rails.application.executor.wrap { inspected(@binding.eval(source, "(repl)", 1)) } }
       send_frame("type" => "result", "id" => id, "text" => text, "cut" => cut)
     rescue SystemExit
       raise
@@ -122,6 +129,13 @@ module RailsLogReaderRepl
       raise if error.is_a?(SignalException) && !error.is_a?(Interrupt)
 
       send_frame("type" => "error", "id" => id, "class" => class_name(error), "message" => utf8(error.message))
+    end
+
+    def interruptible
+      @evaluating = true
+      yield
+    ensure
+      @evaluating = false
     end
 
     def inspected(value)

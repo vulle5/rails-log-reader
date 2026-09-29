@@ -74,9 +74,14 @@ export type ReplMessage =
 
 /**
  * What a tab sends the server. `boot` starts the console process unless one has been started.
- * `restart` stops the one running, if any, and starts a fresh one.
+ * `interrupt` interrupts the running evaluation, if any. `restart` stops the one running, if any,
+ * and starts a fresh one.
  */
-export type ReplCommand = { type: "boot" } | { type: "submit"; input: string } | { type: "restart"; sandbox: boolean }
+export type ReplCommand =
+  | { type: "boot" }
+  | { type: "submit"; input: string }
+  | { type: "interrupt" }
+  | { type: "restart"; sandbox: boolean }
 
 export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, sandbox: false, capabilities: [], transcript: [] }
 

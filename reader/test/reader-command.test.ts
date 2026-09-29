@@ -666,6 +666,21 @@ describe("the REPL socket", () => {
     second.close()
   })
 
+  test("interrupts the running evaluation", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+    await repl.send({ type: "submit", input: "nap 60000" })
+    await repl.next((message) => message.type === "output" && message.text === "napping\n")
+
+    await repl.send({ type: "interrupt" })
+
+    expect(await repl.next((message) => message.type === "finished")).toMatchObject({ outcome: { kind: "error", className: "Interrupt" } })
+    repl.close()
+  })
+
+
   test("restarts the console process, sandboxed when asked", async () => {
     const { root, url, origin } = await aReaderOverTheStubConsole()
     const repl = replSocket(url, origin)

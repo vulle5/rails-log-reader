@@ -8,11 +8,13 @@ import { connect } from "node:net"
  * It notes each start in `log/stub-console.log`, as its arguments, then prints a boot line and
  * says it is ready. When `log/stub-console.fails` is there, it prints that file on fd 2 instead
  * and exits 1, as a failed boot does. It notes its stdin closing and a SIGTERM in the same log,
- * and dies of the SIGTERM. An input is a canned command:
+ * and dies of the SIGTERM. It notes a SIGINT too, which interrupts a running `sleep`. An input
+ * is a canned command:
  *
  * - `puts TEXT` prints TEXT on fd 1, `warn TEXT` on fd 2, and each answers `nil`.
  * - `raise CLASS: MESSAGE` answers with that error.
- * - `sleep MS` answers `1` after MS milliseconds.
+ * - `sleep MS` answers `1` after MS milliseconds, or raises `Interrupt` on a SIGINT before then.
+ * - `nap MS` prints `napping` on fd 1, then sleeps as `sleep` does.
  * - `later TEXT` answers `nil`, then prints TEXT on fd 1 after the answer.
  * - `exit CODE` exits with CODE without answering.
  * - `signal NAME` sends itself signal NAME without answering.
@@ -43,6 +45,13 @@ process.once("SIGTERM", async () => {
   await Promise.race([stdinClosed, Bun.sleep(100)])
   note({ heard: "SIGTERM" })
   process.kill(process.pid, "SIGTERM")
+})
+
+/** Wakes the running `sleep`, if any, to raise `Interrupt`. */
+let interrupt = () => {}
+process.on("SIGINT", () => {
+  note({ heard: "SIGINT" })
+  interrupt()
 })
 
 const channel = connect({ fd: 3 } as never)
@@ -77,9 +86,11 @@ async function evaluate({ id, input }: Frame) {
       const [className, message] = argument.split(": ")
       return send({ type: "error", id, class: className, message })
     }
+    case "nap":
+      process.stdout.write("napping\n")
+      return sleep(id, Number(argument))
     case "sleep":
-      await Bun.sleep(Number(argument))
-      return answer(id, "1")
+      return sleep(id, Number(argument))
     case "later":
       answer(id, "nil")
       await Bun.sleep(50)
@@ -93,4 +104,12 @@ async function evaluate({ id, input }: Frame) {
     default:
       return answer(id, input)
   }
+}
+
+async function sleep(id: number, ms: number) {
+  const interrupted = new Promise<true>((resolve) => (interrupt = () => resolve(true)))
+  const woken = await Promise.race([interrupted, Bun.sleep(ms)])
+  interrupt = () => {}
+  if (woken) return send({ type: "error", id, class: "Interrupt", message: "" })
+  return answer(id, "1")
 }

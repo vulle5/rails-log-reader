@@ -17,6 +17,8 @@ export type ReplHandle = {
   boot: () => void
   /** Sends `input` to run, or says why it will not: `null` when it was sent. */
   submit: (input: string) => string | null
+  /** Interrupts the running evaluation, as Ctrl-C does. */
+  interrupt: () => void
   /** Starts a fresh console process, sandboxed when `sandbox`, in place of the one there is. */
   restart: (sandbox: boolean) => void
   /** The latest input the server refused from this tab, and why. A new object for each. */
@@ -28,6 +30,7 @@ export const DETACHED_REPL: ReplHandle = {
   snapshot: EMPTY_SNAPSHOT,
   boot: () => {},
   submit: () => submitRefusal(EMPTY_SNAPSHOT.state),
+  interrupt: () => {},
   restart: () => {},
   refusal: null,
 }
@@ -100,12 +103,17 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     return null
   }
 
+  function interrupt() {
+    const open = socket.current
+    if (open?.readyState === WebSocket.OPEN) send(open, { type: "interrupt" })
+  }
+
   function restart(sandbox: boolean) {
     const open = socket.current
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "restart", sandbox })
   }
 
-  return { snapshot, boot, submit, restart, refusal }
+  return { snapshot, boot, submit, interrupt, restart, refusal }
 }
 
 function send(socket: WebSocket, command: ReplCommand) {

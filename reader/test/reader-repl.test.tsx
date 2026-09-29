@@ -240,6 +240,47 @@ describe("the REPL's prompt", () => {
   })
 })
 
+describe("the REPL's prompt on Ctrl-C", () => {
+  const BUSY: ReplState = { kind: "busy", pid: PID, id: 1, since: Date.now() }
+
+  test("interrupts a running evaluation, and keeps the input", async () => {
+    const { user, asked } = await openedOver({ state: BUSY })
+
+    await user.type(prompt(), "Post.count{Control>}c{/Control}")
+
+    expect(asked.interrupts).toBe(1)
+    expect(prompt()).toHaveValue("Post.count")
+  })
+
+  test("says it interrupts in its hint row while an evaluation runs", async () => {
+    await openedOver({ state: BUSY })
+
+    expect(hintRow()).toHaveTextContent("Ctrl-C to interrupt")
+  })
+
+  test("copies a selection, and interrupts nothing", async () => {
+    const { user, asked } = await openedOver({ state: BUSY })
+    await user.type(prompt(), "Post.count")
+    await user.pointer([{ target: prompt(), offset: 0, keys: "[MouseLeft>]" }, { offset: 4 }, { keys: "[/MouseLeft]" }])
+
+    await user.keyboard("{Control>}c{/Control}")
+
+    expect(await navigator.clipboard.readText()).toBe("Post")
+    expect(asked.interrupts).toBe(0)
+    expect(prompt()).toHaveValue("Post.count")
+  })
+
+  test("clears the input when nothing is running", async () => {
+    const { user, asked } = await openedOver({ state: READY })
+
+    await user.type(prompt(), "Post.count{Control>}c{/Control}")
+
+    expect(prompt()).toHaveValue("")
+    expect(asked.interrupts).toBe(0)
+    expect(asked.submitted).toEqual([])
+  })
+})
+
 describe("the REPL's Transcript", () => {
   test("shows each evaluation's input, then what it printed, then its result", async () => {
     await openedOver({
@@ -258,6 +299,16 @@ describe("the REPL's Transcript", () => {
 
     expect(transcriptEntries()[0]).toHaveTextContent("ActiveRecord::RecordNotFound: Couldn't find Post with 'id'=0")
   })
+
+  test("shows an evaluation Ctrl-C stopped as raising Interrupt, with no message after it", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [evaluation({ input: "sleep 60", outcome: { kind: "error", className: "Interrupt", message: "" } })],
+    })
+
+    expect(within(transcriptEntries()[0]!).getByText("Interrupt")).toBeInTheDocument()
+  })
+
 
   test("shows what the console process printed outside any evaluation as an entry of its own", async () => {
     await openedOver({

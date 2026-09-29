@@ -41,7 +41,7 @@ export async function stubConsoleStarts(root: string) {
   return (await stubConsoleLog(root)).flatMap((noted) => ("started" in noted ? [noted.started] : []))
 }
 
-/** What the stub consoles in `root` heard from outside, in order: `stdin closed`, `SIGTERM`. */
+/** What the stub consoles in `root` heard from outside, in order: `stdin closed`, `SIGTERM`, `SIGINT`. */
 export async function stubConsoleHeard(root: string) {
   return (await stubConsoleLog(root)).flatMap((noted) => ("heard" in noted ? [noted.heard] : []))
 }

@@ -77,9 +77,7 @@ function Answer({ outcome }: { outcome: Outcome }) {
       )
     case "error":
       return (
-        <Text className="text-error">
-          {outcome.className}: {outcome.message}
-        </Text>
+        <Text className="text-error">{outcome.message === "" ? outcome.className : `${outcome.className}: ${outcome.message}`}</Text>
       )
     case "lost":
       return <p className="font-ui text-error">The REPL exited before it answered.</p>

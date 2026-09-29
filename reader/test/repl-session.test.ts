@@ -157,6 +157,36 @@ describe("the REPL session", () => {
     expect(entry).toMatchObject({ outcome: { kind: "error", className: "ArgumentError", message: "nope" } })
   })
 
+  test("interrupts a running evaluation with SIGINT, which ends it as raising Interrupt", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    const { state: ready } = await booted(listening)
+    listening.submit("nap 60000")
+    const running = listening.snapshot.state
+    if (running.kind !== "busy") throw new Error(`submitted, but the session is ${running.kind}`)
+    await listening.until(({ transcript }) => transcript.at(-1)?.output === "napping\n")
+
+    listening.interrupt()
+    const { state, transcript } = await listening.until(isEvaluated(running.id))
+
+    expect(await stubConsoleHeard(root)).toEqual(["SIGINT"])
+    expect(transcript.at(-1)).toMatchObject({ outcome: { kind: "error", className: "Interrupt", message: "" } })
+    expect(state).toEqual(ready)
+  })
+
+
+  test("sends no signal when interrupted with nothing running", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    listening.interrupt()
+    await evaluate(listening, "1 + 1")
+
+    expect(await stubConsoleHeard(root)).toEqual([])
+  })
+
+
   test("runs one evaluation at a time, refusing a second with a reason and leaving the Transcript alone", async () => {
     const { session } = await aSession()
     const listening = listen(session)

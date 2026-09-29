@@ -86,11 +86,26 @@ class EvalLoopTest < ActiveSupport::TestCase
     end
   end
 
-  test "answers an evaluation Ctrl-C interrupted as an error, and keeps going" do
+  test "answers an evaluation SIGINT stopped as raising Interrupt, and keeps going" do
     DevelopmentRun.console_process do |repl|
-      answer = repl.evaluate("raise Interrupt")
+      interrupting = Thread.new do
+        sleep 0.5
+        repl.signal("INT")
+      end
+      answer = repl.evaluate("sleep 60")
+      interrupting.join
 
-      assert_equal "Interrupt", answer["class"]
+      assert_equal({ "type" => "error", "id" => 1, "class" => "Interrupt", "message" => "" }, answer)
+      assert_equal "2", repl.evaluate("1 + 1")["text"]
+    end
+  end
+
+  test "does nothing on SIGINT between evaluations" do
+    DevelopmentRun.console_process do |repl|
+      repl.signal("INT")
+      sleep 0.5
+
+      assert_nil repl.exited_within(0), "SIGINT ended the console process"
       assert_equal "2", repl.evaluate("1 + 1")["text"]
     end
   end

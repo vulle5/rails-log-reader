@@ -24,6 +24,8 @@ export type ReplAttachment = {
   boot: () => void
   /** Runs `input`, or says why it will not: `null` when it was sent. */
   submit: (input: string) => string | null
+  /** Interrupts the running evaluation, as Ctrl-C does, which ends it as raising `Interrupt`. Nothing when none is running. */
+  interrupt: () => void
   /**
    * Stops the console process, if one is running, and starts a fresh one, sandboxed when
    * `sandbox`, with an empty Transcript.
@@ -223,11 +225,15 @@ export function replSession(railsRoot: string): ReplSession {
     return null
   }
 
+  function interrupt() {
+    if (snapshot.state.kind === "busy") running?.child.kill("SIGINT")
+  }
+
   return {
     attach(listener) {
       listeners.add(listener)
       listener({ type: "snapshot", snapshot })
-      return { boot, submit, restart, detach: () => listeners.delete(listener) }
+      return { boot, submit, interrupt, restart, detach: () => listeners.delete(listener) }
     },
     close() {
       if (running !== null) stop(running)
