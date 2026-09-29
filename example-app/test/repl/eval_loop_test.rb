@@ -205,6 +205,8 @@ class EvalLoopTest < ActiveSupport::TestCase
       assert_equal({ "type" => "filtered", "inspect" => "[FILTERED]", "step" => "[:email]" }, email)
       _, name = tree["fields"].assoc("name")
       assert_equal %("Ada"), name["inspect"]
+      _, blank = repl.evaluate(%(Author.new(name: "Ada")))["tree"]["fields"].assoc("email")
+      assert_equal "nil", blank["type"], "a nil attribute is nil, as the record's inspect says"
     end
   end
 
@@ -281,6 +283,8 @@ class EvalLoopTest < ActiveSupport::TestCase
       shared = repl.evaluate("s = [1]; [s, s]")["tree"]
 
       assert_equal({ "type" => "cycle", "inspect" => "{...}", "step" => "[:self]" }, cyclic["pairs"][1][1])
+      assert_equal "#<struct Loop:...>", repl.evaluate("Loop = Struct.new(:me); l = Loop.new; l.me = l; l")["tree"]["fields"][0][1]["inspect"]
+      assert_equal "#<Set: {...}>", repl.evaluate("t = Set[]; t << [t]; t")["tree"]["items"][0]["items"][0]["inspect"]
       assert_equal [[{ "type" => "integer", "inspect" => "1", "step" => "[0]" }]] * 2, shared["items"].map { |item| item["items"] }
     end
   end

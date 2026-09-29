@@ -120,7 +120,7 @@ module RailsLogReaderRepl
 
       shown = @shown[relation] ||=
         begin
-          relation.annotate("loading for inspect").limit([relation.limit_value, RELATION_LIMIT + 1].compact.min).load
+          relation.annotate("loading for inspect").limit(inspect_limit(relation)).load
         rescue *INSPECT_FAILURES => error
           error
         end
@@ -326,10 +326,12 @@ module RailsLogReaderRepl
       when "struct" then value.each_pair { |name, item| yield item, "[#{name.inspect}]", name.to_s }
       when "data" then value.to_h.each { |name, item| yield item, nil, name.to_s }
       when "record"
-        # An attribute is filtered when the filter changes even an empty value.
+        # An attribute is filtered when the filter changes even an empty value. A nil one is
+        # left nil, as the record's own `inspect` leaves it.
         filter = ActiveSupport::ParameterFilter.new(value.class.filter_attributes)
         value.attribute_names.each do |name|
-          item = filter.filter_param(name, "") == "" ? value[name] : FILTERED
+          item = value[name]
+          item = FILTERED unless item.nil? || filter.filter_param(name, "") == ""
           yield item, "[#{name.to_sym.inspect}]", name
         end
       when "object" then ivars(value).each { |name| yield IVAR.bind(value).call(name), nil, name.to_s }
@@ -340,7 +342,9 @@ module RailsLogReaderRepl
     # more than `RELATION_LIMIT` records, which is never counted.
     def size(value, type)
       case type
-      when "relation" then records(value).size > RELATION_LIMIT ? nil : records(value).size
+      when "relation"
+        count = records(value).size
+        count unless count > RELATION_LIMIT
       when "data" then value.class.members.size
       when "record" then value.attribute_names.size
       when "object" then ivars(value).size
@@ -350,7 +354,12 @@ module RailsLogReaderRepl
 
     # The records a Relation's `inspect` shows, one more than `RELATION_LIMIT` at most.
     def records(relation)
-      (shown(relation) || relation).records.take([relation.limit_value, RELATION_LIMIT + 1].compact.min)
+      (shown(relation) || relation).records.take(inspect_limit(relation))
+    end
+
+    # How many records a Relation's `inspect` loads.
+    def inspect_limit(relation)
+      [relation.limit_value, RELATION_LIMIT + 1].compact.min
     end
 
     def ivars(value)
@@ -399,7 +408,12 @@ module RailsLogReaderRepl
         case value
         when Hash then "{...}"
         when Array then "[...]"
-        else "#{label(value).chomp('>')} ...>"
+        when Struct then "#<struct #{class_of(value).name}:...>"
+        else
+          if defined?(::Set) && ::Set === value then "#<Set: {...}>"
+          elsif DATA && DATA === value then "#<data #{class_of(value).name}:...>"
+          else "#{label(value).chomp('>')} ...>"
+          end
         end
       { "type" => "cycle", "inspect" => text }
     end
