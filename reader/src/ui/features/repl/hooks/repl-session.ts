@@ -67,8 +67,11 @@ const RECONNECT_MS = 1_000
  * Opened only when `mayAct`, since `/repl` is an act and refuses any other page. A boot that
  * has been asked for is asked again each time the socket opens, so a Reader restarted under
  * an open drawer starts its console process too.
+ *
+ * Each exit notice goes to `onExit` with the console process's pid, for the fold: a console
+ * process killed too hard to write its `run_end` says nothing on the Sidecar.
  */
-export function useReplSession(mayAct: boolean): ReplHandle {
+export function useReplSession(mayAct: boolean, onExit: (pid: number) => void): ReplHandle {
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT)
   const [loaded, setLoaded] = useState(false)
   const [refusal, setRefusal] = useState<ReplHandle["refusal"]>(null)
@@ -80,6 +83,9 @@ export function useReplSession(mayAct: boolean): ReplHandle {
   // The completions this tab has asked and not yet been answered, by id.
   const completions = useRef(new Map<number, (completion: Completion) => void>())
   const nextCompletion = useRef(1)
+  // Read through a ref, so a new `onExit` never reopens the socket.
+  const exitListener = useRef(onExit)
+  exitListener.current = onExit
 
   useEffect(() => {
     if (!mayAct) return
@@ -104,6 +110,7 @@ export function useReplSession(mayAct: boolean): ReplHandle {
         else if (message.type === "refused") setRefusal({ reason: message.reason, input: message.input })
         else if (message.type === "checked") answered(message.id, message.complete)
         else if (message.type === "completions") completed(message.id, message.completion)
+        else if (message.type === "exit") exitListener.current(message.pid)
         else if (isReplUpdate(message)) setSnapshot((held) => applyReplUpdate(held, message))
       }
       opened.onclose = () => {

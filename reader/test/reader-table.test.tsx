@@ -4,7 +4,8 @@ import { screen, within } from "@testing-library/react"
 import { aRun } from "./sidecar.fixtures"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { Envelope } from "../src/shared/wire"
-import { activityRows, cellUnder, column, openTheReader, rowShowing, tab } from "./reader.harness"
+import { Reader } from "../src/ui/Reader"
+import { activityRows, aReplSession, cellUnder, column, openTheReader, rowShowing, tab } from "./reader.harness"
 
 /**
  * Seam 2: the Activity table over a seeded model — seeded by folding envelopes, so the
@@ -454,6 +455,19 @@ describe("Evaluation rows", () => {
     const row = evaluationRow()
     expect(row).toHaveAttribute("data-state", "interrupted")
     expect(within(cellUnder(row, "Status")).getByRole("img", { name: "Interrupted" })).toBeInTheDocument()
+  })
+
+  test("reads Interrupted when the session reports its console process exited", () => {
+    const run = aRun("con-1")
+    const busy = aReplSession({ state: { kind: "busy", pid: 92_014, id: 1, since: 0 } }).repl
+    const { fold, rerender } = openTheReader([run.header("console", 92_014), run.evaluationStart("repl-a-1", "sleep 60")], { repl: busy })
+    expect(evaluationRow()).toHaveAttribute("data-state", "in-flight")
+
+    fold.consoleExited(92_014)
+    const exited = aReplSession({ state: { kind: "exited", code: null, signal: "SIGKILL", stderr: "" } }).repl
+    rerender(<Reader {...fold.props} repl={exited} />)
+
+    expect(within(cellUnder(evaluationRow(), "Status")).getByRole("img", { name: "Interrupted" })).toBeInTheDocument()
   })
 })
 

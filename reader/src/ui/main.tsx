@@ -19,16 +19,17 @@ if (container === null) throw new Error("index.html is missing its #root element
  * `detectMismatch` folds the file status together with whatever `v` the live Sidecar last
  * reported into the one thing `Reader` actually renders. `detectEmptyState` folds the same
  * file status, with whether the Sidecar's history has all arrived, into why an empty Reader
- * is empty. `useReplSession` owns the `/repl` WebSocket, on a page that may act.
+ * is empty. `useReplSession` owns the `/repl` WebSocket, on a page that may act, and hands
+ * each console process's exit to the Sidecar's fold.
  */
 function LiveReader() {
-  const { rows, lines, evictedRows, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier } =
+  const { rows, lines, evictedRows, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier, consoleExited } =
     useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
   const appNameOverride = useAppNameOverride()
   const actsOnlyFrom = useActsOnlyFrom()
-  const repl = useReplSession(actsOnlyFrom === null)
+  const repl = useReplSession(actsOnlyFrom === null, consoleExited)
 
   async function onRepair() {
     const copied = await repair()

@@ -51,6 +51,10 @@ export function aFold() {
       stream.evict(evicted)
       evictedRows += evicted.length
     },
+    /** What the *REPL* session hook forwards to the fold when a console process exits. */
+    consoleExited(pid: number) {
+      activity.consoleExited(pid)
+    },
     /** Fresh arrays every read, the way a live `useSidecar` render passes them. */
     get props(): ReaderProps {
       return {

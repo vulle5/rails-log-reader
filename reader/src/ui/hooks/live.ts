@@ -48,6 +48,8 @@ export type WireStatus = {
   /** Whether there is anything before the loaded history, and whether a pull is in flight. */
   earlier: EarlierState
   loadEarlier: () => void
+  /** Tells the fold the console process `pid` exited: `ActivityTable.consoleExited`. */
+  consoleExited: (pid: number) => void
 }
 
 /**
@@ -197,5 +199,10 @@ export function useSidecar(): WireStatus {
     }
   }
 
-  return { ...status, historyLoaded, earlier, loadEarlier }
+  function consoleExited(pid: number) {
+    activity.consoleExited(pid)
+    setStatus((previous) => ({ ...previous, rows: [...activity.rows] }))
+  }
+
+  return { ...status, historyLoaded, earlier, loadEarlier, consoleExited }
 }

@@ -322,6 +322,12 @@ export type ActivityTable = {
    * and that eviction is exactly as real as one the live fold triggers.
    */
   foldEarlier: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
+  /**
+   * The console process `pid` exited: the latest `console` Run whose `run_header` carried it
+   * ended, as its `run_end` would say, though one killed too hard wrote none. Its in-flight rows
+   * become *Interrupted*, their elapsed frozen where they left it.
+   */
+  consoleExited: (pid: number) => void
 }
 
 /**
@@ -362,6 +368,13 @@ export function activityTable(): ActivityTable {
    * unmarked row rather than a wrong one.
    */
   const evictedRuns = new Set<string>()
+  /**
+   * The latest `console` Run to boot under each pid, by its `run_header`. Kept apart from the
+   * Run rows because the bound can take a Run row while its Evaluation row is still in flight.
+   */
+  const consoleRuns = new Map<number, string>()
+  /** Console Runs an exit notice ended. */
+  const exitedRuns = new Set<string>()
   /**
    * The row currently marked `overBound`, if any — there is never more than one, since it
    * only ever holds where `rows.length` is exactly `1`. Tracked rather than recomputed by
@@ -627,8 +640,8 @@ export function activityTable(): ActivityTable {
    * *Interrupted*: the Run ended while these requests were still in flight, so no finish is
    * ever coming. Concluded from evidence and never from a timer — a `run_end`, which carries
    * the ending's own `at_mono` and so freezes the elapsed exactly, or the next web process's
-   * `run_header`, which carries a different process's clock and can only freeze it where the
-   * request itself left it.
+   * `run_header` or a console process's exit, neither of which carries the Run's clock, so
+   * they can only freeze it where the request itself left it.
    */
   function interrupt(whoseRunEnded: (folding: Folding) => boolean, ending: Envelope | null) {
     for (const folding of byRequest.values()) {
@@ -699,6 +712,7 @@ export function activityTable(): ActivityTable {
       row.railsVersion = envelope.payload.rails_version
       row.appName = envelope.payload.app_name
       row.railsRoot = envelope.payload.rails_root
+      if (envelope.payload.kind === "console") consoleBooted(envelope.payload.pid, envelope.run_id)
       // A load-earlier pull can bring this header in after one of its requests already opened.
       for (const folding of byRequest.values()) {
         if (folding.row.kind === "request" && folding.row.runId === envelope.run_id) folding.row.railsRoot = envelope.payload.rails_root
@@ -742,6 +756,9 @@ export function activityTable(): ActivityTable {
     // Only while in flight: past that the elapsed is a finished request's duration or the
     // frozen reading an Interrupted row keeps.
     if (row.state === "in-flight") proveElapsed(folding, envelope)
+    // The exit notice travels apart from the Sidecar, so what the Run wrote before it died can
+    // arrive after it.
+    if (row.state === "in-flight" && exitedRuns.has(row.runId)) row.state = "interrupted"
 
     // An *Echo* is dropped from the row rather than marked on it — the Console reads the
     // envelope stream and not this fold, so the line itself survives where the log lives —
@@ -797,6 +814,26 @@ export function activityTable(): ActivityTable {
         foldChild(folding, row, envelope)
         break
     }
+  }
+
+  /**
+   * `runId` is the latest console Run under `pid`. A load-earlier pull's header is older than
+   * every one held, so it only fills a pid no held header has.
+   */
+  function consoleBooted(pid: number, runId: string) {
+    if (earlier !== null && consoleRuns.has(pid)) return
+
+    // Deleted first, so a reused pid moves to the newest end, which `keepLatest` trims last.
+    consoleRuns.delete(pid)
+    consoleRuns.set(pid, runId)
+  }
+
+  function consoleExited(pid: number) {
+    const runId = consoleRuns.get(pid)
+    if (runId === undefined) return
+
+    exitedRuns.add(runId)
+    interrupt((folding) => folding.row.runId === runId, null)
   }
 
   /** An SQL or App log event, onto its owner's counts and into its timeline. */
@@ -899,6 +936,8 @@ export function activityTable(): ActivityTable {
     keepLatest(folded, ceiling)
     keepLatest(evicted, ceiling)
     keepLatest(evictedRuns, ceiling)
+    keepLatest(consoleRuns, ceiling)
+    keepLatest(exitedRuns, ceiling)
 
     updateOverBound()
     return takenRows
@@ -960,7 +999,7 @@ export function activityTable(): ActivityTable {
     return folding?.events ?? 0
   }
 
-  return { rows, fold, foldEarlier }
+  return { rows, fold, foldEarlier, consoleExited }
 }
 
 function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {
@@ -999,11 +1038,11 @@ function requestIdOf(row: RequestRow | EvaluationRow) {
   return row.kind === "request" ? row.requestId : row.evaluationId
 }
 
-/** Drop a set's oldest entries: a `Set` iterates in insertion order, which is the ring's. */
-function keepLatest(remembered: Set<string>, limit: number) {
-  for (const entry of remembered) {
+/** Drop a set's or a map's oldest entries: both iterate in insertion order, which is the ring's. */
+function keepLatest<Key>(remembered: Set<Key> | Map<Key, unknown>, limit: number) {
+  for (const key of remembered.keys()) {
     if (remembered.size <= limit) return
-    remembered.delete(entry)
+    remembered.delete(key)
   }
 }
 

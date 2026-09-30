@@ -181,6 +181,81 @@ describe("an Evaluation row", () => {
   })
 })
 
+/**
+ * A console process killed too hard to write a `run_end`: the Reader, its parent, reports the
+ * exit with its pid, and that ends the latest console Run whose `run_header` carried it.
+ */
+describe("an Evaluation row whose console process exited", () => {
+  test("is Interrupted by the exit of its Run's pid", () => {
+    const run = aRun("con-1")
+    const activity = folded(run.header("console", 92_014), run.evaluationStart("repl-a-1", "sleep 60"))
+
+    activity.consoleExited(92_014)
+
+    expect(theOnlyEvaluation(activity.rows).state).toBe("interrupted")
+  })
+
+  test("is left in flight by the exit of another pid", () => {
+    const run = aRun("con-1")
+    const activity = folded(run.header("console", 92_014), run.evaluationStart("repl-a-1", "sleep 60"))
+
+    activity.consoleExited(92_015)
+
+    expect(theOnlyEvaluation(activity.rows).state).toBe("in-flight")
+  })
+
+  test("is left as it finished", () => {
+    const run = aRun("con-1")
+    const activity = folded(run.header("console", 92_014), run.evaluationStart("repl-a-1"), run.evaluationFinish("repl-a-1"))
+
+    activity.consoleExited(92_014)
+
+    expect(theOnlyEvaluation(activity.rows)).toMatchObject({ state: "finished", outcome: "ok" })
+  })
+
+  test("ends only the latest console Run under that pid, and no server's", () => {
+    const earlier = aRun("con-1")
+    const server = aRun("srv-1")
+    const latest = aRun("con-2")
+    const activity = folded(
+      earlier.header("console", 92_014),
+      earlier.evaluationStart("repl-a-1"),
+      server.header("server", 92_014),
+      server.start("req-1"),
+      latest.header("console", 92_014),
+      latest.evaluationStart("repl-b-1", "sleep 60"),
+    )
+
+    activity.consoleExited(92_014)
+
+    expect(evaluations(activity.rows).map((row) => [row.evaluationId, row.state])).toEqual([
+      ["repl-a-1", "in-flight"],
+      ["repl-b-1", "interrupted"],
+    ])
+    expect(activity.rows.find((row) => row.kind === "request")?.state).toBe("in-flight")
+  })
+
+  test("is Interrupted when its events arrive after the exit, which travels apart from the Sidecar", () => {
+    const run = aRun("con-1")
+    const activity = folded(run.header("console", 92_014))
+
+    activity.consoleExited(92_014)
+    activity.fold([run.evaluationStart("repl-a-1", "Process.kill(:KILL, Process.pid)")])
+
+    expect(theOnlyEvaluation(activity.rows).state).toBe("interrupted")
+  })
+
+  test("still finishes when its finish arrives after the exit", () => {
+    const run = aRun("con-1")
+    const activity = folded(run.header("console", 92_014), run.evaluationStart("repl-a-1"))
+
+    activity.consoleExited(92_014)
+    activity.fold([run.evaluationFinish("repl-a-1")])
+
+    expect(theOnlyEvaluation(activity.rows).state).toBe("finished")
+  })
+})
+
 describe("an Evaluation row under the Memory bound", () => {
   /** Enough finished requests to push the fold past its ceiling on their own. */
   function traffic(count: number) {
@@ -206,5 +281,17 @@ describe("an Evaluation row under the Memory bound", () => {
 
     activity.fold([run.log("repl-a-1", "too late")])
     expect(activity.rows.at(-1)).toMatchObject({ kind: "run", runId: "con-1", logCount: 1 })
+  })
+
+  test("is Interrupted by its console's exit after the bound took its Run row", () => {
+    const run = aRun("con-1")
+    const activity = activityTable()
+    activity.fold([run.header("console", 92_014), run.log(null, "Loading development environment"), run.evaluationStart("repl-a-1", "sleep 60")])
+    activity.fold(traffic(LOAD_ON_OPEN_EVENTS))
+    expect(activity.rows.some((row) => row.kind === "run" && row.runId === "con-1")).toBe(false)
+
+    activity.consoleExited(92_014)
+
+    expect(theOnlyEvaluation(activity.rows).state).toBe("interrupted")
   })
 })
