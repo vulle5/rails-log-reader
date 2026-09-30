@@ -134,8 +134,9 @@ export function ReplDrawer({
 /** The *Unseen result* mark. */
 function UnseenMark({ result }: { result: UnseenResult }) {
   return (
+    // Lowercase letters sit low in their line box, so the bottom padding is what centres them.
     <span
-      className="flex-none rounded-chip bg-accent px-1 text-2xs font-semibold text-background data-[outcome=error]:bg-error"
+      className="flex-none rounded-chip bg-accent px-1 pb-[2.5px] text-2xs leading-none font-semibold text-background data-[outcome=error]:bg-error"
       data-outcome={result}
       title={result === "error" ? "An evaluation failed while this was folded" : "An evaluation finished while this was folded"}
     >
