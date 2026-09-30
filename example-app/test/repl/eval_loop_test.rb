@@ -343,12 +343,81 @@ class EvalLoopTest < ActiveSupport::TestCase
     end
   end
 
-  test "answers an evaluation that raises with its class and message" do
+  test "answers an evaluation that raises with its class, message and backtrace" do
     DevelopmentRun.console_process do |repl|
       answer = repl.evaluate("raise ArgumentError, 'nope'")
 
-      assert_equal({ "type" => "error", "id" => 1, "class" => "ArgumentError", "message" => "nope" }, answer)
+      assert_equal "error", answer["type"]
+      assert_equal 1, answer["id"]
+      assert_equal "ArgumentError", answer["class"]
+      assert_equal "nope", answer["message"]
+      assert_equal [], answer["causes"]
+      assert_equal ["(repl):1:in '<main>'"], answer["backtrace"].map { |frame| frame.tr("`", "'") }
       assert_equal "3", repl.evaluate("1 + 2")["text"], "the loop keeps going after a raise"
+    end
+  end
+
+  test "ends an error's backtrace at the evaluation, with none of the loop's own frames" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate("def boom = raise('deep')")
+      repl.evaluate("def outer = [1].each { boom }")
+      answer = repl.evaluate("outer")
+
+      assert_equal "(repl):1", answer["backtrace"].first[/\A\(repl\):\d+/]
+      assert_equal "(repl):1", answer["backtrace"].last[/\A\(repl\):\d+/]
+      assert_operator answer["backtrace"].size, :>=, 4
+      assert answer["backtrace"].all? { |frame| frame.start_with?("(repl):") }, answer["backtrace"].inspect
+    end
+  end
+
+  test "keeps the gem frames an error passed through, ending at the evaluation" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate("Post.find(0)")
+
+      assert_equal "ActiveRecord::RecordNotFound", answer["class"]
+      assert answer["backtrace"].any? { |frame| frame.include?("activerecord") }, answer["backtrace"].inspect
+      assert answer["backtrace"].last.start_with?("(repl):1:in "), answer["backtrace"].last
+      assert answer["backtrace"].none? { |frame| frame.include?("/reader/rails/repl.rb") }, answer["backtrace"].inspect
+    end
+  end
+
+  test "answers an error raised before any of the developer's code ran with no backtrace" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate("1 +")
+
+      assert_equal "error", answer["type"]
+      assert_equal "SyntaxError", answer["class"]
+      assert_equal [], answer["backtrace"]
+    end
+  end
+
+  test "answers an error's causes, nearest first, each with its class, message and backtrace" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate(<<~RUBY)
+        begin
+          begin
+            raise KeyError, "root"
+          rescue
+            raise ArgumentError, "middle"
+          end
+        rescue
+          raise "top"
+        end
+      RUBY
+
+      assert_equal "RuntimeError", answer["class"]
+      assert_equal %w[ArgumentError KeyError], answer["causes"].map { |cause| cause["class"] }
+      assert_equal %w[middle root], answer["causes"].map { |cause| cause["message"] }
+      assert_equal ["(repl):5", "(repl):3"], answer["causes"].map { |cause| cause["backtrace"].first[/\A\(repl\):\d+/] }
+      assert answer["causes"].all? { |cause| cause["backtrace"].all? { |frame| frame.start_with?("(repl):") } }
+    end
+  end
+
+  test "answers a cause that was never raised with no backtrace" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate(%(raise "top", cause: ArgumentError.new("never raised")))
+
+      assert_equal [{ "class" => "ArgumentError", "message" => "never raised", "backtrace" => [] }], answer["causes"]
     end
   end
 
@@ -398,7 +467,7 @@ class EvalLoopTest < ActiveSupport::TestCase
       answer = repl.evaluate("sleep 60")
       interrupting.join
 
-      assert_equal({ "type" => "error", "id" => 1, "class" => "Interrupt", "message" => "" }, answer)
+      assert_equal ["error", "Interrupt", ""], answer.values_at("type", "class", "message")
       assert_equal "2", repl.evaluate("1 + 1")["text"]
     end
   end

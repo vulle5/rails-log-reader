@@ -14,7 +14,8 @@ import { stubComplete } from "./repl.fixtures"
  * is a canned command:
  *
  * - `puts TEXT` prints TEXT on fd 1, `warn TEXT` on fd 2, and each answers `nil`.
- * - `raise CLASS: MESSAGE` answers with that error.
+ * - `raise CLASS: MESSAGE` answers with that error, raised at `(repl):1`.
+ * - `wrap CLASS: MESSAGE` answers with that error, raised at `(repl):2` over a `KeyError: root` cause.
  * - `sleep MS` answers `1` after MS milliseconds, or raises `Interrupt` on a SIGINT before then.
  * - `nap MS` prints `napping` on fd 1, then sleeps as `sleep` does.
  * - `later TEXT` answers `nil`, then prints TEXT on fd 1 after the answer.
@@ -96,7 +97,12 @@ async function evaluate({ id, input }: { id: number; input: string }) {
       return answer(id, "nil")
     case "raise": {
       const [className, message] = argument.split(": ")
-      return send({ type: "error", id, class: className, message })
+      return send({ type: "error", id, class: className, message, backtrace: ["(repl):1:in '<main>'"], causes: [] })
+    }
+    case "wrap": {
+      const [className, message] = argument.split(": ")
+      const cause = { class: "KeyError", message: "root", backtrace: ["(repl):1:in 'fetch'", "(repl):1:in '<main>'"] }
+      return send({ type: "error", id, class: className, message, backtrace: ["(repl):2:in '<main>'"], causes: [cause] })
     }
     case "nap":
       process.stdout.write("napping\n")
@@ -124,6 +130,6 @@ async function sleep(id: number, ms: number) {
   const interrupted = new Promise<true>((resolve) => (interrupt = () => resolve(true)))
   const woken = await Promise.race([interrupted, Bun.sleep(ms)])
   interrupt = () => {}
-  if (woken) return send({ type: "error", id, class: "Interrupt", message: "" })
+  if (woken) return send({ type: "error", id, class: "Interrupt", message: "", backtrace: ["(repl):1:in 'sleep'"], causes: [] })
   return answer(id, "1")
 }

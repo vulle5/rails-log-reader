@@ -30,13 +30,23 @@ export type ReplState =
  */
 export type ExitedState = { kind: "exited"; code: number | null; signal: string | null; stderr: string }
 
+/**
+ * An error an evaluation raised. Its `backtrace` runs from where it was raised down to the
+ * developer's last `(repl):N` frame, so it holds none of the eval loop's own, and is empty for
+ * an error that came before any of their code ran, such as a SyntaxError.
+ */
+export type RubyError = { className: string; message: string; backtrace: string[] }
+
+/**
+ * How an evaluation ended. An `error`'s `causes` are the errors that led to it, nearest first.
+ */
 export type Outcome =
   /**
    * Its value's `pretty_inspect`, cut to 64 KB when `cut`, and the value laid out as `tree`.
    * `inspectError` says what an `inspect` raised while the result was built, when one did.
    */
   | { kind: "result"; text: string; cut: boolean; tree: RubyNode; inspectError: string | null }
-  | { kind: "error"; className: string; message: string }
+  | ({ kind: "error" } & RubyError & { causes: RubyError[] })
   /** The console process ended before the evaluation answered. */
   | { kind: "lost" }
 

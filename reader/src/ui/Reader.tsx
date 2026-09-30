@@ -450,6 +450,7 @@ export function Reader({
                 onFold={drawer.fold}
                 onUnfold={drawer.unfold}
                 repl={repl}
+                railsRoot={railsRoot}
                 actsOnlyFrom={actsOnlyFrom}
                 className="col-span-3 row-start-3"
               />

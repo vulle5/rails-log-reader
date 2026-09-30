@@ -12,7 +12,8 @@
 #        {"type":"check","id":2,"text":"[1, 2].each do |x|"}
 #   out: {"type":"ready","pid":48213,"capabilities":["check"]}
 #        {"type":"result","id":1,"text":"2","cut":false,"tree":{"type":"integer","inspect":"2"}}
-#        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ..."}
+#        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ...",
+#         "backtrace":["(repl):1:in `<main>'"],"causes":[]}
 #        {"type":"checked","id":2,"complete":false}
 #
 # A result's `tree` is its value laid out, and `inspect_error` says what an `inspect` raised while
@@ -32,6 +33,11 @@
 #   {"type":"hash","inspect":"{a: [1, 2]}","pairs":[
 #     [{"type":"symbol","inspect":":a"},
 #      {"type":"array","inspect":"[1, 2]","step":"[:a]","items":[{"type":"integer","inspect":"1","step":"[0]"}],"more":1}]]}
+#
+# An `error`'s `backtrace` runs from where it was raised down to the developer's last `(repl):N`
+# frame, so none of the loop's own frames bury theirs, and is empty when the error came before any
+# of their code ran, such as a SyntaxError. Its `causes` are the errors that led to it, nearest
+# first, each with its own `class`, `message` and `backtrace`, and empty when it had none.
 #
 # `check` asks whether a text is a whole input or needs more lines, and is answered even while
 # an evaluation runs. It uses IRB's lexer, and `ready` lists "check" among its capabilities
@@ -55,6 +61,11 @@ module RailsLogReaderRepl
 
   # What an `inspect` can raise and still leave a result.
   INSPECT_FAILURES = [StandardError, ScriptError, SystemStackError].freeze
+
+  # The file name every frame of the developer's own input carries in a backtrace, and this
+  # file's own path, which every frame of the loop does.
+  EVAL_FILE = "(repl)"
+  LOOP_FILE = __FILE__
 
   # The width `pretty_inspect` wraps a result at.
   WIDTH = 80
@@ -243,7 +254,35 @@ module RailsLogReaderRepl
     rescue Exception => error
       raise if error.is_a?(SignalException) && !error.is_a?(Interrupt)
 
-      send_frame("type" => "error", "id" => id, "class" => class_name(error), "message" => utf8(error.message))
+      send_frame({ "type" => "error", "id" => id }.merge(failure(error)).merge("causes" => causes(error)))
+    end
+
+    # `error`'s class, message and backtrace.
+    def failure(error)
+      { "class" => class_name(error), "message" => utf8(error.message), "backtrace" => backtrace(error) }
+    end
+
+    # The errors behind `error`, nearest first, each as `failure` gives it. An error met again
+    # ends the chain.
+    def causes(error)
+      seen = { error => true }.compare_by_identity
+      causes = []
+      while (error = error.cause) && !seen.key?(error)
+        seen[error] = true
+        causes << failure(error)
+      end
+      causes
+    end
+
+    # `error`'s backtrace down to the developer's last `(repl)` frame, so the loop's own frames
+    # under it are left out. An error with no such frame is cut where the loop's own begin, which
+    # leaves nothing for a SyntaxError and everything for one raised on another thread.
+    def backtrace(error)
+      frames = (error.backtrace || []).map { |frame| utf8(frame) }
+      last = frames.rindex { |frame| frame.start_with?("#{EVAL_FILE}:") }
+      return frames.first(last + 1) if last
+
+      frames.take_while { |frame| !frame.start_with?("#{LOOP_FILE}:") }
     end
 
     def interruptible

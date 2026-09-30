@@ -24,6 +24,7 @@ export function ReplDrawer({
   onFold,
   onUnfold,
   repl,
+  railsRoot,
   actsOnlyFrom,
   className,
 }: {
@@ -31,6 +32,8 @@ export function ReplDrawer({
   onFold: () => void
   onUnfold: () => void
   repl: ReplHandle
+  /** The live Run's `rails_root`, which tells the Host app's own frames of an error's backtrace from a gem's. */
+  railsRoot: string | null
   /** Where acts can be made from, when this page is not there, else `null`. */
   actsOnlyFrom: string | null
   className?: string
@@ -82,7 +85,7 @@ export function ReplDrawer({
         <div className="flex min-h-0 flex-auto flex-col" id={body}>
           {actsOnlyFrom === null ? (
             <>
-              <Transcript entries={repl.snapshot.transcript} />
+              <Transcript entries={repl.snapshot.transcript} railsRoot={railsRoot} />
               {repl.snapshot.state.kind === "exited" && <ExitNotice state={repl.snapshot.state} />}
               <ReplPrompt
                 submit={repl.submit}

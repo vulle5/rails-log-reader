@@ -157,14 +157,32 @@ describe("the REPL session", () => {
     expect(entry).toMatchObject({ outcome: { kind: "result", text: "#<Broken>", inspectError: "RuntimeError: nope" } })
   })
 
-  test("answers an evaluation that raised with its error's class and message", async () => {
+  test("answers an evaluation that raised with its error's class, message and backtrace", async () => {
     const { session } = await aSession()
     const listening = listen(session)
     await booted(listening)
 
     const entry = await evaluate(listening, "raise ArgumentError: nope")
 
-    expect(entry).toMatchObject({ outcome: { kind: "error", className: "ArgumentError", message: "nope" } })
+    expect(entry).toMatchObject({
+      outcome: { kind: "error", className: "ArgumentError", message: "nope", backtrace: ["(repl):1:in '<main>'"], causes: [] },
+    })
+  })
+
+  test("answers an error with the causes behind it, each as its class, message and backtrace", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    const entry = await evaluate(listening, "wrap TypeError: top")
+
+    expect(entry).toMatchObject({
+      outcome: {
+        kind: "error",
+        className: "TypeError",
+        causes: [{ className: "KeyError", message: "root", backtrace: ["(repl):1:in 'fetch'", "(repl):1:in '<main>'"] }],
+      },
+    })
   })
 
   test("interrupts a running evaluation with SIGINT, which ends it as raising Interrupt", async () => {

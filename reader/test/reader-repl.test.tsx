@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
-import type { Outcome, ReplSnapshot, ReplState, RubyNode, TranscriptEntry } from "../src/shared/repl"
+import type { Outcome, ReplSnapshot, ReplState, RubyError, RubyNode, TranscriptEntry } from "../src/shared/repl"
 import { Reader } from "../src/ui/Reader"
 import { aReplSession, openRepl, openTheReader, replDrawer, type ReaderProps } from "./reader.harness"
 import { RUBY_HASH, RUBY_RECORD } from "./repl.fixtures"
@@ -50,6 +50,16 @@ function transcriptEntries() {
 /** A result whose value is `tree`, by default a structureless leaf of its text. */
 function result(text: string, tree: RubyNode = { type: "object", inspect: text }, inspectError: string | null = null): Extract<Outcome, { kind: "result" }> {
   return { kind: "result", text, cut: false, tree, inspectError }
+}
+
+/** An evaluation's error, raised at `(repl):1` unless it says otherwise, with no causes unless it has them. */
+function raised(
+  className: string,
+  message: string,
+  backtrace: string[] = ["(repl):1:in `<main>'"],
+  causes: RubyError[] = [],
+): Extract<Outcome, { kind: "error" }> {
+  return { kind: "error", className, message, backtrace, causes }
 }
 
 function evaluation(entry: Partial<Extract<TranscriptEntry, { kind: "evaluation" }>>): TranscriptEntry {
@@ -403,7 +413,7 @@ describe("the REPL's Transcript", () => {
   test("shows an evaluation that raised as its error's class and message", async () => {
     await openedOver({
       state: READY,
-      transcript: [evaluation({ input: "Post.find(0)", outcome: { kind: "error", className: "ActiveRecord::RecordNotFound", message: "Couldn't find Post with 'id'=0" } })],
+      transcript: [evaluation({ input: "Post.find(0)", outcome: raised("ActiveRecord::RecordNotFound", "Couldn't find Post with 'id'=0") })],
     })
 
     expect(transcriptEntries()[0]).toHaveTextContent("ActiveRecord::RecordNotFound: Couldn't find Post with 'id'=0")
@@ -412,7 +422,7 @@ describe("the REPL's Transcript", () => {
   test("shows an evaluation Ctrl-C stopped as raising Interrupt, with no message after it", async () => {
     await openedOver({
       state: READY,
-      transcript: [evaluation({ input: "sleep 60", outcome: { kind: "error", className: "Interrupt", message: "" } })],
+      transcript: [evaluation({ input: "sleep 60", outcome: raised("Interrupt", "", []) })],
     })
 
     expect(within(transcriptEntries()[0]!).getByText("Interrupt")).toBeInTheDocument()
@@ -455,6 +465,135 @@ describe("the REPL's Transcript", () => {
     await openedOver({ state: EXITED, transcript: [evaluation({ outcome: { kind: "lost" } })] })
 
     expect(transcriptEntries()[0]).toHaveTextContent("The REPL exited before it answered.")
+  })
+})
+
+describe("an evaluation that raised", () => {
+  const GEM = "activerecord (8.0.2) lib/active_record/relation/finder_methods.rb:400:in `find_one'"
+  const OTHER_GEM = "activesupport (8.0.2) lib/active_support/execution_wrapper.rb:91:in `wrap'"
+
+  function backtrace(entry = transcriptEntries()[0]!, at = 0) {
+    return within(within(entry).getAllByRole("list", { name: "Backtrace" })[at]!)
+  }
+
+  test("shows its class, its message and its backtrace", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [evaluation({ input: 'raise "boom"', outcome: raised("RuntimeError", "boom", ["(repl):1:in `<main>'"]) })],
+    })
+
+    const entry = within(transcriptEntries()[0]!)
+    expect(entry.getByText("RuntimeError: boom")).toBeInTheDocument()
+    expect(entry.getAllByRole("listitem").map((frame) => frame.textContent)).toEqual(["(repl):1:in `<main>'"])
+  })
+
+  test("draws no backtrace for an error that came before any of the developer's code ran", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [evaluation({ input: "1 +", outcome: raised("SyntaxError", "(repl):1: syntax error", []) })],
+    })
+
+    expect(within(transcriptEntries()[0]!).queryByRole("list", { name: "Backtrace" })).not.toBeInTheDocument()
+  })
+
+  test("shows its (repl) frames as the developer's own, and never collapses them", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [
+        evaluation({
+          outcome: raised("ActiveRecord::RecordNotFound", "gone", [GEM, OTHER_GEM, "(repl):1:in `find_post'", OTHER_GEM, "(repl):2:in `<main>'"]),
+        }),
+      ],
+    })
+
+    const frames = backtrace().getAllByRole("listitem")
+    expect(frames.map((frame) => frame.textContent)).toEqual([GEM, "1 frame hidden", "(repl):1:in `find_post'", "1 frame hidden", "(repl):2:in `<main>'"])
+    expect(frames[2]).toHaveAttribute("data-frame", "host")
+    expect(frames[4]).toHaveAttribute("data-frame", "host")
+    expect(frames[0]).not.toHaveAttribute("data-frame")
+  })
+
+  test("collapses gem frames into markers that open, as the Detail column's do", async () => {
+    const { user } = await openedOver({
+      state: READY,
+      transcript: [evaluation({ outcome: raised("RuntimeError", "boom", [GEM, OTHER_GEM, "(repl):1:in `<main>'"]) })],
+    })
+
+    await user.click(backtrace().getByRole("button", { name: "1 frame hidden" }))
+
+    expect(backtrace().getAllByRole("listitem").map((frame) => frame.textContent)).toEqual([GEM, OTHER_GEM, "(repl):1:in `<main>'"])
+  })
+
+  test("shows a frame under the app's own directory as the developer's own", async () => {
+    const { repl } = aReplSession({
+      state: READY,
+      transcript: [evaluation({ outcome: raised("RuntimeError", "boom", [GEM, "/srv/shop/app/models/post.rb:3:in `title'", "(repl):1:in `<main>'"]) })],
+    })
+    const { user } = openTheReader([], { repl, railsRoot: "/srv/shop" })
+    await openRepl(user)
+
+    const frames = backtrace().getAllByRole("listitem")
+    expect(frames[1]).toHaveAttribute("data-frame", "host")
+    expect(frames[0]).not.toHaveAttribute("data-frame")
+  })
+
+  test("folds each cause as Caused by, its backtrace shown once it is opened", async () => {
+    const { user } = await openedOver({
+      state: READY,
+      transcript: [
+        evaluation({
+          outcome: raised("RuntimeError", "top", ["(repl):5:in `<main>'"], [
+            { className: "ArgumentError", message: "middle", backtrace: ["(repl):3:in `<main>'"] },
+            { className: "KeyError", message: "root", backtrace: [GEM, "(repl):1:in `<main>'"] },
+          ]),
+        }),
+      ],
+    })
+    const entry = within(transcriptEntries()[0]!)
+
+    const middle = entry.getByRole("button", { name: "Caused by ArgumentError: middle" })
+    const root = entry.getByRole("button", { name: "Caused by KeyError: root" })
+    expect(middle).toHaveAttribute("aria-expanded", "false")
+    expect(entry.getAllByRole("list", { name: "Backtrace" })).toHaveLength(1)
+
+    await user.click(middle)
+
+    expect(middle).toHaveAttribute("aria-expanded", "true")
+    expect(root).toHaveAttribute("aria-expanded", "false")
+    expect(backtrace(transcriptEntries()[0]!, 1).getAllByRole("listitem").map((frame) => frame.textContent)).toEqual(["(repl):3:in `<main>'"])
+
+    await user.click(root)
+
+    expect(backtrace(transcriptEntries()[0]!, 2).getAllByRole("listitem").map((frame) => frame.textContent)).toEqual([GEM, "(repl):1:in `<main>'"])
+  })
+
+  test("folds a cause again when it is closed", async () => {
+    const { user } = await openedOver({
+      state: READY,
+      transcript: [
+        evaluation({ outcome: raised("RuntimeError", "top", [], [{ className: "KeyError", message: "root", backtrace: ["(repl):1:in `<main>'"] }]) }),
+      ],
+    })
+    const entry = within(transcriptEntries()[0]!)
+    const cause = entry.getByRole("button", { name: "Caused by KeyError: root" })
+
+    await user.click(cause)
+    await user.click(cause)
+
+    expect(cause).toHaveAttribute("aria-expanded", "false")
+    expect(entry.queryByRole("list", { name: "Backtrace" })).not.toBeInTheDocument()
+  })
+
+  test("shows a cause with no backtrace as its class and message alone", async () => {
+    const { user } = await openedOver({
+      state: READY,
+      transcript: [evaluation({ outcome: raised("RuntimeError", "top", [], [{ className: "KeyError", message: "never raised", backtrace: [] }]) })],
+    })
+    const entry = within(transcriptEntries()[0]!)
+
+    await user.click(entry.getByRole("button", { name: "Caused by KeyError: never raised" }))
+
+    expect(entry.queryByRole("list", { name: "Backtrace" })).not.toBeInTheDocument()
   })
 })
 

@@ -1,9 +1,12 @@
 /**
- * Whether a frame's path sits under the owning Run's `rails_root`. Exact prefix match on
- * `rails_root` plus a path separator, so a sibling directory like `app-worker` doesn't
- * count. `false` whenever `railsRoot` is `null` — never guessed.
+ * Whether a frame is the developer's own: a `(repl):N` frame, which is their input to the
+ * *REPL* and is theirs whatever `rails_root` is, or a path under the owning Run's `rails_root`.
+ * The path is an exact prefix match on `rails_root` plus a path separator, so a sibling
+ * directory like `app-worker` doesn't count. `false` for a path whenever `railsRoot` is `null`
+ * — never guessed.
  */
 export function isHostFrame(frame: string, railsRoot: string | null): boolean {
+  if (frame.startsWith("(repl):")) return true
   if (railsRoot === null) return false
   return frame.startsWith(`${railsRoot}/`)
 }

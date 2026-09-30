@@ -11,7 +11,7 @@ import {
   type TimelineEvent,
 } from "../src/shared/activity"
 import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
-import { isHostFrame } from "../src/ui/features/detail-column/lib/backtrace"
+import { isHostFrame } from "../src/ui/lib/backtrace"
 import {
   CLOCK_STEPPED_BACK,
   CONSOLE_RUN,

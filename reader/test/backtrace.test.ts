@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { isHostFrame, segmentBacktrace } from "../src/ui/features/detail-column/lib/backtrace"
+import { isHostFrame, segmentBacktrace } from "../src/ui/lib/backtrace"
 
 describe("classifying a backtrace frame against rails_root", () => {
   test("is a Host frame when the path sits under rails_root", () => {
@@ -23,6 +23,29 @@ describe("classifying a backtrace frame against rails_root", () => {
 
   test("is never a Host frame when rails_root is unknown", () => {
     expect(isHostFrame("/home/dev/example-app/app/models/order.rb:44", null)).toBe(false)
+  })
+})
+
+describe("classifying a REPL frame", () => {
+  test("is a Host frame whatever rails_root is, because it is the developer's own input", () => {
+    expect(isHostFrame("(repl):3:in `<main>'", "/home/dev/example-app")).toBe(true)
+    expect(isHostFrame("(repl):3:in `<main>'", null)).toBe(true)
+  })
+
+  test("is not one for a path that merely begins with the same letters", () => {
+    expect(isHostFrame("(replica):3", null)).toBe(false)
+  })
+
+  test("never collapses, beside gem frames that do", () => {
+    const raised = "activerecord (8.0.2) lib/active_record/core.rb:1:in `find'"
+    const gem = "activesupport (8.0.2) lib/active_support/executor.rb:9:in `wrap'"
+    expect(segmentBacktrace([raised, gem, "(repl):1:in `boom'", gem, "(repl):2:in `<main>'"], null)).toEqual([
+      { type: "frame", index: 0, frame: raised, host: false },
+      { type: "gap", from: 1, frames: [gem] },
+      { type: "frame", index: 2, frame: "(repl):1:in `boom'", host: true },
+      { type: "gap", from: 3, frames: [gem] },
+      { type: "frame", index: 4, frame: "(repl):2:in `<main>'", host: true },
+    ])
   })
 })
 

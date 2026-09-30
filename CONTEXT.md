@@ -259,6 +259,12 @@ offers to open that row on its *Result* tab; when it has none, it shows the rest
 cut is the Reader's own fold, so *Search* opens it for a match inside it, and it never cuts what
 the developer opened by hand.
 
+An entry that raised is drawn as an exception is in the *Detail column*: its class and message,
+then its backtrace with gem frames collapsed. The backtrace ends at the developer's last
+`(repl):N` frame, so the eval loop's own frames under it never bury theirs, and it is empty for
+an error that came before any of their code ran, a SyntaxError. Each error behind it, through
+`cause`, is folded as "Caused by" its class and message, and opens to its own backtrace.
+
 **Input history** — the inputs the *REPL* has submitted, kept apart from the *Transcript*
 because it outlives the console process: it survives a Restart and the Reader restarting. It is
 kept in the browser's `localStorage`, keyed by the Host app's Rails root so two apps taking
@@ -529,8 +535,9 @@ called which. The raised frame — `backtrace[0]`, Ruby's own guarantee of where
 exception happened — stays visible whatever its Host-app status; collapsing away the raise
 site by the same rule that hides `ActiveSupport`'s dispatch chain would defeat the column
 on its most common case, a `NoMethodError` or `RecordNotFound` several frames inside a gem.
-A marker's reveal is one-way and unpersisted: clicking opens its frames for the rest of
-that render, and the next render of any exception starts fully collapsed again — no
+A `(repl):N` frame, which is what the developer's *REPL* input is called in a backtrace, is a
+Host-app frame whatever `railsRoot` is, so it is never collapsed. A marker's reveal is one-way
+and unpersisted: clicking opens its frames for the rest of that render, and the next render of any exception starts fully collapsed again — no
 toggle, nothing survives a reload. A trace with no Host-app frame at all (including while
 `railsRoot` is still unknown) is just one marker spanning everything but the raised frame;
 the exception's class and message above it are never hidden by this. *Search* reaches into

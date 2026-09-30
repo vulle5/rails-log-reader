@@ -11,6 +11,7 @@ import {
   type ReplSnapshot,
   type ReplState,
   type ReplUpdate,
+  type RubyError,
   type RubyNode,
 } from "../shared/repl"
 
@@ -47,11 +48,14 @@ export type ReplSession = {
   close: () => void
 }
 
+/** An error's own fields in an `error` frame, as a cause carries them. */
+type ErrorFrame = { class: string; message: string; backtrace: string[] }
+
 /** A frame the eval loop sends on fd 3. */
 type Frame =
   | { type: "ready"; pid: number; capabilities: string[] }
   | { type: "result"; id: number; text: string; cut: boolean; tree: RubyNode; inspect_error?: string }
-  | { type: "error"; id: number; class: string; message: string }
+  | { type: "error"; id: number; class: string; message: string; backtrace: string[]; causes: ErrorFrame[] }
   | { type: "checked"; id: number; complete: boolean }
 
 /** How long a stopped console process has to end on SIGTERM before it is sent SIGKILL. */
@@ -179,7 +183,7 @@ export function replSession(railsRoot: string): ReplSession {
     const outcome: Outcome =
       frame.type === "result"
         ? { kind: "result", text: frame.text, cut: frame.cut, tree: frame.tree, inspectError: frame.inspect_error ?? null }
-        : { kind: "error", className: frame.class, message: frame.message }
+        : { kind: "error", ...rubyError(frame), causes: frame.causes.map(rubyError) }
     publish({ type: "finished", id: frame.id, outcome })
     become({ kind: "ready", pid: state.pid })
   }
@@ -271,6 +275,10 @@ export function replSession(railsRoot: string): ReplSession {
 }
 
 /** Calls `onText` with each piece of text `stream` carries, until it ends. */
+function rubyError({ class: className, message, backtrace }: ErrorFrame): RubyError {
+  return { className, message, backtrace }
+}
+
 async function readText(stream: ReadableStream<Uint8Array>, onText: (text: string) => void) {
   const decoder = new TextDecoder()
   for await (const chunk of stream) onText(decoder.decode(chunk, { stream: true }))
