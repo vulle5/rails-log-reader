@@ -310,6 +310,16 @@ describe("the completion popover", () => {
     expect(await options()).toEqual(["upcase", "upcase!"])
   })
 
+  test("chooses the first candidate again when something is typed after another was chosen", async () => {
+    const { user } = await withPopover()
+    await user.keyboard("{ArrowDown}")
+    expect(await chosen()).toHaveTextContent("upcase!")
+
+    await user.keyboard("c")
+
+    expect(await chosen()).toHaveTextContent("upcase")
+  })
+
   test("closes when the word ends", async () => {
     const { user } = await withPopover()
 
@@ -400,13 +410,26 @@ describe("the completion trigger set to as you type", () => {
     return await opened(state, capabilities)
   }
 
-  test("opens the popover as a word is typed, with nothing chosen", async () => {
+  test("opens the popover as a word is typed, with the first candidate chosen", async () => {
     const { user } = await typing()
 
     await user.type(prompt(), '"abc".up')
 
     expect(await options()).toEqual(["upcase", "upcase!"])
-    expect(within(await theListbox()).queryByRole("option", { selected: true })).not.toBeInTheDocument()
+    expect(await chosen()).toHaveTextContent("upcase")
+  })
+
+  test("chooses the first candidate again when something is typed after another was chosen", async () => {
+    const { user } = await typing()
+    await user.type(prompt(), '"abc".up')
+    await theListbox()
+    await user.keyboard("{ArrowDown}")
+    expect(await chosen()).toHaveTextContent("upcase!")
+
+    await user.type(prompt(), "c")
+
+    expect(await options()).toEqual(["upcase", "upcase!"])
+    expect(await chosen()).toHaveTextContent("upcase")
   })
 
   test("opens it for a single candidate too, and inserts nothing", async () => {
@@ -438,28 +461,39 @@ describe("the completion trigger set to as you type", () => {
     expect(hintRow()).not.toHaveTextContent("Completion")
   })
 
-  test("runs the input on Enter while nothing is chosen", async () => {
+  test("inserts the first candidate on Enter, and runs nothing", async () => {
     const { user, asked } = await typing()
     await user.type(prompt(), '"abc".up')
     await theListbox()
 
     await user.keyboard("{Enter}")
 
+    expect(prompt()).toHaveValue('"abc".upcase')
+    expect(asked.submitted).toEqual([])
+  })
+
+  test("runs the input on Enter once Esc has closed the popover", async () => {
+    const { user, asked } = await typing()
+    await user.type(prompt(), '"abc".up')
+    await theListbox()
+
+    await user.keyboard("{Escape}{Enter}")
+
     expect(asked.submitted).toEqual(['"abc".up'])
   })
 
-  test("inserts the chosen candidate on Enter once ↓ chose one", async () => {
+  test("inserts the chosen candidate on Enter once ↓ chose another", async () => {
     const { user, asked } = await typing()
     await user.type(prompt(), '"abc".up')
     await theListbox()
 
     await user.keyboard("{ArrowDown}{Enter}")
 
-    expect(prompt()).toHaveValue('"abc".upcase')
+    expect(prompt()).toHaveValue('"abc".upcase!')
     expect(asked.submitted).toEqual([])
   })
 
-  test("inserts the first candidate on Tab while nothing is chosen", async () => {
+  test("inserts the first candidate on Tab", async () => {
     const { user } = await typing()
     await user.type(prompt(), '"abc".up')
     await theListbox()

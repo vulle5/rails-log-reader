@@ -27,7 +27,8 @@ type Browsing = { filter: string; back: number }
 /**
  * The open completion popover. Its candidates replace the text from `from` to `caret`, and it
  * holds only while the text before `from` is still `prefix`. `selected` is an index into the
- * candidates that still match what is typed, `-1` while none is chosen.
+ * candidates that still match what is typed. It is the first when the popover opens and again
+ * whenever something is typed.
  */
 type Completing = { from: number; prefix: string; caret: number; receiver: string | null; candidates: readonly Candidate[]; selected: number }
 
@@ -66,14 +67,15 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
  * closes when none do, which is when the word ends. ↑ and ↓ choose, Enter or Tab inserts the
  * chosen candidate without running the input, and Esc, the caret moving off the word, editing
  * before it, or leaving the textarea closes it. With `trigger` `typing`, each thing typed asks
- * for itself: the popover opens for a single candidate too, chooses none until ↓, and says
- * nothing when it cannot, and Enter runs the input while none is chosen.
+ * for itself: the popover opens for a single candidate too, and says
+ * nothing when it cannot. Either way the first candidate is chosen when the popover opens, and
+ * again whenever something is typed, so Enter inserts it.
  *
  * With `suggesting`, the *History suggestion* is grey text after the caret, drawn only while the
  * caret is at the end of the text: the rest of the newest entry that starts with the input. It
  * is found from a deferred copy of the input and drawn only while it still matches the input,
  * and not while the textarea is unfocused or an input method is composing. → or End takes it. The text has one owner: while the popover is open it previews the chosen
- * candidate instead, nothing while none is chosen, and → or End takes that. The *Input history*
+ * candidate instead, and → or End takes that. The *Input history*
  * list open hides it.
  */
 export function ReplPrompt({
@@ -272,7 +274,7 @@ export function ReplPrompt({
         insert(completion.from, caret, completion.candidates[0]!)
       } else {
         const { from, receiver, candidates } = completion
-        setCompleting({ from, prefix: text.slice(0, from), caret, receiver, candidates, selected: explicit ? 0 : -1 })
+        setCompleting({ from, prefix: text.slice(0, from), caret, receiver, candidates, selected: 0 })
       }
     })
   }
@@ -309,7 +311,7 @@ export function ReplPrompt({
   function typedInto(event: ChangeEvent<HTMLTextAreaElement>) {
     const { value, selectionStart } = event.target
     setInput(value)
-    setCompleting((held) => (held === null ? null : { ...held, caret: selectionStart }))
+    setCompleting((held) => (held === null ? null : { ...held, caret: selectionStart, selected: 0 }))
     if (value === "") {
       asks.current++
       setCompleting(null)

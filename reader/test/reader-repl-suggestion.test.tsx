@@ -204,7 +204,7 @@ describe("the History suggestion beside the completion popover", () => {
     expect(suggestion("case.reverse")).toHaveAttribute("data-suggestion", "history")
   })
 
-  test("draws nothing while the popover is open and none of its candidates is chosen", async () => {
+  test("previews the first candidate as soon as the popover opens as a word is typed", async () => {
     localStorage.setItem("rails-log-reader.completion-trigger", "typing")
     kept('"abc".upcase.reverse')
     const { user } = await opened()
@@ -212,7 +212,7 @@ describe("the History suggestion beside the completion popover", () => {
     await user.type(prompt(), '"abc".up')
     await within(replDrawer()).findByRole("listbox", { name: /^Completions/ })
 
-    expect(noSuggestion("case")).not.toBeInTheDocument()
+    expect(suggestion("case")).toHaveAttribute("data-suggestion", "completion")
     expect(noSuggestion("case.reverse")).not.toBeInTheDocument()
   })
 })
