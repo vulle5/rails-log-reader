@@ -764,8 +764,12 @@ module RailsLogReader
         raised = e
         raise
       ensure
-        guard { emit("evaluation_finish", evaluation_outcome(raised, db_before), request_id: id) }
-        guard { Current.reset }
+        # Nested, so an `Interrupt` arriving while the finish is written still resets.
+        begin
+          guard { emit("evaluation_finish", evaluation_outcome(raised, db_before), request_id: id) }
+        ensure
+          Current.reset
+        end
       end
     end
 
@@ -906,8 +910,16 @@ module RailsLogReader
         @disabled = true
         Rails.logger.warn("[rails_log_reader] disabled: #{e.class}: #{e.message}")
       end
+
+      # `evaluation_finish`'s payload: how the evaluation ended, and the SQL time counted since
+      # `db_before`, left off when either reading failed.
       def evaluation_outcome(raised, db_before)
-        outcome = raised ? { outcome: "raised", class: raised.class.name || raised.class.inspect, message: raised.message.to_s } : { outcome: "ok" }
+        outcome =
+          if raised
+            { outcome: "raised", class: raised.class.name || raised.class.inspect, message: raised.message.to_s }
+          else
+            { outcome: "ok" }
+          end
         db_after = sql_runtime
         outcome[:db_runtime_ms] = db_after - db_before if db_before && db_after
         outcome

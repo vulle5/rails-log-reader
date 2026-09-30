@@ -537,7 +537,7 @@ module RailsLogReaderRepl
     end
 
     def sandbox?
-      Rails.application.respond_to?(:sandbox?) && Rails.application.sandbox? ? true : false
+      Rails.application.respond_to?(:sandbox?) && Rails.application.sandbox? == true
     end
 
     def interruptible

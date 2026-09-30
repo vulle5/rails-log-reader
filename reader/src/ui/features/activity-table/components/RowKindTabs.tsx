@@ -2,8 +2,7 @@ import type { ActivityRow } from "../../../../shared/activity"
 
 /**
  * The Activity table's tabs, which filter by **row kind and nothing else**: Requests, Runs,
- * All. An *Evaluation row* has no tab of its own and shows under All alone, because the REPL's
- * *Transcript* already lists evaluations. Never by method, status or controller — v1 rules those out, and a tab that grew one
+ * All. An *Evaluation row* has no tab of its own and shows under All alone. Never by method, status or controller — v1 rules those out, and a tab that grew one
  * of them would be that exclusion returning by drift rather than by decision.
  *
  * Each carries a count of everything of its kind the Reader holds, whichever tab is showing,

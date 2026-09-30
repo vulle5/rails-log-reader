@@ -83,26 +83,8 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
     heading: "Started",
     fixed: true,
     description: "When it started",
-    request: (row) => (
-      // A *Partial request* has no start to show, which is exactly where it says so: the
-      // column that would have said when this began says instead that nobody saw it begin.
-      <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
-        {row.partial ? (
-          <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge>
-        ) : (
-          clock(row.startedAtWall)
-        )}
-        {/* A different fact from `partial`, and never in tension with it: the *last row
-            standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
-        <OverBoundMark row={row} />
-      </Cell>
-    ),
-    evaluation: (row) => (
-      <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
-        {row.partial ? <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge> : clock(row.startedAtWall)}
-        <OverBoundMark row={row} />
-      </Cell>
-    ),
+    request: (row) => <StartedCell row={row} />,
+    evaluation: (row) => <StartedCell row={row} />,
     run: (row) => (
       <Cell className="text-faint">
         {clock(row.startedAtWall)}
@@ -139,7 +121,6 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
         </MethodText>
       </Cell>
     ),
-    // `sandbox` because what it wrote was rolled back.
     evaluation: (row) => (
       <Cell className="font-bold text-muted group-data-[state=interrupted]:text-faint">
         REPL
@@ -216,14 +197,8 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
     heading: "Total",
     fixed: true,
     description: `The whole request, middleware included, so a bit longer than Rails' "Completed in" time`,
-    // What the request said it took, or — where it said nothing — what the Reader can prove
-    // it took. A finish that carried no `duration_ms` at all, the Initializer having never
-    // seen that request start, reads exactly as an in-flight row does, as the distance
-    // between the request's own first and last events, frozen. Never a `0ms` standing in for
-    // a number nobody has.
-    request: (row) => <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>,
-    // From its start to its finish, both in its Run's own clock.
-    evaluation: (row) => <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>,
+    request: (row) => <TotalCell row={row} />,
+    evaluation: (row) => <TotalCell row={row} />,
     run: () => <NumberCell total />,
   },
 ]
@@ -359,6 +334,7 @@ function EvaluationRow({ columns, row, selected, pinned, lit, onSelect }: RowPro
 function InputCell({ input, colSpan }: { input: string | null; colSpan: number }) {
   const [first = "", ...more] = (input ?? "").split("\n")
   return (
+    // The path's cap and the action's together, in characters, as the cells it spans are capped.
     <Cell className="max-w-[68ch] group-data-[state=interrupted]:text-faint" colSpan={colSpan} title={first}>
       <Highlight text={first} />
       {more.length > 0 && <span className="ml-2 text-faint">+{more.length} lines</span>}
@@ -440,6 +416,33 @@ function RunDescriptionCell({ row, colSpan }: { row: Run; colSpan: number }) {
       </span>
     </Cell>
   )
+}
+
+/**
+ * When a Request row or an Evaluation row started. A *Partial request* has no start to show,
+ * which is exactly where it says so: the column that would have said when this began says
+ * instead that nobody saw it begin.
+ */
+function StartedCell({ row }: { row: Request | Evaluation }) {
+  return (
+    <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
+      {row.partial ? <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge> : clock(row.startedAtWall)}
+      {/* A different fact from `partial`, and never in tension with it: the *last row
+          standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
+      <OverBoundMark row={row} />
+    </Cell>
+  )
+}
+
+/**
+ * What a request said it took, or an evaluation's start to its finish — or, where there is
+ * neither, what the Reader can prove it took. A finish that carried no `duration_ms` at all,
+ * the Initializer having never seen that request start, reads exactly as an in-flight row
+ * does, as the distance between the row's own first and last events, frozen. Never a `0ms`
+ * standing in for a number nobody has.
+ */
+function TotalCell({ row }: { row: Request | Evaluation }) {
+  return <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>
 }
 
 /**
@@ -545,11 +548,7 @@ function Status({ row }: { row: Request }) {
   )
 }
 
-/**
- * An evaluation's state: the dot while it runs or once its Run ended under it, then how it
- * ended. `ok` is faint, because finishing is the ordinary case, and `raised` is in the error
- * colour, because it failed.
- */
+/** An evaluation's state: the dot while it runs or once its Run ended under it, then a faint `ok` or a `raised` in the error colour. */
 function EvaluationStatus({ row }: { row: Evaluation }) {
   if (row.outcome === null) return <StateDot state={row.state === "interrupted" ? "interrupted" : "in-flight"} />
 

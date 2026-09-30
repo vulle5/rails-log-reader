@@ -402,9 +402,8 @@ export function activityTable(): ActivityTable {
     const existing = byRequest.get(requestId)
     if (existing !== undefined) return existing
 
-    const evaluation = envelope.type === "evaluation_start" || envelope.type === "evaluation_finish"
     const folding: Folding = {
-      row: evaluation ? evaluationRow(requestId, envelope) : {
+      row: isEvaluationEvent(envelope) ? evaluationRow(requestId, envelope) : {
         kind: "request",
         id: requestRowId(requestId),
         requestId,
@@ -445,23 +444,24 @@ export function activityTable(): ActivityTable {
   }
 
   /**
-   * Whether `folding` takes `envelope`. A row opened by children alone, whose owner is not yet
-   * known, becomes an Evaluation row when an evaluation's event names it. Otherwise an event of
-   * the other owner's kind is one no Initializer writes, and is left out.
+   * Whether `folding` takes `envelope`: an SQL or App log event, or an event of its own owner's
+   * kind. An evaluation's event naming a row opened by children alone first makes it an
+   * Evaluation row, since that is the owner it turned out to have. Any other event of the other
+   * owner's kind is one no Initializer writes, and is left out.
    */
   function claims(folding: Folding, envelope: Envelope) {
-    const evaluationEvent = envelope.type === "evaluation_start" || envelope.type === "evaluation_finish"
-    const requestEvent =
-      envelope.type === "request_start" ||
-      envelope.type === "request_route" ||
-      envelope.type === "request_finish" ||
-      envelope.type === "response"
     const row = folding.row
-
-    if (row.kind === "evaluation") return !requestEvent
-    if (!evaluationEvent) return true
+    if (envelope.type === "sql" || envelope.type === "app_log") return true
+    if (row.kind === "evaluation") return isEvaluationEvent(envelope)
+    if (!isEvaluationEvent(envelope)) return true
     if (!row.partial || row.method !== null || row.controller !== null || row.status !== null || row.response !== null) return false
 
+    becomeEvaluation(folding, row, envelope)
+    return true
+  }
+
+  /** `folding`'s Request row replaced, where it stands, by an Evaluation row holding what it held. */
+  function becomeEvaluation(folding: Folding, row: FoldingRow & RequestRow, envelope: Envelope) {
     const evaluation = evaluationRow(row.requestId, envelope)
     evaluation.state = row.state
     evaluation.overBound = row.overBound
@@ -473,7 +473,6 @@ export function activityTable(): ActivityTable {
     if (at !== -1) rows[at] = evaluation
     if (overBoundRow === row) overBoundRow = evaluation
     folding.row = evaluation
-    return true
   }
 
   function runningFor(envelope: Envelope) {
@@ -751,7 +750,7 @@ export function activityTable(): ActivityTable {
     count(folding)
 
     if (row.kind === "evaluation") {
-      if (envelope.type === "evaluation_start" || envelope.type === "evaluation_finish") foldEvaluation(folding, row, envelope)
+      if (isEvaluationEvent(envelope)) foldEvaluation(folding, row, envelope)
       else if (envelope.type === "sql" || envelope.type === "app_log") foldChild(folding, row, envelope)
       return
     }
@@ -962,6 +961,10 @@ export function activityTable(): ActivityTable {
   }
 
   return { rows, fold, foldEarlier }
+}
+
+function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {
+  return envelope.type === "evaluation_start" || envelope.type === "evaluation_finish"
 }
 
 /** An Evaluation row, opened by `envelope`: partial unless that is its `evaluation_start`. */
