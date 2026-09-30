@@ -112,6 +112,7 @@ export function aReplSession(
   const held = { ...EMPTY_SNAPSHOT, ...snapshot }
   const repl: ReplHandle = {
     snapshot: held,
+    loaded: true,
     refusal,
     boot: () => {
       asked.boots++

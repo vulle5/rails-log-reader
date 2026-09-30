@@ -7,6 +7,7 @@ import type { CompletionTrigger } from "../../../hooks/completion-trigger"
 import { cn } from "../../../lib/cn"
 import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
+import { useUnseenResult, type UnseenResult } from "../hooks/unseen-result"
 import { ReplPrompt } from "./ReplPrompt"
 import { Transcript } from "./Transcript"
 
@@ -14,6 +15,10 @@ import { Transcript } from "./Transcript"
  * The *REPL* drawer: an outlined panel under the Console and the Activity table, headed "REPL"
  * the way a column is. The header is the same element open or folded, and folding drops only
  * the body. Folded, the whole header opens it; its fold button is the keyboard's way in.
+ *
+ * A folded header carries the *Unseen result* after the name: a `new` mark, in the error colour
+ * when the latest unseen evaluation raised or lost its console process. Nothing here unfolds the
+ * drawer.
  *
  * The header's right side is the status slot, before the fold button: what the console
  * process is doing, open or folded. The body is the *Transcript* over the prompt, with how the
@@ -51,6 +56,7 @@ export function ReplDrawer({
   const { boot } = repl
   const history = useInputHistory(railsRoot, repl.snapshot)
   const { state } = repl.snapshot
+  const unseen = useUnseenResult(repl.snapshot.transcript, folded && repl.loaded)
 
   useEffect(() => {
     if (!folded && actsOnlyFrom === null) boot()
@@ -71,7 +77,10 @@ export function ReplDrawer({
         )}
         onClick={folded ? onUnfold : undefined}
       >
-        <ColumnHeading>REPL</ColumnHeading>
+        <div className="flex min-w-0 items-center gap-2">
+          <ColumnHeading>REPL</ColumnHeading>
+          {unseen !== null && <UnseenMark result={unseen} />}
+        </div>
         <div className="flex min-w-0 items-center gap-3">
           <ReplStatus snapshot={repl.snapshot} />
           <button
@@ -119,6 +128,19 @@ export function ReplDrawer({
         </div>
       )}
     </section>
+  )
+}
+
+/** The *Unseen result* mark. */
+function UnseenMark({ result }: { result: UnseenResult }) {
+  return (
+    <span
+      className="flex-none rounded-chip bg-accent px-1 text-2xs font-semibold text-background data-[outcome=error]:bg-error"
+      data-outcome={result}
+      title={result === "error" ? "An evaluation failed while this was folded" : "An evaluation finished while this was folded"}
+    >
+      new
+    </span>
   )
 }
 

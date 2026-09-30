@@ -15,6 +15,8 @@ import {
 /** What `Reader` is handed of the *REPL* session: what it holds, and what can be asked of it. */
 export type ReplHandle = {
   snapshot: ReplSnapshot
+  /** Whether the server has sent this page a snapshot, rather than `snapshot` being the empty one held before it. */
+  loaded: boolean
   /** Starts the console process unless one has been started. Asked while the drawer is open. */
   boot: () => void
   /** Sends `input` to run, or says why it will not: `null` when it was sent. */
@@ -41,6 +43,7 @@ export type ReplHandle = {
 /** A session this page is not attached to: never started, and refusing every input. */
 export const DETACHED_REPL: ReplHandle = {
   snapshot: EMPTY_SNAPSHOT,
+  loaded: false,
   boot: () => {},
   submit: () => submitRefusal(EMPTY_SNAPSHOT.state),
   check: async () => true,
@@ -67,6 +70,7 @@ const RECONNECT_MS = 1_000
  */
 export function useReplSession(mayAct: boolean): ReplHandle {
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT)
+  const [loaded, setLoaded] = useState(false)
   const [refusal, setRefusal] = useState<ReplHandle["refusal"]>(null)
   const socket = useRef<WebSocket | null>(null)
   const booting = useRef(false)
@@ -93,7 +97,10 @@ export function useReplSession(mayAct: boolean): ReplHandle {
       }
       opened.onmessage = (event) => {
         const message = JSON.parse(String(event.data)) as ReplMessage
-        if (message.type === "snapshot") setSnapshot(message.snapshot)
+        if (message.type === "snapshot") {
+          setSnapshot(message.snapshot)
+          setLoaded(true)
+        }
         else if (message.type === "refused") setRefusal({ reason: message.reason, input: message.input })
         else if (message.type === "checked") answered(message.id, message.complete)
         else if (message.type === "completions") completed(message.id, message.completion)
@@ -176,7 +183,7 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "restart", sandbox })
   }
 
-  return { snapshot, boot, submit, check, complete, interrupt, restart, refusal }
+  return { snapshot, loaded, boot, submit, check, complete, interrupt, restart, refusal }
 }
 
 function send(socket: WebSocket, command: ReplCommand) {
