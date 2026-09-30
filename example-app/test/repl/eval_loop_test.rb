@@ -359,8 +359,8 @@ class EvalLoopTest < ActiveSupport::TestCase
 
   test "ends an error's backtrace at the evaluation, with none of the loop's own frames" do
     DevelopmentRun.console_process do |repl|
-      repl.evaluate("def boom = raise('deep')")
-      repl.evaluate("def outer = [1].each { boom }")
+      repl.evaluate("def boom; raise('deep'); end")
+      repl.evaluate("def outer; [1].each { boom }; end")
       answer = repl.evaluate("outer")
 
       assert_equal "(repl):1", answer["backtrace"].first[/\A\(repl\):\d+/]
@@ -468,6 +468,7 @@ class EvalLoopTest < ActiveSupport::TestCase
       interrupting.join
 
       assert_equal ["error", "Interrupt", ""], answer.values_at("type", "class", "message")
+      assert answer["backtrace"].all? { |frame| frame.start_with?("(repl):") }, answer["backtrace"].inspect
       assert_equal "2", repl.evaluate("1 + 1")["text"]
     end
   end

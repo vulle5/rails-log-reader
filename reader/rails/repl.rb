@@ -266,23 +266,30 @@ module RailsLogReaderRepl
     # ends the chain.
     def causes(error)
       seen = { error => true }.compare_by_identity
-      causes = []
-      while (error = error.cause) && !seen.key?(error)
-        seen[error] = true
-        causes << failure(error)
+      chain = []
+      current = error
+      while (cause = current.cause) && !seen.key?(cause)
+        seen[cause] = true
+        chain << failure(cause)
+        current = cause
       end
-      causes
+      chain
     end
 
-    # `error`'s backtrace down to the developer's last `(repl)` frame, so the loop's own frames
+    # `error`'s backtrace from its first frame that is not the loop's own, such as the trap that
+    # raised an `Interrupt`, down to the developer's last `(repl)` frame, so the loop's frames
     # under it are left out. An error with no such frame is cut where the loop's own begin, which
     # leaves nothing for a SyntaxError and everything for one raised on another thread.
     def backtrace(error)
       frames = (error.backtrace || []).map { |frame| utf8(frame) }
       last = frames.rindex { |frame| frame.start_with?("#{EVAL_FILE}:") }
-      return frames.first(last + 1) if last
+      return frames.take_while { |frame| !loop_frame?(frame) } unless last
 
-      frames.take_while { |frame| !frame.start_with?("#{LOOP_FILE}:") }
+      frames.first(last + 1).drop_while { |frame| loop_frame?(frame) }
+    end
+
+    def loop_frame?(frame)
+      frame.start_with?("#{LOOP_FILE}:")
     end
 
     def interruptible

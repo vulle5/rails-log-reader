@@ -274,11 +274,12 @@ export function replSession(railsRoot: string): ReplSession {
   }
 }
 
-/** Calls `onText` with each piece of text `stream` carries, until it ends. */
+/** An error frame's fields, named as the Reader names them. */
 function rubyError({ class: className, message, backtrace }: ErrorFrame): RubyError {
   return { className, message, backtrace }
 }
 
+/** Calls `onText` with each piece of text `stream` carries, until it ends. */
 async function readText(stream: ReadableStream<Uint8Array>, onText: (text: string) => void) {
   const decoder = new TextDecoder()
   for await (const chunk of stream) onText(decoder.decode(chunk, { stream: true }))

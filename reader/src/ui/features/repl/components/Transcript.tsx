@@ -81,7 +81,7 @@ function Answer({ outcome, railsRoot }: { outcome: Outcome; railsRoot: string | 
     case "error":
       return (
         <>
-          <Text className="text-error">{outcome.message === "" ? outcome.className : `${outcome.className}: ${outcome.message}`}</Text>
+          <Text className="text-error">{described(outcome)}</Text>
           <Backtrace className="mt-1" backtrace={outcome.backtrace} railsRoot={railsRoot} />
           {outcome.causes.map((cause, at) => (
             <Cause key={at} cause={cause} railsRoot={railsRoot} />
@@ -91,6 +91,11 @@ function Answer({ outcome, railsRoot }: { outcome: Outcome; railsRoot: string | 
     case "lost":
       return <ErrorNote>The REPL exited before it answered.</ErrorNote>
   }
+}
+
+/** An error as its class, then its message when it has one. */
+function described({ className, message }: RubyError) {
+  return message === "" ? className : `${className}: ${message}`
 }
 
 /** An error's cause, folded to "Caused by" its class and message, and its backtrace once opened. */
@@ -106,7 +111,7 @@ function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | nul
         onClick={() => setOpen(!open)}
       >
         <Marker>{open ? "▾ " : "▸ "}</Marker>
-        {cause.message === "" ? `Caused by ${cause.className}` : `Caused by ${cause.className}: ${cause.message}`}
+        {`Caused by ${described(cause)}`}
       </button>
       {open && <Backtrace className="mt-1" backtrace={cause.backtrace} railsRoot={railsRoot} />}
     </div>
