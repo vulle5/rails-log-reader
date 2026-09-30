@@ -579,6 +579,58 @@ describe("a REPL result", () => {
     expect(within(member).queryByRole("button", { name: "Copy path" })).not.toBeInTheDocument()
   })
 
+  test("copies the whole result as its inspect text", async () => {
+    const { user } = await openedOver({ state: READY, transcript: [evaluation({ outcome: result(PRETTY, HASH) })] })
+
+    await user.click(within(transcriptEntries()[0]!).getByRole("button", { name: "Copy result" }))
+
+    expect(await navigator.clipboard.readText()).toBe(HASH.inspect)
+  })
+
+  test("copies a nested node's inspect text, and the [...] path that reaches it", async () => {
+    const { user } = await openedOver({ state: READY, transcript: [evaluation({ outcome: result(PRETTY, HASH) })] })
+    await user.click(within(resultTree()).getByRole("treeitem", { name: /"b"/ }))
+    const array = within(resultTree()).getByRole("treeitem", { name: /"b"/ })
+    const symbol = within(array).getByRole("treeitem", { name: "2: :c" })
+
+    await user.click(within(symbol).getByRole("button", { name: "Copy value" }))
+    expect(await navigator.clipboard.readText()).toBe(":c")
+
+    await user.click(within(symbol).getByRole("button", { name: "Copy path" }))
+    expect(await navigator.clipboard.readText()).toBe('["b"][2]')
+
+    // The array's own controls are the first under its item, ahead of its children's.
+    await user.click(within(array).getAllByRole("button", { name: "Copy value" })[0]!)
+    expect(await navigator.clipboard.readText()).toBe("[1.0, nil, :c]")
+  })
+
+  test("names each copy control after the node it copies", async () => {
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: result(PRETTY, HASH) })] })
+
+    const leaf = within(resultTree()).getByRole("treeitem", { name: "a: 1" })
+
+    expect(within(leaf).getByRole("button", { name: "Copy value" })).toHaveAccessibleDescription("a: 1")
+    expect(within(leaf).getByRole("button", { name: "Copy path" })).toHaveAccessibleDescription("a: 1")
+  })
+
+  test("offers no path to copy under an ivar, only the value", async () => {
+    const money: RubyNode = {
+      type: "object",
+      class: "Money",
+      inspect: "#<Money:0x0 @parts=[1]>",
+      step: "[0]",
+      fields: [["@parts", { type: "array", inspect: "[1]", items: [{ type: "integer", inspect: "1" }] }]],
+    }
+    const tree: RubyNode = { type: "array", inspect: `[${money.inspect}]`, items: [money] }
+    const { user } = await openedOver({ state: READY, transcript: [evaluation({ outcome: result(tree.inspect, tree) })] })
+    await user.click(within(resultTree()).getByRole("treeitem", { name: /Money/ }))
+    await user.click(within(resultTree()).getByRole("treeitem", { name: /@parts/ }))
+
+    const part = within(resultTree()).getByRole("treeitem", { name: "0: 1" })
+    expect(within(part).getByRole("button", { name: "Copy value" })).toBeInTheDocument()
+    expect(within(part).queryByRole("button", { name: "Copy path" })).not.toBeInTheDocument()
+  })
+
   test("shows a value whose inspect raised as a result, noting what inspect raised", async () => {
     await openedOver({
       state: READY,
