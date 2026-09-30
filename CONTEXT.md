@@ -292,10 +292,12 @@ whether Tab opens the popover or each word typed does. See
 _Avoid_: autocomplete, intellisense.
 
 **History suggestion** — the grey text after the caret offering the newest *Input history*
-entry that starts with what has been typed; → takes it. It is computed from a deferred copy of
-the input, and drawn only while it still matches, so typing never waits on it. While the
-completion popover is open, the grey text previews the selected candidate instead: it belongs to
-whichever is showing, and never means both at once. It can be turned off in *Settings*.
+entry that starts with what has been typed, drawn only while the caret is at the end of the
+text; → or End takes it. It is computed from a deferred copy of the input, and drawn only while
+it still matches, so typing never waits on it. While the completion popover is open, the grey
+text previews the selected candidate instead, and nothing while none is selected, and → or End
+takes that: it belongs to whichever is showing, and never means both at once. It can be turned
+off in *Settings*, and is remembered as what is off.
 _Avoid_: autosuggestion, ghost text.
 
 **Unseen result** — the mark on a folded *REPL* drawer: an *Evaluation* finished since this tab

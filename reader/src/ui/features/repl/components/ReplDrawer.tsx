@@ -29,6 +29,7 @@ export function ReplDrawer({
   railsRoot,
   actsOnlyFrom,
   completionTrigger,
+  historySuggestion,
   className,
 }: {
   folded: boolean
@@ -41,6 +42,8 @@ export function ReplDrawer({
   actsOnlyFrom: string | null
   /** What opens the prompt's completion popover. */
   completionTrigger: CompletionTrigger
+  /** Whether the prompt offers the *History suggestion*. */
+  historySuggestion: boolean
   className?: string
 }) {
   const body = useId()
@@ -104,6 +107,7 @@ export function ReplDrawer({
                 busy={state.kind === "busy"}
                 history={history}
                 trigger={completionTrigger}
+                suggesting={historySuggestion}
                 pid={runningPid(state)}
                 // Keyed by the session's choice, so the toggle starts from it again whenever it changes.
                 actions={<RestartControls key={String(repl.snapshot.sandbox)} sandboxed={repl.snapshot.sandbox} restart={repl.restart} />}

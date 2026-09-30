@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react"
+import { useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from "react"
 
 import type { Candidate } from "../../../../shared/repl"
 import type { CompletionTrigger } from "../../../hooks/completion-trigger"
@@ -30,6 +30,9 @@ type Browsing = { filter: string; back: number }
  * candidates that still match what is typed, `-1` while none is chosen.
  */
 type Completing = { from: number; prefix: string; caret: number; receiver: string | null; candidates: readonly Candidate[]; selected: number }
+
+/** The grey text after the caret: `rest` is what it adds, and `owner` is what it is the suggestion of. */
+type Suggested = { owner: "history" | "completion"; rest: string }
 
 /** What is in the hint row for a moment: why an input was refused, or why nothing completed. */
 type Notice = { reason: string; error: boolean }
@@ -65,6 +68,13 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
  * before it, or leaving the textarea closes it. With `trigger` `typing`, each thing typed asks
  * for itself: the popover opens for a single candidate too, chooses none until ↓, and says
  * nothing when it cannot, and Enter runs the input while none is chosen.
+ *
+ * With `suggesting`, the *History suggestion* is grey text after the caret, drawn only while the
+ * caret is at the end of the text: the rest of the newest entry that starts with the input. It
+ * is found from a deferred copy of the input and drawn only while it still matches the input,
+ * and not while the textarea is unfocused or an input method is composing. → or End takes it. The text has one owner: while the popover is open it previews the chosen
+ * candidate instead, nothing while none is chosen, and → or End takes that. The *Input history*
+ * list open hides it.
  */
 export function ReplPrompt({
   submit,
@@ -75,6 +85,7 @@ export function ReplPrompt({
   busy,
   history,
   trigger,
+  suggesting,
   pid,
   actions,
 }: Pick<ReplHandle, "submit" | "check" | "complete" | "interrupt" | "refusal"> & {
@@ -82,6 +93,8 @@ export function ReplPrompt({
   history: InputHistory
   /** What opens the completion popover. */
   trigger: CompletionTrigger
+  /** Whether the *History suggestion* is offered. */
+  suggesting: boolean
   /** The console process running now, `null` when none is. */
   pid: number | null
   actions?: ReactNode
@@ -90,6 +103,10 @@ export function ReplPrompt({
   const [browsing, setBrowsing] = useState<Browsing | null>(null)
   const [completing, setCompleting] = useState<Completing | null>(null)
   const [place, setPlace] = useState({ left: 0, top: 0 })
+  // Whether the caret is at the end of the text with nothing selected, which is the only place grey text can follow it.
+  const [atEnd, setAtEnd] = useState(true)
+  // An input method is composing, whose text the textarea has yet to settle.
+  const [composing, setComposing] = useState(false)
   const listId = useId()
   const completionId = useId()
   // An object, so a second notice with the same words shows for its own moment.
@@ -107,9 +124,12 @@ export function ReplPrompt({
   const caret = useRef<number | null>(null)
 
   useLayoutEffect(() => {
-    if (caret.current === null) return
-    box.current?.setSelectionRange(caret.current, caret.current)
-    caret.current = null
+    if (box.current === null) return
+    if (caret.current !== null) {
+      box.current.setSelectionRange(caret.current, caret.current)
+      caret.current = null
+    }
+    markCaret(box.current)
   }, [input])
 
   // A value that shrinks can clamp the textarea's scroll without a scroll event.
@@ -148,11 +168,45 @@ export function ReplPrompt({
     if (completing !== null && !holds) setCompleting(null)
   }, [completing, holds])
 
+  // The newest entry starting with a deferred copy of the input, so typing never waits on the search.
+  const deferred = useDeferredValue(input)
+  const remembered = useMemo(
+    () => (suggesting && deferred !== "" ? history.entries.findLast((entry) => entry.input.length > deferred.length && entry.input.startsWith(deferred)) : undefined),
+    [suggesting, deferred, history.entries],
+  )
+  const suggested = suggest()
+
   // Where the word starts on the page, read off an invisible copy of the text before it that wraps as the textarea does.
   useLayoutEffect(() => {
     if (open === null || wordStart.current === null) return
     setPlace({ left: wordStart.current.offsetLeft, top: wordStart.current.offsetTop - (box.current?.scrollTop ?? 0) })
   }, [open?.from, open?.prefix, input])
+
+  function markCaret(textarea: HTMLTextAreaElement) {
+    setAtEnd(caretAtEnd(textarea))
+  }
+
+  /** The grey text to draw: the chosen candidate's rest while the popover is open, else the newest matching history entry's. */
+  function suggest(): Suggested | null {
+    if (!suggesting || !atEnd || composing || browsing !== null) return null
+    if (open !== null) {
+      const candidate = picked === -1 ? undefined : shown[picked]
+      return candidate === undefined || candidate.text.length === word.length ? null : { owner: "completion", rest: candidate.text.slice(word.length) }
+    }
+    return remembered !== undefined && remembered.input.startsWith(input) && remembered.input.length > input.length
+      ? { owner: "history", rest: remembered.input.slice(input.length) }
+      : null
+  }
+
+  /** Puts what the grey text offers in the input, as if it had been typed. */
+  function take(offered: Suggested) {
+    if (offered.owner === "completion" && open !== null) {
+      insert(open.from, open.caret, shown[picked]!)
+      return
+    }
+    caret.current = input.length + offered.rest.length
+    setInput(input + offered.rest)
+  }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (isCtrlC(event)) {
@@ -160,6 +214,13 @@ export function ReplPrompt({
       setCompleting(null)
       ctrlC(event)
       return
+    }
+    if (suggested !== null && takesSuggestion(event)) {
+      if (caretAtEnd(event.currentTarget)) {
+        event.preventDefault()
+        take(suggested)
+        return
+      }
     }
     if (browsing !== null) {
       browse(event, browsing)
@@ -362,7 +423,16 @@ export function ReplPrompt({
           ref={highlighted}
           aria-hidden="true"
         >
-          <RubyCode source={input} />{" "}
+          <RubyCode source={input} />
+          {suggested !== null && (
+            <>
+              {/* A break opportunity, so the typed text wraps as the textarea wraps it and the grey text after it does not carry its last word onto the next line. */}
+              {"\u200b"}
+              <span className="text-faint" data-suggestion={suggested.owner}>
+                {suggested.rest}
+              </span>
+            </>
+          )}{" "}
         </pre>
         <textarea
           className={cn(
@@ -385,9 +455,18 @@ export function ReplPrompt({
           onBlur={() => {
             setBrowsing(null)
             setCompleting(null)
+            setAtEnd(false)
           }}
+          onFocus={(event) => markCaret(event.currentTarget)}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
           // A click puts the caret somewhere else, which may be off the word.
-          onClick={() => setCompleting(null)}
+          onClick={(event) => {
+            setCompleting(null)
+            markCaret(event.currentTarget)
+          }}
+          onKeyUp={(event) => markCaret(event.currentTarget)}
+          onSelect={(event) => markCaret(event.currentTarget)}
           onScroll={(event) => {
             if (highlighted.current !== null) highlighted.current.scrollTop = event.currentTarget.scrollTop
           }}
@@ -401,6 +480,16 @@ export function ReplPrompt({
       </div>
     </div>
   )
+}
+
+/** Whether the caret is at the end of the text with nothing selected. */
+function caretAtEnd({ selectionStart, selectionEnd, value }: HTMLTextAreaElement) {
+  return selectionStart === selectionEnd && selectionEnd === value.length
+}
+
+/** → or End alone. */
+function takesSuggestion(event: KeyboardEvent) {
+  return (event.key === "ArrowRight" || event.key === "End") && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && !event.nativeEvent.isComposing
 }
 
 /** Ctrl-C alone, which is not the Mac's copy: that is ⌘C. */

@@ -36,6 +36,7 @@ import { Setting, Settings, type SettingsHandle } from "./features/settings/comp
 import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
 import { COMPLETION_TRIGGER, CompletionTriggerSwitch, useCompletionTrigger } from "./hooks/completion-trigger"
+import { HISTORY_SUGGESTION, HistorySuggestionSwitch, useHistorySuggestion } from "./hooks/history-suggestion"
 import { EDITOR_SCHEME, EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
@@ -157,6 +158,7 @@ export function Reader({
   const theme = useTheme()
   const editorScheme = useEditorScheme()
   const completionTrigger = useCompletionTrigger()
+  const historySuggestion = useHistorySuggestion()
   const settings = useRef<SettingsHandle>(null)
   const editor = useMemo(
     () => ({ scheme: editorScheme.scheme, requestScheme: () => settings.current?.open(EDITOR_SCHEME) }),
@@ -327,6 +329,12 @@ export function Reader({
             >
               <CompletionTriggerSwitch trigger={completionTrigger.trigger} onChoose={completionTrigger.choose} />
             </Setting>
+            <Setting
+              label={HISTORY_SUGGESTION}
+              description="Grey text after the REPL's caret offering the newest earlier input that starts with what is typed. → or End takes it."
+            >
+              <HistorySuggestionSwitch on={historySuggestion.on} onChoose={historySuggestion.choose} />
+            </Setting>
           </Settings>
         </div>
       </header>
@@ -461,6 +469,7 @@ export function Reader({
                 railsRoot={railsRoot}
                 actsOnlyFrom={actsOnlyFrom}
                 completionTrigger={completionTrigger.trigger}
+                historySuggestion={historySuggestion.on}
                 className="col-span-3 row-start-3"
               />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's

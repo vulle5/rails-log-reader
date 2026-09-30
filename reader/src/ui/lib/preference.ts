@@ -17,6 +17,7 @@ export type PreferenceSetting =
   | "repl-height"
   | "repl-open"
   | "completion-trigger"
+  | "history-suggestion"
 
 function keyFor(setting: PreferenceSetting) {
   return `rails-log-reader.${setting}`
