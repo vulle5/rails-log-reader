@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   applyReplUpdate,
+  completeRefusal,
   EMPTY_SNAPSHOT,
   isReplUpdate,
   submitRefusal,
+  type Completion,
   type ReplCommand,
   type ReplMessage,
   type ReplSnapshot,
@@ -22,6 +24,12 @@ export type ReplHandle = {
    * console process has no multi-line check, or the page is not connected.
    */
   check: (text: string) => Promise<boolean>
+  /**
+   * What the word ending at `caret` in `text`, counted in UTF-16 code units, could be. Never asked of
+   * the server while an evaluation runs or when the console process has no completion: `none`,
+   * with why, answers then, and when the page is not connected.
+   */
+  complete: (text: string, caret: number) => Promise<Completion>
   /** Interrupts the running evaluation, as Ctrl-C does. */
   interrupt: () => void
   /** Starts a fresh console process, sandboxed when `sandbox`, in place of the one there is. */
@@ -36,10 +44,14 @@ export const DETACHED_REPL: ReplHandle = {
   boot: () => {},
   submit: () => submitRefusal(EMPTY_SNAPSHOT.state),
   check: async () => true,
+  complete: async () => ({ kind: "none", reason: completeRefusal(EMPTY_SNAPSHOT.state, EMPTY_SNAPSHOT.capabilities) ?? "" }),
   interrupt: () => {},
   restart: () => {},
   refusal: null,
 }
+
+/** What a completion comes to when the page is not connected to the Reader. */
+const NOT_CONNECTED: Completion = { kind: "none", reason: "Not connected to the Reader." }
 
 /** How long the page waits before opening `/repl` again once it has closed. */
 const RECONNECT_MS = 1_000
@@ -61,6 +73,9 @@ export function useReplSession(mayAct: boolean): ReplHandle {
   // The checks this tab has asked and not yet been answered, by id.
   const checks = useRef(new Map<number, (complete: boolean) => void>())
   const nextCheck = useRef(1)
+  // The completions this tab has asked and not yet been answered, by id.
+  const completions = useRef(new Map<number, (completion: Completion) => void>())
+  const nextCompletion = useRef(1)
 
   useEffect(() => {
     if (!mayAct) return
@@ -81,11 +96,13 @@ export function useReplSession(mayAct: boolean): ReplHandle {
         if (message.type === "snapshot") setSnapshot(message.snapshot)
         else if (message.type === "refused") setRefusal({ reason: message.reason, input: message.input })
         else if (message.type === "checked") answered(message.id, message.complete)
+        else if (message.type === "completions") completed(message.id, message.completion)
         else if (isReplUpdate(message)) setSnapshot((held) => applyReplUpdate(held, message))
       }
       opened.onclose = () => {
         if (socket.current === opened) socket.current = null
         for (const id of checks.current.keys()) answered(id, true)
+        for (const id of completions.current.keys()) completed(id, NOT_CONNECTED)
         if (!stopped) reconnect = setTimeout(open, RECONNECT_MS)
       }
     }
@@ -130,6 +147,25 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     })
   }
 
+  function completed(id: number, completion: Completion) {
+    completions.current.get(id)?.(completion)
+    completions.current.delete(id)
+  }
+
+  function complete(text: string, caret: number) {
+    const refused = completeRefusal(snapshot.state, snapshot.capabilities)
+    if (refused !== null) return Promise.resolve<Completion>({ kind: "none", reason: refused })
+
+    const open = socket.current
+    if (open?.readyState !== WebSocket.OPEN) return Promise.resolve(NOT_CONNECTED)
+
+    const id = nextCompletion.current++
+    return new Promise<Completion>((resolve) => {
+      completions.current.set(id, resolve)
+      send(open, { type: "complete", id, text, caret })
+    })
+  }
+
   function interrupt() {
     const open = socket.current
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "interrupt" })
@@ -140,7 +176,7 @@ export function useReplSession(mayAct: boolean): ReplHandle {
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "restart", sandbox })
   }
 
-  return { snapshot, boot, submit, check, interrupt, restart, refusal }
+  return { snapshot, boot, submit, check, complete, interrupt, restart, refusal }
 }
 
 function send(socket: WebSocket, command: ReplCommand) {

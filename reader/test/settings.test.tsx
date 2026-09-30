@@ -205,10 +205,11 @@ describe("each setting's description", () => {
   }
 
   test("is Ctrl-worded off macOS, and absent for the Theme", async () => {
-    const [theme, scheme, ...others] = await settingsOn("Linux x86_64")
+    const [theme, scheme, completion, ...others] = await settingsOn("Linux x86_64")
 
     expect(others).toEqual([])
     expect(theme).toHaveAccessibleName("Theme")
+    expect(completion).toHaveAccessibleName("Completion popover")
     expect(theme).not.toHaveAccessibleDescription()
     expect(scheme).toHaveAccessibleName("Editor scheme")
     expect(description(scheme)).toHaveTextContent(
@@ -222,5 +223,56 @@ describe("each setting's description", () => {
     expect(description(scheme)).toHaveTextContent(
       "URI your editor opens files with, like vscode://file{path}:{line}. ⌘-click a file location in the Detail column to open it.",
     )
+  })
+})
+
+const TRIGGER_KEY = "rails-log-reader.completion-trigger"
+
+function triggerButtons(dialog: HTMLElement) {
+  const group = within(dialog).getByRole("group", { name: "Completion popover" })
+  return { onTab: within(group).getByRole("button", { name: "On Tab" }), asYouType: within(group).getByRole("button", { name: "As you type" }) }
+}
+
+describe("the Completion popover setting", () => {
+  test("is on Tab until set, and stores nothing until then", async () => {
+    const { user } = openTheReader()
+    const { onTab, asYouType } = triggerButtons(await openSettings(user))
+
+    expect(onTab).toHaveAttribute("aria-pressed", "true")
+    expect(asYouType).toHaveAttribute("aria-pressed", "false")
+    expect(localStorage.getItem(TRIGGER_KEY)).toBeNull()
+  })
+
+  test("switches between on Tab and as you type, and stores the choice", async () => {
+    const { user } = openTheReader()
+    const { onTab, asYouType } = triggerButtons(await openSettings(user))
+
+    await user.click(asYouType)
+
+    expect(asYouType).toHaveAttribute("aria-pressed", "true")
+    expect(onTab).toHaveAttribute("aria-pressed", "false")
+    expect(localStorage.getItem(TRIGGER_KEY)).toBe("typing")
+
+    await user.click(onTab)
+
+    expect(onTab).toHaveAttribute("aria-pressed", "true")
+    expect(localStorage.getItem(TRIGGER_KEY)).toBe("tab")
+  })
+
+  test("is still chosen on the next page load", async () => {
+    const { user, unmount } = openTheReader()
+    await user.click(triggerButtons(await openSettings(user)).asYouType)
+
+    unmount()
+    const { user: next } = openTheReader()
+
+    expect(triggerButtons(await openSettings(next)).asYouType).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("reads a stored value it does not know as on Tab", async () => {
+    localStorage.setItem(TRIGGER_KEY, "always")
+    const { user } = openTheReader()
+
+    expect(triggerButtons(await openSettings(user)).onTab).toHaveAttribute("aria-pressed", "true")
   })
 })

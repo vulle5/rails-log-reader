@@ -279,6 +279,18 @@ loads, and again only when another tab writes it. It is written on submit, and o
 that evaluation finishes, to mark that it raised, and never on a keystroke.
 _Avoid_: history (alone), which already means the load-on-open Events; command history.
 
+**Completion** — what Tab offers in the *REPL*'s input: the names the word before the caret could
+be, with what kind of name each is, and what it was asked of when it follows a `.` or a `::`. One
+candidate is inserted, and several open a popover at the word that narrows as it is typed and
+closes when the word ends. It comes from IRB's own completor, run by the eval loop in the console
+process: `TypeCompletor` when `repl_type_completor` is in the Host app's bundle, and
+`RegexpCompletor` otherwise, which reads a receiver off its text and never calls a method to do
+it. The loop says which it has when it is ready, and without either there is no completion. It
+is never run beside an *Evaluation*, so while one runs Tab says it waits. A *Setting* chooses
+whether Tab opens the popover or each word typed does. See
+`docs/adr/0014-the-repl-is-a-reader-owned-eval-loop.md`.
+_Avoid_: autocomplete, intellisense.
+
 **History suggestion** — the grey text after the caret offering the newest *Input history*
 entry that starts with what has been typed; → takes it. It is computed from a deferred copy of
 the input, and drawn only while it still matches, so typing never waits on it. While the

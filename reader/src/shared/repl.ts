@@ -114,6 +114,26 @@ export type RubyNode = {
   more?: number | null
 }
 
+/**
+ * What kind of name a completion candidate is: a `method` or a `constant` after a `.` or a `::`,
+ * and where none leads a `local`, a `keyword`, an `ivar`, a `cvar`, a `gvar`, a `symbol` or,
+ * inside a `require`, a `path`.
+ */
+export type CandidateKind = "method" | "constant" | "local" | "ivar" | "cvar" | "gvar" | "keyword" | "symbol" | "path"
+
+/** One completion candidate: the word that replaces what was typed of it, and what kind of name it is. */
+export type Candidate = { text: string; kind: CandidateKind }
+
+/**
+ * What completing the word before a caret came to. Candidates are sorted, each once, and
+ * `from` is where the word starts in the text: each candidate's `text` replaces the text from
+ * there to the caret. `receiver` names what a member was asked of, and is `null` for a name no
+ * `.` or `::` leads. When there are no candidates, `reason` says why.
+ */
+export type Completion =
+  | { kind: "candidates"; from: number; receiver: string | null; candidates: Candidate[] }
+  | { kind: "none"; reason: string }
+
 export type TranscriptEntry =
   /** One *Evaluation*: its input, what it printed, and how it ended, once it has. */
   | { kind: "evaluation"; id: number; input: string; output: string; outputCut: boolean; outcome: Outcome | null }
@@ -140,7 +160,7 @@ export type ReplUpdate =
 
 /**
  * What the server sends a tab. A refusal goes only to the tab whose input was refused, and a
- * check's answer only to the tab that asked, under the id it asked with. The exit notice goes
+ * check's or a completion's answer only to the tab that asked, under the id it asked with. The exit notice goes
  * to every tab, once for each console process that ends, including one a Restart replaced, and
  * changes nothing the session holds.
  */
@@ -149,25 +169,34 @@ export type ReplMessage =
   | ReplUpdate
   | { type: "refused"; reason: string; input: string }
   | { type: "checked"; id: number; complete: boolean }
+  | { type: "completions"; id: number; completion: Completion }
   | { type: "exit"; pid: number }
 
 /**
  * What a tab sends the server. `boot` starts the console process unless one has been started.
- * `check` asks whether `text` is a whole input or needs more lines. `interrupt` interrupts the
+ * `check` asks whether `text` is a whole input or needs more lines, and `complete` what the word
+ * ending at `caret` in `text`, counted in UTF-16 code units, could be. `interrupt` interrupts the
  * running evaluation, if any. `restart` stops the one running, if any, and starts a fresh one.
  */
 export type ReplCommand =
   | { type: "boot" }
   | { type: "submit"; input: string }
   | { type: "check"; id: number; text: string }
+  | { type: "complete"; id: number; text: string; caret: number }
   | { type: "interrupt" }
   | { type: "restart"; sandbox: boolean }
 
 export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, sandbox: false, capabilities: [], transcript: [] }
 
-/** Whether `message` is an update `applyReplUpdate` folds, rather than a snapshot, a refusal, a check's answer or an exit notice. */
+/** Whether `message` is an update `applyReplUpdate` folds, rather than a snapshot, a refusal, an answer or an exit notice. */
 export function isReplUpdate(message: ReplMessage): message is ReplUpdate {
-  return message.type !== "snapshot" && message.type !== "refused" && message.type !== "checked" && message.type !== "exit"
+  return (
+    message.type !== "snapshot" &&
+    message.type !== "refused" &&
+    message.type !== "checked" &&
+    message.type !== "completions" &&
+    message.type !== "exit"
+  )
 }
 
 /** `snapshot` with `update` applied. Never changes `snapshot` itself. */
@@ -205,6 +234,16 @@ export function submitRefusal(state: ReplState): string | null {
     case "exited":
       return "The REPL has exited."
   }
+}
+
+/**
+ * Why a completion asked in `state`, by a console process with `capabilities`, is not asked, or
+ * `null` when it would be. It never runs beside an evaluation.
+ */
+export function completeRefusal(state: ReplState, capabilities: readonly string[]): string | null {
+  if (state.kind === "busy") return "Completion waits for the running evaluation to finish."
+  if (state.kind !== "ready") return submitRefusal(state)
+  return capabilities.includes("complete") ? null : "Completion isn't available."
 }
 
 function replacing(snapshot: ReplSnapshot, id: number, change: (entry: TranscriptEntry) => TranscriptEntry) {

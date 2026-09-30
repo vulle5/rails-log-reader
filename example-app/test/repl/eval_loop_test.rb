@@ -4,11 +4,225 @@ require "support/development_run"
 # The Reader's eval loop, run by a real `bin/rails console` the way the Reader runs it: frames
 # on fd 3, and whatever the evaluated code prints on fds 1 and 2.
 class EvalLoopTest < ActiveSupport::TestCase
-  test "says it is ready, with the console process's pid and the multi-line check among its capabilities" do
+  # What a console process is told to use RegexpCompletor, as `IRB.conf` does for IRB itself.
+  REGEXP_COMPLETOR = "IRB.conf[:COMPLETOR] = :regexp"
+
+  # Waits for the signatures TypeCompletor reads a method's return type from, which it loads in
+  # the background as it starts.
+  AWAIT_SIGNATURES = "sleep 0.1 until ReplTypeCompletor.rbs_loaded?"
+
+  # What leaves a console process with neither of IRB's completors.
+  NO_COMPLETOR = "IRB.send(:remove_const, :TypeCompletor); IRB.send(:remove_const, :RegexpCompletor)"
+
+  test "says it is ready, with the console process's pid, and the multi-line check and completion among its capabilities" do
     DevelopmentRun.console_process do |repl|
       assert_equal "ready", repl.ready["type"]
       assert_operator repl.ready["pid"], :>, 0
+      assert_equal %w[check complete], repl.ready["capabilities"]
+    end
+  end
+
+  test "says which completor completes, TypeCompletor when repl_type_completor is in the bundle" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal "TypeCompletor", repl.ready["completor"]
+    end
+  end
+
+  test "completes with RegexpCompletor when IRB is set to it, and says so" do
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      assert_equal "RegexpCompletor", repl.ready["completor"]
+      assert_includes repl.ready["capabilities"], "complete"
+    end
+  end
+
+  test "has no completion without either of IRB's completors, and says so when asked" do
+    DevelopmentRun.console_process(script: NO_COMPLETOR) do |repl|
+      assert_nil repl.ready["completor"]
       assert_equal ["check"], repl.ready["capabilities"]
+      assert_equal({ "type" => "completions", "id" => 1, "reason" => "Completion isn't available." }, repl.complete("1.ab"))
+    end
+  end
+
+  test "completes a String literal's method with RegexpCompletor, as the String it is, calling nothing" do
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      answer = repl.complete(%("abc".up))
+
+      assert_equal ["completions", 1, 6, "String"], answer.values_at("type", "id", "from", "receiver")
+      assert_includes answer["candidates"], { "text" => "upcase", "kind" => "method" }
+      assert_includes answer["candidates"], { "text" => "upcase!", "kind" => "method" }
+      assert answer["candidates"].all? { |candidate| candidate["text"].start_with?("up") }, answer["candidates"].inspect
+    end
+  end
+
+  test "calls nothing of the Host app to complete with RegexpCompletor, whatever the receiver's text" do
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      repl.evaluate("$called = []; class Spy; def self.boom = ($called << :boom; self); def self.name_of = :x; end; user = Spy")
+      ["Spy.boom.na", "Spy.boom::Na", "Spy.boom(1).na", "user.na", "Spy.na", "Spy::Na"].each { |text| repl.complete(text) }
+
+      assert_equal "[]", repl.evaluate("$called")["text"]
+    end
+  end
+
+  test "completes a variable's methods, and says what class it is" do
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      repl.evaluate("names = %w[a b]")
+      answer = repl.complete("names.ea")
+
+      assert_equal ["Array", 6], answer.values_at("receiver", "from")
+      assert_includes answer["candidates"], { "text" => "each", "kind" => "method" }
+    end
+  end
+
+  test "completes with TypeCompletor from what a value is, past what RegexpCompletor can read" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate("names = %w[a b]")
+      answer = repl.complete("names.fir")
+
+      assert_equal ["Array", 6], answer.values_at("receiver", "from")
+      assert_equal [{ "text" => "first", "kind" => "method" }], answer["candidates"]
+      repl.evaluate(AWAIT_SIGNATURES)
+      assert_includes repl.complete(%("abc".upcase.rev))["candidates"], { "text" => "reverse", "kind" => "method" }
+    end
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      assert_equal "Nothing completes “\"abc\".upcase.rev”.", repl.complete(%("abc".upcase.rev))["reason"]
+    end
+  end
+
+  test "names a receiver that is no literal, variable or constant as it was typed" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate(AWAIT_SIGNATURES)
+      answer = repl.complete(%("abc".upcase.rev))
+
+      assert_equal '"abc".upcase', answer["receiver"]
+      assert_nil repl.complete("pu")["receiver"]
+    end
+  end
+
+  test "names a Class's methods and constants after its own name" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.complete("File::SEPA")
+
+      assert_equal ["File", 6], answer.values_at("receiver", "from")
+      assert_equal [{ "text" => "SEPARATOR", "kind" => "constant" }], answer["candidates"]
+      assert_includes repl.complete("Author.wh")["candidates"], { "text" => "where", "kind" => "method" }
+    end
+  end
+
+  test "completes each kind of name from where it starts, with its kind" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate("counter = 1; @counted = 2; $counts = 3")
+
+      {
+        "coun" => [0, { "text" => "counter", "kind" => "local" }],
+        "Aut" => [0, { "text" => "Author", "kind" => "constant" }],
+        "@coun" => [0, { "text" => "@counted", "kind" => "ivar" }],
+        "$coun" => [0, { "text" => "$counts", "kind" => "gvar" }],
+        "whil" => [0, { "text" => "while", "kind" => "keyword" }],
+        "puts(coun" => [5, { "text" => "counter", "kind" => "local" }],
+        "puts" => [0, { "text" => "puts", "kind" => "method" }],
+      }.each do |text, (from, candidate)|
+        answer = repl.complete(text)
+
+        assert_equal from, answer["from"], text
+        assert_includes answer["candidates"], candidate, text
+      end
+    end
+  end
+
+  test "completes with RegexpCompletor each kind of name too" do
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      repl.evaluate("counter = 1; @counted = 2; $counts = 3")
+
+      {
+        "coun" => { "text" => "counter", "kind" => "local" },
+        "Aut" => { "text" => "Author", "kind" => "constant" },
+        "@coun" => { "text" => "@counted", "kind" => "ivar" },
+        "$coun" => { "text" => "$counts", "kind" => "gvar" },
+        "whil" => { "text" => "while", "kind" => "keyword" },
+        "puts" => { "text" => "puts", "kind" => "method" },
+      }.each do |text, candidate|
+        assert_includes repl.complete(text)["candidates"], candidate, text
+      end
+    end
+  end
+
+  test "completes only up to the caret" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.complete(%("abc".up + 1), caret: 8)
+
+      assert_equal 6, answer["from"]
+      assert_includes answer["candidates"], { "text" => "upcase", "kind" => "method" }
+    end
+  end
+
+  test "counts the caret in UTF-16 code units, as the browser does, and answers where the word starts in them" do
+    DevelopmentRun.console_process do |repl|
+      # The emoji is two code units and one character.
+      answer = repl.complete(%("😀".up + 1), caret: 7)
+
+      assert_equal 5, answer["from"]
+      assert_includes answer["candidates"], { "text" => "upcase", "kind" => "method" }
+    end
+  end
+
+  test "sorts candidates, each once" do
+    DevelopmentRun.console_process do |repl|
+      texts = repl.complete("[].fi")["candidates"].map { |candidate| candidate["text"] }
+
+      assert_equal texts.uniq.sort, texts
+    end
+  end
+
+  test "offers every method after a dot, none of them an operator" do
+    DevelopmentRun.console_process do |repl|
+      texts = repl.complete("1.")["candidates"].map { |candidate| candidate["text"] }
+
+      assert_includes texts, "abs"
+      assert_empty texts.reject { |text| text.match?(/\A[[:alpha:]_]/) }
+    end
+  end
+
+  test "gives a reason when nothing completes" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal({ "type" => "completions", "id" => 1, "reason" => "Nothing completes “zzzz”." }, repl.complete("zzzz"))
+      assert_equal "Nothing completes “\"abc\".zzz”.", repl.complete(%("abc".zzz))["reason"]
+      assert_equal "Nothing to complete here.", repl.complete("")["reason"]
+      assert_equal "Nothing to complete here.", repl.complete("1 + ")["reason"]
+    end
+  end
+
+  test "offers none of IRB's commands, which the loop does not have" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal "Nothing completes “show_so”.", repl.complete("show_so")["reason"]
+      assert_includes repl.complete("exi")["candidates"], { "text" => "exit", "kind" => "method" }
+    end
+  end
+
+  test "completes with the locals evaluations have defined" do
+    DevelopmentRun.console_process do |repl|
+      assert_equal "Nothing completes “tally”.", repl.complete("tally")["reason"]
+      repl.evaluate("tally = 1")
+
+      assert_includes repl.complete("tall")["candidates"], { "text" => "tally", "kind" => "local" }
+    end
+  end
+
+  test "answers a completion after a running evaluation, and never while it runs" do
+    DevelopmentRun.console_process do |repl|
+      running = repl.submit("sleep 1; 1")
+      id = repl.ask_completion("1.ab")
+
+      assert_equal ["result", running], repl.next_frame.values_at("type", "id")
+      assert_equal ["completions", id], repl.next_frame.values_at("type", "id")
+    end
+  end
+
+  test "keeps going after a completion raises" do
+    DevelopmentRun.console_process(script: REGEXP_COMPLETOR) do |repl|
+      repl.evaluate("class Raiser; def self.constants = raise('nope'); end")
+
+      assert_equal "completions", repl.complete("Raiser::x")["type"]
+      assert_equal "2", repl.evaluate("1 + 1")["text"]
     end
   end
 
@@ -49,7 +263,7 @@ class EvalLoopTest < ActiveSupport::TestCase
 
   test "has no multi-line check without IRB's lexer, and checks every input as complete" do
     DevelopmentRun.console_process(script: "IRB.send(:remove_const, :RubyLex)") do |repl|
-      assert_equal [], repl.ready["capabilities"]
+      assert_equal ["complete"], repl.ready["capabilities"]
       assert_equal true, repl.check("[1, 2].each do |x|")["complete"]
     end
   end

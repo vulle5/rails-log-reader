@@ -27,6 +27,9 @@ group :development, :test do
 end
 
 group :development do
+  # Lets the Reader's REPL complete from what a value is rather than from what its text looks like
+  gem "repl_type_completor", require: false
+
   # Use console on exceptions pages [https://github.com/rails/web-console]
   gem "web-console"
 end

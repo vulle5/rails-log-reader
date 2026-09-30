@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import type { RubyNode } from "../src/shared/repl"
+import type { Candidate, Completion, RubyNode } from "../src/shared/repl"
 
 const STUB = Bun.fileURLToPath(new URL("./stub-console.ts", import.meta.url))
 
@@ -37,12 +37,44 @@ export function stubComplete(text: string) {
   return count(/\b(do|def)\b/g) <= count(/\bend\b/g)
 }
 
+/** What the stand-ins offer after a `.`: the methods of any receiver. */
+const STUB_METHODS = ["downcase", "each", "upcase", "upcase!"]
+
+/** What the stand-ins offer where no `.` leads: a local, a constant and a keyword, in that order. */
+const STUB_NAMES: Candidate[] = [
+  { text: "upload", kind: "local" },
+  { text: "Upload", kind: "constant" },
+  { text: "unless", kind: "keyword" },
+]
+
+/**
+ * The stand-ins' completion, the stub console's and the Reader harness's, of the word before
+ * `caret`: the methods above after a `.`, named after a quoted receiver as a String and after any
+ * other as it was typed, and the names above elsewhere. `zzz` completes to nothing.
+ */
+export function stubCompletion(text: string, caret: number): Completion {
+  const [word = ""] = text.slice(0, caret).match(/[^\s(]*$/) ?? []
+  const dot = word.lastIndexOf(".")
+  const name = word.slice(dot + 1)
+  const candidates: Candidate[] =
+    dot === -1 ? STUB_NAMES.filter((each) => each.text.startsWith(name)) : STUB_METHODS.filter((method) => method.startsWith(name)).map((method) => ({ text: method, kind: "method" }))
+
+  if (word === "" || candidates.length === 0) return { kind: "none", reason: word === "" ? "Nothing to complete here." : `Nothing completes “${word}”.` }
+  const receiver = dot === -1 ? null : word.startsWith('"') ? "String" : word.slice(0, dot)
+  return { kind: "candidates", from: caret - name.length, receiver, candidates }
+}
+
+/** Makes every start of the stub console in `root` say it has no completion. */
+export async function stubConsoleUncompletable(root: string) {
+  await writeFile(join(root, "log", "stub-console.uncompletable"), "")
+}
+
 /** Makes every start of the stub console in `root` say it has no multi-line check. */
 export async function stubConsoleUncheckable(root: string) {
   await writeFile(join(root, "log", "stub-console.uncheckable"), "")
 }
 
-type Noted = { started: string[] } | { heard: string }
+type Noted = { started: string[] } | { heard: string } | { completed: string }
 
 async function stubConsoleLog(root: string): Promise<Noted[]> {
   const log = await readFile(join(root, "log", "stub-console.log"), "utf8").catch(() => "")
@@ -55,6 +87,11 @@ async function stubConsoleLog(root: string): Promise<Noted[]> {
 /** The arguments of each start of the stub console in `root`, in order. */
 export async function stubConsoleStarts(root: string) {
   return (await stubConsoleLog(root)).flatMap((noted) => ("started" in noted ? [noted.started] : []))
+}
+
+/** The text of each completion the stub consoles in `root` were asked for, in order. */
+export async function stubConsoleCompleted(root: string) {
+  return (await stubConsoleLog(root)).flatMap((noted) => ("completed" in noted ? [noted.completed] : []))
 }
 
 /** What the stub consoles in `root` heard from outside, in order: `stdin closed`, `SIGTERM`, `SIGINT`. */

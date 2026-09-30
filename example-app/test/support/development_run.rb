@@ -134,6 +134,23 @@ class DevelopmentRun
       frame
     end
 
+    # Asks to complete `text` with the caret at `caret`, the end of it unless given, and hands
+    # back the request's id without waiting for the answer.
+    def ask_completion(text, caret: text.length)
+      id = (@next_id += 1)
+      @frames.write("#{JSON.generate(type: "complete", id:, text:, caret:)}\n")
+      id
+    end
+
+    # The frame that answers a request to complete `text`.
+    def complete(text, caret: text.length)
+      id = ask_completion(text, caret:)
+      frame = next_frame
+      raise "expected completions for #{id}, got #{frame.inspect}" unless frame["id"] == id
+
+      frame
+    end
+
     # The next frame the loop sends.
     def next_frame
       raise "the console process answered nothing in #{TIMEOUT}s:\n#{@streams.values.join}" unless @frames.wait_readable(TIMEOUT)

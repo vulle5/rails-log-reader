@@ -7,8 +7,8 @@ export type ReplSocket = { kind: "repl"; attachment?: ReplAttachment }
 /**
  * `/repl`, one WebSocket per tab: each is an attachment to `session`, sent its snapshot and
  * then its updates as JSON, and each message it sends is a `ReplCommand`. A refusal is sent
- * back to the socket whose input was refused and to no other, and a check's answer to the socket
- * that asked.
+ * back to the socket whose input was refused and to no other, and a check's or a completion's
+ * answer to the socket that asked.
  *
  * The route is an act, and its upgrade passes the gate in the Reader's own handler before it
  * gets here: Bun would accept a foreign `Origin` on the upgrade by itself.
@@ -32,6 +32,9 @@ export function replSocket(session: ReplSession) {
       else if (command.type === "check") {
         void attachment.check(command.text).then((complete) => socket.send(JSON.stringify({ type: "checked", id: command.id, complete })))
       }
+      else if (command.type === "complete") {
+        void attachment.complete(command.text, command.caret).then((completion) => socket.send(JSON.stringify({ type: "completions", id: command.id, completion })))
+      }
       else if (command.type === "restart") attachment.restart(command.sandbox)
       else {
         const refusal = attachment.submit(command.input)
@@ -54,6 +57,9 @@ function parsed(received: string | Buffer): ReplCommand | null {
     if (command?.type === "submit" && typeof command.input === "string") return { type: "submit", input: command.input }
     if (command?.type === "check" && typeof command.id === "number" && typeof command.text === "string") {
       return { type: "check", id: command.id, text: command.text }
+    }
+    if (command?.type === "complete" && typeof command.id === "number" && typeof command.text === "string" && Number.isInteger(command.caret)) {
+      return { type: "complete", id: command.id, text: command.text, caret: command.caret as number }
     }
     if (command?.type === "interrupt") return { type: "interrupt" }
     if (command?.type === "restart" && typeof command.sandbox === "boolean") return { type: "restart", sandbox: command.sandbox }

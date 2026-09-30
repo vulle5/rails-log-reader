@@ -697,6 +697,63 @@ describe("the REPL socket", () => {
     other.close()
   })
 
+  test("completes a word, answering only the tab that asked, and refuses while an evaluation runs", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    const other = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+
+    await repl.send({ type: "complete", id: 4, text: '"abc".up', caret: 8 })
+    await repl.send({ type: "complete", id: 5, text: "zzz", caret: 3 })
+
+    expect(await repl.next((message) => message.type === "completions" && message.id === 4)).toEqual({
+      type: "completions",
+      id: 4,
+      completion: {
+        kind: "candidates",
+        from: 6,
+        receiver: "String",
+        candidates: [
+          { text: "upcase", kind: "method" },
+          { text: "upcase!", kind: "method" },
+        ],
+      },
+    })
+    expect(await repl.next((message) => message.type === "completions" && message.id === 5)).toEqual({
+      type: "completions",
+      id: 5,
+      completion: { kind: "none", reason: "Nothing completes “zzz”." },
+    })
+    expect(other.received.some((message) => message.type === "completions")).toBe(false)
+
+    await repl.send({ type: "submit", input: "nap 60000" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "busy")
+    await repl.send({ type: "complete", id: 6, text: "1.ab", caret: 4 })
+
+    expect(await repl.next((message) => message.type === "completions" && message.id === 6)).toEqual({
+      type: "completions",
+      id: 6,
+      completion: { kind: "none", reason: "Completion waits for the running evaluation to finish." },
+    })
+    repl.close()
+    other.close()
+  })
+
+  test("ignores a completion request with no whole-number caret", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+
+    await repl.send({ type: "complete", id: 1, text: "1.ab", caret: 1.5 })
+    await repl.send({ type: "complete", id: 2, text: "1.ab", caret: 4 })
+
+    await repl.next((message) => message.type === "completions" && message.id === 2)
+    expect(repl.received.some((message) => message.type === "completions" && message.id === 1)).toBe(false)
+    repl.close()
+  })
+
   test("restarts the console process, sandboxed when asked", async () => {
     const { root, url, origin } = await aReaderOverTheStubConsole()
     const repl = replSocket(url, origin)

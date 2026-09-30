@@ -4,7 +4,15 @@ import { join } from "node:path"
 
 import { REPL_LOOP, replSession, type ReplSession } from "../src/server/repl-session"
 import { applyReplUpdate, isReplUpdate, TRANSCRIPT_LIMIT, type ReplMessage, type ReplSnapshot, type ReplState } from "../src/shared/repl"
-import { stubConsoleFailsToBoot, stubConsoleHeard, stubConsoleRoot, stubConsoleStarts, stubConsoleUncheckable } from "./repl.fixtures"
+import {
+  stubConsoleCompleted,
+  stubConsoleFailsToBoot,
+  stubConsoleHeard,
+  stubConsoleRoot,
+  stubConsoleStarts,
+  stubConsoleUncheckable,
+  stubConsoleUncompletable,
+} from "./repl.fixtures"
 
 /**
  * The server's *REPL* session, driven through its interface over the stub console in
@@ -478,7 +486,7 @@ describe("the REPL session's multi-line check", () => {
   test("says the console process has it once it is ready", async () => {
     const { session } = await aSession()
 
-    expect((await booted(listen(session))).capabilities).toEqual(["check"])
+    expect((await booted(listen(session))).capabilities).toEqual(["check", "complete"])
   })
 
   test("checks a complete input as complete, and one with an open block as incomplete", async () => {
@@ -507,7 +515,7 @@ describe("the REPL session's multi-line check", () => {
     await stubConsoleUncheckable(root)
     const listening = listen(session)
 
-    expect((await booted(listening)).capabilities).toEqual([])
+    expect((await booted(listening)).capabilities).toEqual(["complete"])
     expect(await listening.check("[1, 2].each do |x|")).toBe(true)
   })
 
@@ -521,5 +529,93 @@ describe("the REPL session's multi-line check", () => {
     await listening.until(isExited)
 
     expect(await listening.check("def greet")).toBe(true)
+  })
+})
+
+describe("the REPL session's completion", () => {
+  test("says the console process has it once it is ready", async () => {
+    const { session } = await aSession()
+
+    expect((await booted(listen(session))).capabilities).toContain("complete")
+  })
+
+  test("completes the word before the caret, with where it starts, the receiver's name and each candidate's kind", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    expect(await listening.complete('"abc".up', 8)).toEqual({
+      kind: "candidates",
+      from: 6,
+      receiver: "String",
+      candidates: [
+        { text: "upcase", kind: "method" },
+        { text: "upcase!", kind: "method" },
+      ],
+    })
+    expect(await listening.complete("upl", 3)).toEqual({ kind: "candidates", from: 0, receiver: null, candidates: [{ text: "upload", kind: "local" }] })
+  })
+
+  test("says why nothing completes, in the console process's words", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    expect(await listening.complete("zzz", 3)).toEqual({ kind: "none", reason: "Nothing completes “zzz”." })
+  })
+
+  test("answers each completion its own, though they are asked together", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    const [first, second] = await Promise.all([listening.complete("x.up", 4), listening.complete("x.do", 4)])
+
+    expect(first.kind === "candidates" && first.candidates.map((each) => each.text)).toEqual(["upcase", "upcase!"])
+    expect(second.kind === "candidates" && second.candidates.map((each) => each.text)).toEqual(["downcase"])
+  })
+
+  test("does not ask the console process while an evaluation runs, and says it waits", async () => {
+    const { root, session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+    listening.submit("sleep 500")
+
+    expect(await listening.complete("1.ab", 4)).toEqual({ kind: "none", reason: "Completion waits for the running evaluation to finish." })
+    expect(await stubConsoleCompleted(root)).toEqual([])
+    expect(listening.snapshot.state.kind).toBe("busy")
+  })
+
+  test("does not ask a console process that has no completion, and says so", async () => {
+    const { root, session } = await aSession()
+    await stubConsoleUncompletable(root)
+    const listening = listen(session)
+
+    expect((await booted(listening)).capabilities).toEqual(["check"])
+    expect(await listening.complete("1.ab", 4)).toEqual({ kind: "none", reason: "Completion isn't available." })
+    expect(await stubConsoleCompleted(root)).toEqual([])
+  })
+
+  test("says why before the console process is ready, and once it has exited", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+
+    expect(await listening.complete("1.ab", 4)).toEqual({ kind: "none", reason: "The REPL hasn't started." })
+    await booted(listening)
+    listening.submit("exit 0")
+    await listening.until(isExited)
+
+    expect(await listening.complete("1.ab", 4)).toEqual({ kind: "none", reason: "The REPL has exited." })
+  })
+
+  test("gives up on a completion the console process ended before it answered", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    const hanging = listening.complete("hang", 4)
+    listening.submit("exit 0")
+
+    expect(await hanging).toEqual({ kind: "none", reason: "The REPL has exited." })
   })
 })

@@ -85,6 +85,10 @@ To turn the Reader off again, delete `log/rails_log_reader.enabled` and restart.
   Reader's own environment, not puma-dev's, so start the Reader from a shell where
   `bin/rails console` works: the right Ruby, your version manager's shims, and any env vars
   your app needs to boot.
+- Tab in the REPL completes the word before the caret. With the `repl_type_completor` gem in
+  your app's bundle, it completes from what a value is, and without it, from how the text
+  reads. Either way is IRB's own completor, so an IRB too old to have them has no completion.
+  Settings can open the popover as you type instead.
 - Running two Rails apps at once? Only one Reader can hold port 5273, so set
   `RAILS_LOG_READER_PORT` for the second one.
 - The tab title and the header both show your app's name, by default it's the value of

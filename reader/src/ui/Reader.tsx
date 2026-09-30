@@ -35,6 +35,7 @@ import { TableColumnSelect, useHiddenTableColumns } from "./features/activity-ta
 import { Setting, Settings, type SettingsHandle } from "./features/settings/components/Settings"
 import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
+import { COMPLETION_TRIGGER, CompletionTriggerSwitch, useCompletionTrigger } from "./hooks/completion-trigger"
 import { EDITOR_SCHEME, EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
@@ -155,6 +156,7 @@ export function Reader({
   // below returns before the bar exists, and the theme still has to follow the OS behind it.
   const theme = useTheme()
   const editorScheme = useEditorScheme()
+  const completionTrigger = useCompletionTrigger()
   const settings = useRef<SettingsHandle>(null)
   const editor = useMemo(
     () => ({ scheme: editorScheme.scheme, requestScheme: () => settings.current?.open(EDITOR_SCHEME) }),
@@ -319,6 +321,12 @@ export function Reader({
             >
               <EditorSchemeField scheme={editorScheme.scheme} onChoose={editorScheme.choose} />
             </Setting>
+            <Setting
+              label={COMPLETION_TRIGGER}
+              description="What opens the REPL's list of completions: Tab, or every word as it is typed."
+            >
+              <CompletionTriggerSwitch trigger={completionTrigger.trigger} onChoose={completionTrigger.choose} />
+            </Setting>
           </Settings>
         </div>
       </header>
@@ -452,6 +460,7 @@ export function Reader({
                 repl={repl}
                 railsRoot={railsRoot}
                 actsOnlyFrom={actsOnlyFrom}
+                completionTrigger={completionTrigger.trigger}
                 className="col-span-3 row-start-3"
               />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's

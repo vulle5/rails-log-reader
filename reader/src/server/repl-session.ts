@@ -3,9 +3,12 @@ import { join } from "node:path"
 
 import {
   applyReplUpdate,
+  completeRefusal,
   EMPTY_SNAPSHOT,
   OUTPUT_LIMIT,
   submitRefusal,
+  type Candidate,
+  type Completion,
   type Outcome,
   type ReplMessage,
   type ReplSnapshot,
@@ -31,6 +34,12 @@ export type ReplAttachment = {
    * `do`. Always true when the console process has no multi-line check, or is not running.
    */
   check: (text: string) => Promise<boolean>
+  /**
+   * What the word ending at `caret` in `text`, counted in UTF-16 code units, could be. Never asked of
+   * the console process while an evaluation runs, or when it has no completion: `none`, with why,
+   * answers then, and once the console process is not running.
+   */
+  complete: (text: string, caret: number) => Promise<Completion>
   /** Interrupts the running evaluation, as Ctrl-C does, which ends it as raising `Interrupt`. Nothing when none is running. */
   interrupt: () => void
   /**
@@ -57,6 +66,7 @@ type Frame =
   | { type: "result"; id: number; text: string; cut: boolean; tree: RubyNode; inspect_error?: string }
   | (ErrorFrame & { type: "error"; id: number; causes: ErrorFrame[]; causes_cut?: true })
   | { type: "checked"; id: number; complete: boolean }
+  | { type: "completions"; id: number; from?: number; receiver?: string | null; candidates?: Candidate[]; reason?: string }
 
 /** How long a stopped console process has to end on SIGTERM before it is sent SIGKILL. */
 const STOP_GRACE_MS = 5_000
@@ -77,6 +87,8 @@ type ConsoleProcess = {
   forced?: ReturnType<typeof setTimeout>
   /** Its unanswered checks, by id, each resolved with whether the text is complete. */
   checks: Map<number, (complete: boolean) => void>
+  /** Its unanswered completions, by id, each resolved with what they came to. */
+  completions: Map<number, (completion: Completion) => void>
 }
 
 /**
@@ -103,6 +115,7 @@ export function replSession(railsRoot: string): ReplSession {
   let running: ConsoleProcess | null = null
   let nextId = 1
   let nextCheck = 1
+  let nextCompletion = 1
 
   function send(message: ReplMessage) {
     for (const listener of listeners) listener(message)
@@ -144,7 +157,7 @@ export function replSession(railsRoot: string): ReplSession {
     }
 
     const frames = connect({ fd: child.stdio[3] } as never)
-    const started: ConsoleProcess = { child, frames, stderr: "", checks: new Map() }
+    const started: ConsoleProcess = { child, frames, stderr: "", checks: new Map(), completions: new Map() }
     running = started
 
     frames.setEncoding("utf8")
@@ -154,6 +167,7 @@ export function replSession(railsRoot: string): ReplSession {
     readLines(frames, (line) => {
       const frame = parsedFrame(line)
       if (frame?.type === "checked") started.checks.get(frame.id)?.(frame.complete)
+      else if (frame?.type === "completions") started.completions.get(frame.id)?.(completionOf(frame))
       else if (frame !== null) setTimeout(() => running === started && answered(frame))
     })
     const printed = Promise.all([readText(child.stdout, (text) => printedBy(started, text)), readText(child.stderr, (text) => warnedBy(started, text))])
@@ -171,7 +185,7 @@ export function replSession(railsRoot: string): ReplSession {
     stopping.forced.unref()
   }
 
-  function answered(frame: Exclude<Frame, { type: "checked" }>) {
+  function answered(frame: Exclude<Frame, { type: "checked" | "completions" }>) {
     const state = snapshot.state
 
     if (frame.type === "ready") {
@@ -197,6 +211,7 @@ export function replSession(railsRoot: string): ReplSession {
     clearTimeout(ended.forced)
     ended.frames.destroy()
     for (const resolve of ended.checks.values()) resolve(true)
+    for (const resolve of ended.completions.values()) resolve({ kind: "none", reason: "The REPL has exited." })
 
     if (running === ended) {
       running = null
@@ -263,6 +278,21 @@ export function replSession(railsRoot: string): ReplSession {
     })
   }
 
+  function complete(text: string, caret: number) {
+    const completing = running
+    const refusal = completeRefusal(snapshot.state, snapshot.capabilities)
+    if (completing === null || refusal !== null) return Promise.resolve<Completion>({ kind: "none", reason: refusal ?? "The REPL has exited." })
+
+    const id = nextCompletion++
+    return new Promise<Completion>((resolve) => {
+      completing.completions.set(id, (completion) => {
+        completing.completions.delete(id)
+        resolve(completion)
+      })
+      completing.frames.write(`${JSON.stringify({ type: "complete", id, text, caret })}\n`)
+    })
+  }
+
   function interrupt() {
     if (snapshot.state.kind === "busy") running?.child.kill("SIGINT")
   }
@@ -271,7 +301,7 @@ export function replSession(railsRoot: string): ReplSession {
     attach(listener) {
       listeners.add(listener)
       listener({ type: "snapshot", snapshot })
-      return { boot, submit, check, interrupt, restart, detach: () => listeners.delete(listener) }
+      return { boot, submit, check, complete, interrupt, restart, detach: () => listeners.delete(listener) }
     },
     close() {
       if (running !== null) stop(running)
@@ -282,6 +312,12 @@ export function replSession(railsRoot: string): ReplSession {
 /** An error frame's fields, named as the Reader names them. */
 function rubyError({ class: className, message, backtrace, cut }: ErrorFrame): RubyError {
   return { className, message, backtrace, ...(cut && { cut }) }
+}
+
+/** A completions frame's fields, named as the Reader names them: candidates, or the reason for none. */
+function completionOf(frame: Extract<Frame, { type: "completions" }>): Completion {
+  if (frame.candidates === undefined || frame.from === undefined) return { kind: "none", reason: frame.reason ?? "Nothing completes here." }
+  return { kind: "candidates", from: frame.from, receiver: frame.receiver ?? null, candidates: frame.candidates }
 }
 
 /** Calls `onText` with each piece of text `stream` carries, until it ends. */

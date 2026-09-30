@@ -3,6 +3,7 @@ import { useEffect, useId, useState } from "react"
 import { runningPid, type ExitedState, type ReplSnapshot, type ReplState } from "../../../../shared/repl"
 import { ColumnHeading } from "../../../components/Column"
 import { Tag } from "../../../components/Tag"
+import type { CompletionTrigger } from "../../../hooks/completion-trigger"
 import { cn } from "../../../lib/cn"
 import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
@@ -27,6 +28,7 @@ export function ReplDrawer({
   repl,
   railsRoot,
   actsOnlyFrom,
+  completionTrigger,
   className,
 }: {
   folded: boolean
@@ -37,6 +39,8 @@ export function ReplDrawer({
   railsRoot: string | null
   /** Where acts can be made from, when this page is not there, else `null`. */
   actsOnlyFrom: string | null
+  /** What opens the prompt's completion popover. */
+  completionTrigger: CompletionTrigger
   className?: string
 }) {
   const body = useId()
@@ -94,10 +98,12 @@ export function ReplDrawer({
               <ReplPrompt
                 submit={repl.submit}
                 check={repl.check}
+                complete={repl.complete}
                 interrupt={repl.interrupt}
                 refusal={repl.refusal}
                 busy={state.kind === "busy"}
                 history={history}
+                trigger={completionTrigger}
                 pid={runningPid(state)}
                 // Keyed by the session's choice, so the toggle starts from it again whenever it changes.
                 actions={<RestartControls key={String(repl.snapshot.sandbox)} sandboxed={repl.snapshot.sandbox} restart={repl.restart} />}

@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs"
 import { connect } from "node:net"
 
-import { stubComplete } from "./repl.fixtures"
+import { stubComplete, stubCompletion } from "./repl.fixtures"
 
 /**
  * A stand-in for `bin/rails console` running the eval loop: it speaks the loop's fd 3 frames
@@ -27,9 +27,16 @@ import { stubComplete } from "./repl.fixtures"
  *
  * It answers a check at once, even while an evaluation runs, by `stubComplete`. When
  * `log/stub-console.uncheckable` is there, it says it has no multi-line check, and answers none.
+ *
+ * It answers a completion at once, by `stubCompletion`, and notes its text in the same log,
+ * except a text that is `hang`, which it never answers. When `log/stub-console.uncompletable` is
+ * there, it says it has no completion.
  */
 
-type Frame = { type: "eval"; id: number; input: string } | { type: "check"; id: number; text: string }
+type Frame =
+  | { type: "eval"; id: number; input: string }
+  | { type: "check"; id: number; text: string }
+  | { type: "complete"; id: number; text: string; caret: number }
 
 const note = (entry: object) => appendFileSync("log/stub-console.log", `${JSON.stringify(entry)}\n`)
 
@@ -68,7 +75,13 @@ const answer = (id: number, text: string, extra: object = {}) =>
   send({ type: "result", id, text, cut: false, tree: { type: "object", inspect: text }, ...extra })
 
 const checkable = !existsSync("log/stub-console.uncheckable")
-send({ type: "ready", pid: process.pid, capabilities: checkable ? ["check"] : [] })
+const completable = !existsSync("log/stub-console.uncompletable")
+send({
+  type: "ready",
+  pid: process.pid,
+  capabilities: [...(checkable ? ["check"] : []), ...(completable ? ["complete"] : [])],
+  completor: completable ? "TypeCompletor" : null,
+})
 
 let received = ""
 channel.setEncoding("utf8")
@@ -79,11 +92,21 @@ channel.on("data", (chunk: string) => {
   for (const line of lines) {
     const frame = JSON.parse(line) as Frame
     if (frame.type === "eval") void evaluate(frame)
+    else if (frame.type === "complete") completions(frame)
     else if (checkable) send({ type: "checked", id: frame.id, complete: stubComplete(frame.text) })
   }
 })
 // A moment late, so a signal the Reader sent before it went away is heard first.
 channel.on("end", () => setTimeout(() => process.exit(0), 100))
+
+function completions({ id, text, caret }: { id: number; text: string; caret: number }) {
+  note({ completed: text })
+  if (text === "hang") return
+
+  const completion = stubCompletion(text, caret)
+  if (completion.kind === "none") send({ type: "completions", id, reason: completion.reason })
+  else send({ type: "completions", id, from: completion.from, receiver: completion.receiver, candidates: completion.candidates })
+}
 
 async function evaluate({ id, input }: { id: number; input: string }) {
   const [command = "", ...rest] = input.split(" ")

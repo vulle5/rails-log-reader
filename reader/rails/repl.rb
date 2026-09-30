@@ -10,11 +10,14 @@
 #
 #   in:  {"type":"eval","id":1,"input":"1 + 1"}
 #        {"type":"check","id":2,"text":"[1, 2].each do |x|"}
-#   out: {"type":"ready","pid":48213,"capabilities":["check"]}
+#        {"type":"complete","id":3,"text":"\"abc\".up","caret":8}
+#   out: {"type":"ready","pid":48213,"capabilities":["check","complete"],"completor":"TypeCompletor"}
 #        {"type":"result","id":1,"text":"2","cut":false,"tree":{"type":"integer","inspect":"2"}}
 #        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ...",
 #         "backtrace":["(repl):1:in `<main>'"],"causes":[]}
 #        {"type":"checked","id":2,"complete":false}
+#        {"type":"completions","id":3,"from":6,"receiver":"String",
+#         "candidates":[{"text":"upcase","kind":"method"},{"text":"upcase!","kind":"method"}]}
 #
 # A result's `tree` is its value laid out, and `inspect_error` says what an `inspect` raised while
 # it was built, when one did. A node carries its own `inspect` text, `cut` when that was cut, and
@@ -46,6 +49,22 @@
 # an evaluation runs. It uses IRB's lexer, and `ready` lists "check" among its capabilities
 # only when that lexer is one the loop knows how to call. Without it, every text is complete.
 #
+# `complete` asks what the word ending at `caret` could be, and is answered with `completions`.
+# The caret and `from` are counted in UTF-16 code units, as the browser counts them. `from` is where
+# that word starts in the text, and each candidate's `text`
+# replaces the text from `from` to the caret. A candidate's `kind` is `method`, `constant`, `local`,
+# `ivar`, `cvar`, `gvar`, `keyword`, `symbol` or `path`, and `receiver` names what it was asked of
+# when it was a member: a literal's or a variable's class, and otherwise the receiver as it was
+# typed. Candidates are sorted, each once, and cut at 500. When there are none, `reason` says why
+# in their place. It is queued behind an evaluation and never run beside one.
+#
+# It uses IRB's completors: `TypeCompletor` when `repl_type_completor` is in the bundle and IRB is
+# not set to `:regexp`, and `RegexpCompletor` otherwise. `ready` lists "complete" among its
+# capabilities and names the `completor` only when the one it has is one the loop knows how to
+# call, and without either, completion is answered with a `reason` alone. `RegexpCompletor` reads
+# a member's receiver off its text, and the loop leaves a text alone that would make it call a
+# method to find out.
+#
 # Fds 1 and 2 are the console process's own, read by the Reader as plain text, so nothing the
 # Host app prints can corrupt a frame. The process ends when fd 3 closes, even mid-evaluation.
 
@@ -75,6 +94,38 @@ module RailsLogReaderRepl
   BACKTRACE_LIMIT = 64 * 1024
   CAUSE_LIMIT = 10
 
+  # The most candidates a completion answers with.
+  COMPLETION_LIMIT = 500
+
+  # The characters IRB ends the word it completes at, so what precedes the last one is left out
+  # of the word, as IRB leaves it out.
+  WORD_BREAK = /[ \t\n`><=;|&{(]/
+
+  # What a completor is called with, as IRB's own are: three texts and the binding. Anything else
+  # is a completor the loop does not know how to call.
+  COMPLETION_PARAMETERS = %i[req req req keyreq].freeze
+
+  # A completion's `receiver` for what Prism reads a literal as.
+  LITERALS = {
+    "StringNode" => "String", "InterpolatedStringNode" => "String", "XStringNode" => "String",
+    "SymbolNode" => "Symbol", "InterpolatedSymbolNode" => "Symbol",
+    "ArrayNode" => "Array", "HashNode" => "Hash", "RangeNode" => "Range", "LambdaNode" => "Proc",
+    "RegularExpressionNode" => "Regexp", "InterpolatedRegularExpressionNode" => "Regexp",
+    "IntegerNode" => "Integer", "FloatNode" => "Float", "RationalNode" => "Rational",
+    "ImaginaryNode" => "Complex", "NilNode" => "NilClass", "TrueNode" => "TrueClass",
+    "FalseNode" => "FalseClass"
+  }.freeze
+
+  # Ruby's reserved words, which a completor offers beside the names in scope.
+  KEYWORDS = %w[
+    __ENCODING__ __LINE__ __FILE__ BEGIN END alias and begin break case class def defined? do else
+    elsif end ensure false for if in module next nil not or redo rescue retry return self super
+    then true undef unless until when while yield
+  ].freeze
+
+  # What a completor's `TypeCompletor` asks its context for.
+  CompletionContext = Struct.new(:irb_path)
+
   # The width `pretty_inspect` wraps a result at.
   WIDTH = 80
 
@@ -97,6 +148,7 @@ module RailsLogReaderRepl
   METHOD = Kernel.instance_method(:method)
   IVARS = Kernel.instance_method(:instance_variables)
   IVAR = Kernel.instance_method(:instance_variable_get)
+  RESPONDS = Kernel.instance_method(:respond_to?)
 
   # A buffer for `PP` that stops it once it holds more than `limit` bytes.
   class Bounded
@@ -172,11 +224,16 @@ module RailsLogReaderRepl
       @binding = TOPLEVEL_BINDING.eval("binding")
 
       @lexer = lexer
+      @completor, completor_name = completor
       inbox = read_frames(input)
-      send_frame("type" => "ready", "pid" => Process.pid, "capabilities" => @lexer ? ["check"] : [])
+      capabilities = [("check" if @lexer), ("complete" if @completor)].compact
+      send_frame("type" => "ready", "pid" => Process.pid, "capabilities" => capabilities, "completor" => completor_name)
 
       while (frame = inbox.pop)
-        evaluate(frame["id"], frame["input"]) if frame["type"] == "eval"
+        case frame["type"]
+        when "eval" then evaluate(frame["id"], frame["input"])
+        when "complete" then complete(frame["id"], frame["text"], frame["caret"])
+        end
       end
     end
 
@@ -212,6 +269,36 @@ module RailsLogReaderRepl
       IRB::RubyLex.new
     end
 
+    # The completor IRB would complete with, and its name, when it is one the loop can call.
+    def completor
+      wanted = IRB.conf[:COMPLETOR] if defined?(IRB.conf)
+      if wanted != :regexp && callable?("TypeCompletor") && type_completor_loads?
+        [IRB::TypeCompletor.new(CompletionContext.new(EVAL_FILE)), "TypeCompletor"]
+      elsif callable?("RegexpCompletor")
+        [IRB::RegexpCompletor.new, "RegexpCompletor"]
+      end
+    end
+
+    def callable?(name)
+      return false unless defined?(IRB) && IRB.const_defined?(name, false)
+
+      parameters = IRB.const_get(name, false).instance_method(:completion_candidates).parameters
+      parameters.map(&:first) == COMPLETION_PARAMETERS && parameters.last.last == :bind
+    rescue NameError
+      false
+    end
+
+    # Loads `repl_type_completor`, as IRB does, and has it read its signatures in the background.
+    def type_completor_loads?
+      return false if RUBY_ENGINE == "truffleruby"
+
+      require "repl_type_completor"
+      ReplTypeCompletor.preload_rbs
+      true
+    rescue LoadError
+      false
+    end
+
     # Whether `text` is a whole input: nothing left open, and no syntax error another line could
     # fix. A text the lexer cannot read is complete, so running it shows what is wrong.
     def complete?(text)
@@ -221,6 +308,126 @@ module RailsLogReaderRepl
       terminated
     rescue StandardError
       true
+    end
+
+    # Answers what the word before `caret` in `text` could be, in the executor an evaluation runs
+    # in, since a completor reads constants that may autoload.
+    def complete(id, text, caret)
+      answer = Rails.application.executor.wrap { completion(text.to_s, caret) }
+      send_frame({ "type" => "completions", "id" => id }.merge(answer))
+    end
+
+    # A completion's fields: its candidates, or the `reason` it has none.
+    def completion(text, caret)
+      return { "reason" => "Completion isn't available." } unless @completor
+
+      units = text.encode(Encoding::UTF_16LE)
+      caret = caret.is_a?(Integer) ? caret.clamp(0, units.bytesize / 2) : units.bytesize / 2
+      before = utf16_slice(units, 0, caret)
+      broke = before.rindex(WORD_BREAK)
+      preposing = broke ? before[0..broke] : ""
+      target = broke ? before[(broke + 1)..] : before
+      return { "reason" => "Nothing to complete here." } if target.empty?
+
+      path = target.match?(/\A["']/) && preposing.match?(/(\A|[^\w])require(_relative)?\(? *\z/)
+      member = target.match(/(&?\.|::)([^.:]*)\z/) unless path
+      start = member ? member.begin(2) : 0
+      names = candidates(preposing, target, utf16_slice(units, caret, units.bytesize / 2 - caret), member)
+      prefix = target[0, start]
+      words = names.select { |name| name.start_with?(prefix) }.map { |name| name[start..] }.reject(&:empty?)
+      words = command_free(words) unless member
+      words = words.uniq.sort.first(COMPLETION_LIMIT)
+      return { "reason" => "Nothing completes “#{target}”." } if words.empty?
+
+      candidates = words.map { |word| { "text" => word, "kind" => path ? "path" : kind(word, member) } }
+      { "from" => caret - utf16_size(target[start..]), "receiver" => receiver(member && target[0, member.begin(1)]), "candidates" => candidates }
+    rescue *INSPECT_FAILURES => error
+      { "reason" => "Completion raised #{class_name(error)}." }
+    end
+
+    # `length` UTF-16 code units of `units` from `from`, as text. A surrogate pair cut in two is
+    # dropped.
+    def utf16_slice(units, from, length)
+      units.byteslice(from * 2, length * 2).force_encoding(Encoding::UTF_16LE).encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "")
+    end
+
+    def utf16_size(text)
+      text.encode(Encoding::UTF_16LE).bytesize / 2
+    end
+
+    # What the completor offers for `target`. RegexpCompletor finds a member's receiver by
+    # evaluating its text, which is left alone when that text would call a method: a receiver
+    # written with a call in it, before a `::`.
+    def candidates(preposing, target, postposing, member)
+      return [] if @completor.class.name == "IRB::RegexpCompletor" && calls_method?(target, member)
+
+      @completor.completion_candidates(preposing, target, postposing, bind: @binding).map(&:to_s)
+    end
+
+    # Whether `RegexpCompletor` would evaluate a receiver that is more than a name for `target`.
+    def calls_method?(target, member)
+      member && member[1] == "::" && target.match?(/\A[A-Z]/) && !target[0, member.begin(1)].match?(/\A[\w:]+\z/)
+    end
+
+    # `words` without IRB's commands, which the loop does not have, unless a name of the same
+    # spelling is in scope.
+    def command_free(words)
+      return words unless defined?(IRB::Command) && IRB::Command.respond_to?(:command_names)
+
+      commands = IRB::Command.command_names
+      words.reject { |word| commands.include?(word) && !in_scope?(word) }
+    end
+
+    def in_scope?(word)
+      @binding.local_variables.include?(word.to_sym) || RESPONDS.bind(@binding.receiver).call(word, true)
+    end
+
+    # What kind of name `word` is, told by how it is spelled and where it is: after a `.` or a
+    # `::` when `member`.
+    def kind(word, member)
+      if member then word.match?(/\A[[:upper:]]/) ? "constant" : "method"
+      elsif word.start_with?("@@") then "cvar"
+      elsif word.start_with?("@") then "ivar"
+      elsif word.start_with?("$") then "gvar"
+      elsif word.start_with?(":") then "symbol"
+      elsif KEYWORDS.include?(word) then "keyword"
+      elsif @binding.local_variables.include?(word.to_sym) then "local"
+      elsif word.match?(/\A[[:upper:]]/) then "constant"
+      else "method"
+      end
+    end
+
+    # What a completion's member was asked of: the class of a literal, or of a variable's value,
+    # and the receiver as it was typed otherwise. Nothing when it was no member.
+    def receiver(text)
+      return if text.nil?
+
+      node = single_node(text)
+      return text unless node
+
+      name = node.class.name.split("::").last
+      case name
+      when "LocalVariableReadNode" then value_class(@binding.local_variable_get(node.name))
+      when "InstanceVariableReadNode" then value_class(IVAR.bind(@binding.receiver).call(node.name))
+      else LITERALS.fetch(name, text)
+      end
+    rescue *INSPECT_FAILURES
+      text
+    end
+
+    # The one expression `text` is, read by Prism against the locals in scope, or nil when it is
+    # more than one, is not Ruby, or Prism is not there.
+    def single_node(text)
+      return unless defined?(::Prism) && ::Prism.respond_to?(:parse)
+
+      parsed = ::Prism.parse(text, scopes: [@binding.local_variables])
+      body = parsed.value.statements.body
+      body.first if parsed.success? && body.size == 1
+    end
+
+    def value_class(value)
+      klass = class_of(value)
+      klass.name || klass.inspect
     end
 
     # Detaches the stderr logger Active Record's `console` hook adds, so no query is echoed on

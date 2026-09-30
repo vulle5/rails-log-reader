@@ -16,6 +16,7 @@ export type PreferenceSetting =
   | "hidden-table-columns"
   | "repl-height"
   | "repl-open"
+  | "completion-trigger"
 
 function keyFor(setting: PreferenceSetting) {
   return `rails-log-reader.${setting}`
