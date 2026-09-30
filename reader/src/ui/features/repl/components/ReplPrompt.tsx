@@ -71,11 +71,11 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
  * nothing when it cannot. Either way the first candidate is chosen when the popover opens, and
  * again whenever something is typed, so Enter inserts it.
  *
- * With `suggesting`, the *History suggestion* is grey text after the caret, drawn only while the
- * caret is at the end of the text: the rest of the newest entry that starts with the input. It
+ * Grey text follows the caret while the caret is at the end of the text. With `suggesting` it is
+ * the *History suggestion*: the rest of the newest entry that starts with the input. It
  * is found from a deferred copy of the input and drawn only while it still matches the input,
  * and not while the textarea is unfocused or an input method is composing. → or End takes it. The text has one owner: while the popover is open it previews the chosen
- * candidate instead, and → or End takes that. The *Input history*
+ * candidate instead, and → or End takes that, whether or not `suggesting`. The *Input history*
  * list open hides it.
  */
 export function ReplPrompt({
@@ -95,7 +95,7 @@ export function ReplPrompt({
   history: InputHistory
   /** What opens the completion popover. */
   trigger: CompletionTrigger
-  /** Whether the *History suggestion* is offered. */
+  /** Whether the *History suggestion* is offered; the popover's preview of its chosen candidate is not part of it. */
   suggesting: boolean
   /** The console process running now, `null` when none is. */
   pid: number | null
@@ -190,7 +190,7 @@ export function ReplPrompt({
 
   /** The grey text to draw: the chosen candidate's rest while the popover is open, else the newest matching history entry's. */
   function suggest(): Suggested | null {
-    if (!suggesting || !atEnd || composing || browsing !== null) return null
+    if (!atEnd || composing || browsing !== null) return null
     if (open !== null) {
       const candidate = picked === -1 ? undefined : shown[picked]
       return candidate === undefined || candidate.text.length === word.length ? null : { owner: "completion", rest: candidate.text.slice(word.length) }

@@ -331,7 +331,7 @@ export function Reader({
             </Setting>
             <Setting
               label={HISTORY_SUGGESTION}
-              description="Grey text after the REPL's caret offering the newest earlier input that starts with what is typed. → or End takes it."
+              description="Grey text after the REPL's caret offering the newest earlier input that starts with what is typed. → or End takes it. The completion list's chosen candidate is previewed the same way whatever this is set to."
             >
               <HistorySuggestionSwitch on={historySuggestion.on} onChoose={historySuggestion.choose} />
             </Setting>

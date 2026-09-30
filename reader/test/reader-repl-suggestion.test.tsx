@@ -230,6 +230,20 @@ describe("the History suggestion Setting", () => {
     expect(prompt()).toHaveValue("User.")
   })
 
+  test("off still previews the chosen completion while the popover is open", async () => {
+    localStorage.setItem(SETTING_KEY, "off")
+    kept('"abc".upcase.reverse')
+    const { user } = await opened()
+
+    await user.type(prompt(), '"abc".up')
+    expect(noSuggestion("case.reverse")).not.toBeInTheDocument()
+
+    await user.keyboard("{Tab}")
+    await within(replDrawer()).findByRole("listbox", { name: /^Completions/ })
+
+    expect(suggestion("case")).toHaveAttribute("data-suggestion", "completion")
+  })
+
   test("turned off in Settings, takes effect at once", async () => {
     kept("User.find(1)")
     const { user } = await opened()
