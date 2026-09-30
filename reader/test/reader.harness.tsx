@@ -162,12 +162,15 @@ export function rowShowing(text: string) {
   return found
 }
 
-/** A Request row's cell under the column heading `heading`. */
+/** A row's cell under the column heading `heading`: the one spanning it, where one spans several. */
 export function cellUnder(row: HTMLElement, heading: string) {
   const headings = within(column("Activity table")).getAllByRole("columnheader")
   const at = headings.findIndex((each) => each.textContent === heading)
-  const cell = within(row).getAllByRole("cell")[at]
-  if (cell === undefined) throw new Error(`the row has no cell under ${heading}`)
+  let spanned = 0
+  const cell = within(row)
+    .getAllByRole("cell")
+    .find((each) => (spanned += Number(each.getAttribute("colspan") ?? 1)) > at)
+  if (at === -1 || cell === undefined) throw new Error(`the row has no cell under ${heading}`)
   return cell
 }
 

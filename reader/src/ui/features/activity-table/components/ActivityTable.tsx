@@ -19,7 +19,7 @@ import { Badge } from "./Badge"
 
 /**
  * The Activity table: one dense, fixed-height row per thing that owns events — a *Request
- * row* or a *Run row*. Rows arrive already in append order and are rendered in it — this
+ * row*, an *Evaluation row* or a *Run row*. Rows arrive already in append order and are rendered in it — this
  * component never sorts, and nothing in it may start.
  *
  * Everything unknown renders as absence rather than as a guess: a request still in flight
@@ -50,17 +50,20 @@ import { Badge } from "./Badge"
  */
 
 /**
- * The two halves of `ActivityRow`, narrowed once here so the components below can keep the
- * glossary's own names — a *Request row* and a *Run row* are what the table has rows of.
+ * The three kinds of `ActivityRow`, narrowed once here so the components below can keep the
+ * glossary's own names — a *Request row*, an *Evaluation row* and a *Run row* are what the table
+ * has rows of.
  */
 type Request = Extract<ActivityRow, { kind: "request" }>
+type Evaluation = Extract<ActivityRow, { kind: "evaluation" }>
 type Run = Extract<ActivityRow, { kind: "run" }>
 
 /**
  * A *Table column*: its header, what it measures, and what it renders for each row kind. A Run
  * row's cell is `"description"` where the column is one the run's description spans instead —
- * the columns a request fills with its method, path and outcome, which a Run has none of. Those
- * columns sit next to each other, because the description is one cell spanning all of them.
+ * the columns a request fills with its method, path and outcome, which a Run has none of. An
+ * Evaluation row's is `"input"` where its input spans the path and the action. Each set of
+ * spanned columns sits together, because what spans them is one cell.
  */
 type TableColumn = {
   key: string
@@ -70,6 +73,7 @@ type TableColumn = {
   /** Never hidden: its checkbox is always checked. */
   fixed?: true
   request: (row: Request) => ReactNode
+  evaluation: ((row: Evaluation) => ReactNode) | "input"
   run: ((row: Run) => ReactNode) | "description"
 }
 
@@ -93,6 +97,12 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
         <OverBoundMark row={row} />
       </Cell>
     ),
+    evaluation: (row) => (
+      <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
+        {row.partial ? <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge> : clock(row.startedAtWall)}
+        <OverBoundMark row={row} />
+      </Cell>
+    ),
     run: (row) => (
       <Cell className="text-faint">
         {clock(row.startedAtWall)}
@@ -110,6 +120,11 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
         <Status row={row} />
       </Cell>
     ),
+    evaluation: (row) => (
+      <Cell>
+        <EvaluationStatus row={row} />
+      </Cell>
+    ),
     run: "description",
   },
   {
@@ -124,6 +139,17 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
         </MethodText>
       </Cell>
     ),
+    // `sandbox` because what it wrote was rolled back.
+    evaluation: (row) => (
+      <Cell className="font-bold text-muted group-data-[state=interrupted]:text-faint">
+        REPL
+        {row.sandbox && (
+          <Badge className="ml-1.5 font-normal" title="Run in a sandboxed console: what it wrote was rolled back">
+            sandbox
+          </Badge>
+        )}
+      </Cell>
+    ),
     run: "description",
   },
   {
@@ -136,6 +162,7 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
         <Highlight text={row.path ?? ""} />
       </Cell>
     ),
+    evaluation: "input",
     run: "description",
   },
   {
@@ -147,6 +174,7 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
         <Highlight text={controllerAction(row)} />
       </Cell>
     ),
+    evaluation: "input",
     run: "description",
   },
   {
@@ -154,6 +182,7 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
     heading: "SQL",
     description: "How many database queries it ran, including cached ones",
     request: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
+    evaluation: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
     run: (row) => <NumberCell>{count(row.sqlCount)}</NumberCell>,
   },
   {
@@ -161,15 +190,17 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
     heading: "Log",
     description: "How many log lines it wrote",
     request: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
+    evaluation: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
     run: (row) => <NumberCell>{count(row.logCount)}</NumberCell>,
   },
-  // A Run has no db, view or total to show: empty cells, so the columns beside a request's
-  // stay the columns they are.
+  // A Run has no db, view or total to show, and an evaluation renders no view: empty cells, so
+  // the columns beside a request's stay the columns they are.
   {
     key: "db",
     heading: "DB",
     description: "Time spent in the database",
     request: (row) => <NumberCell>{ms(row.dbRuntimeMs)}</NumberCell>,
+    evaluation: (row) => <NumberCell>{ms(row.dbRuntimeMs)}</NumberCell>,
     run: () => <NumberCell />,
   },
   {
@@ -177,6 +208,7 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
     heading: "View",
     description: "Time spent rendering views",
     request: (row) => <NumberCell>{ms(row.viewRuntimeMs)}</NumberCell>,
+    evaluation: () => <NumberCell />,
     run: () => <NumberCell />,
   },
   {
@@ -190,6 +222,8 @@ export const TABLE_COLUMNS: readonly TableColumn[] = [
     // between the request's own first and last events, frozen. Never a `0ms` standing in for
     // a number nobody has.
     request: (row) => <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>,
+    // From its start to its finish, both in its Run's own clock.
+    evaluation: (row) => <NumberCell total>{row.durationMs === null ? <Elapsed row={row} /> : ms(row.durationMs)}</NumberCell>,
     run: () => <NumberCell total />,
   },
 ]
@@ -240,29 +274,23 @@ export function ActivityTable({ rows, selected, pinned, lit, onSelect, hidden }:
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) =>
-          row.kind === "request" ? (
-            <RequestRow
-              key={row.id}
-              columns={columns}
-              row={row}
-              selected={row.id === selected}
-              pinned={row.id === pinned}
-              lit={row.id === lit}
-              onSelect={() => onSelect(row.id)}
-            />
-          ) : (
-            <RunRow
-              key={row.id}
-              columns={columns}
-              row={row}
-              selected={row.id === selected}
-              pinned={row.id === pinned}
-              lit={row.id === lit}
-              onSelect={() => onSelect(row.id)}
-            />
-          ),
-        )}
+        {rows.map((row) => {
+          const props = {
+            columns,
+            selected: row.id === selected,
+            pinned: row.id === pinned,
+            lit: row.id === lit,
+            onSelect: () => onSelect(row.id),
+          }
+          switch (row.kind) {
+            case "request":
+              return <RequestRow key={row.id} row={row} {...props} />
+            case "evaluation":
+              return <EvaluationRow key={row.id} row={row} {...props} />
+            case "run":
+              return <RunRow key={row.id} row={row} {...props} />
+          }
+        })}
       </tbody>
     </table>
   )
@@ -298,6 +326,43 @@ function RequestRow({ columns, row, selected, pinned, lit, onSelect }: RowProps<
         <Fragment key={column.key}>{column.request(row)}</Fragment>
       ))}
     </Row>
+  )
+}
+
+/**
+ * An *Evaluation row*: one input the REPL ran. It reads as a request does where it can — its
+ * state, its counts, its DB time and a Total that climbs while it runs — with `REPL` where a
+ * method goes and its input spanning the path and the action. Interrupted, it is set apart as
+ * a request is.
+ */
+function EvaluationRow({ columns, row, selected, pinned, lit, onSelect }: RowProps<Evaluation>) {
+  const inputColumns = columns.filter((column) => column.evaluation === "input")
+  return (
+    <Row
+      className="not-aria-selected:data-[state=interrupted]:bg-sunken"
+      data-row={row.id}
+      data-kind="evaluation"
+      data-state={row.state}
+      {...rowMarks(selected, pinned, lit)}
+      onClick={onSelect}
+    >
+      {columns.map((column) => {
+        if (column.evaluation !== "input") return <Fragment key={column.key}>{column.evaluation(row)}</Fragment>
+        // The input takes the place of the first column it covers and spans them all.
+        return column === inputColumns[0] ? <InputCell key={column.key} input={row.input} colSpan={inputColumns.length} /> : null
+      })}
+    </Row>
+  )
+}
+
+/** The input's first line, and how many more there are, as plain text: none while its start is not held. */
+function InputCell({ input, colSpan }: { input: string | null; colSpan: number }) {
+  const [first = "", ...more] = (input ?? "").split("\n")
+  return (
+    <Cell className="max-w-[68ch] group-data-[state=interrupted]:text-faint" colSpan={colSpan} title={first}>
+      <Highlight text={first} />
+      {more.length > 0 && <span className="ml-2 text-faint">+{more.length} lines</span>}
+    </Cell>
   )
 }
 
@@ -385,7 +450,7 @@ function RunDescriptionCell({ row, colSpan }: { row: Run; colSpan: number }) {
  * row is simply larger than the bound's usual figure. Always the last thing in its cell, so
  * its margin is only on the side facing what came before it.
  */
-function OverBoundMark({ row }: { row: Request | Run }) {
+function OverBoundMark({ row }: { row: ActivityRow }) {
   if (!row.overBound) return null
 
   return (
@@ -399,7 +464,7 @@ function OverBoundMark({ row }: { row: Request | Run }) {
 }
 
 /**
- * Both row kinds. The selected row and the detail column are one thing seen twice, so the
+ * Every row kind. The selected row and the detail column are one thing seen twice, so the
  * mark is a background, readable at a glance from across the table, and wins over the hover
  * and over a Run row's or an Interrupted row's own.
  */
@@ -481,6 +546,25 @@ function Status({ row }: { row: Request }) {
 }
 
 /**
+ * An evaluation's state: the dot while it runs or once its Run ended under it, then how it
+ * ended. `ok` is faint, because finishing is the ordinary case, and `raised` is in the error
+ * colour, because it failed.
+ */
+function EvaluationStatus({ row }: { row: Evaluation }) {
+  if (row.outcome === null) return <StateDot state={row.state === "interrupted" ? "interrupted" : "in-flight"} />
+
+  return (
+    <span
+      className="data-[outcome=ok]:text-faint data-[outcome=raised]:text-error"
+      data-outcome={row.outcome}
+      title={row.outcome === "ok" ? "Finished without raising" : "Raised"}
+    >
+      {row.outcome}
+    </span>
+  )
+}
+
+/**
  * The whole of what an in-flight row says about itself, beside the elapsed: a dot, pulsing
  * while the request runs and still once its Run has ended under it. Labelled rather than
  * left to colour — the two states differ by whether the dot is moving, which a screen reader
@@ -515,7 +599,7 @@ function StateDot({ state }: { state: Exclude<Request["state"], "finished"> }) {
  * sits in the column a finished request shows its total in: the same question, asked of a
  * request that has not answered it yet.
  */
-function Elapsed({ row }: { row: Request }) {
+function Elapsed({ row }: { row: Request | Evaluation }) {
   const climbing = row.state === "in-flight"
   const climbed = useClimbingElapsed(row.provenElapsed, climbing)
 

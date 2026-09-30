@@ -67,9 +67,15 @@
 #
 # Fds 1 and 2 are the console process's own, read by the Reader as plain text, so nothing the
 # Host app prints can corrupt a frame. The process ends when fd 3 closes, even mid-evaluation.
+#
+# When the Host app's Initializer defines `RailsLogReader.evaluation`, each evaluation runs inside
+# it, which records the evaluation in the Sidecar and attributes its queries and log lines to it.
+# Its id there is `repl-<token>-<id>`, where the token is this process's own, so no two consoles'
+# evaluations share one. Without the Initializer, an evaluation runs just the same.
 
 require "json"
 require "pp"
+require "securerandom"
 
 module RailsLogReaderRepl
   # A result's text is cut at this many bytes.
@@ -222,6 +228,7 @@ module RailsLogReaderRepl
       define_reload
       trap_interrupt
       @binding = TOPLEVEL_BINDING.eval("binding")
+      @token = SecureRandom.hex(4)
 
       @lexer = lexer
       @completor, completor_name = completor
@@ -457,12 +464,15 @@ module RailsLogReaderRepl
     end
 
     # Runs `source` the way a request runs, so the query cache is fresh and a reload is safe. The
-    # result is inspected and laid out inside too, since inspecting a relation runs its query.
+    # result is inspected and laid out inside too, since inspecting a relation runs its query, and
+    # the query belongs to the evaluation.
     #
     # `exit` and a signal such as SIGTERM end the process rather than the evaluation, except
     # Ctrl-C's `Interrupt`, which is the evaluation's answer.
     def evaluate(id, source)
-      frame = interruptible { Rails.application.executor.wrap { result(@binding.eval(source, "(repl)", 1)) } }
+      frame = interruptible do
+        recorded(id, source) { Rails.application.executor.wrap { result(@binding.eval(source, "(repl)", 1)) } }
+      end
       send_frame({ "type" => "result", "id" => id }.merge(frame))
     rescue SystemExit
       raise
@@ -516,6 +526,18 @@ module RailsLogReaderRepl
 
     def loop_frame?(frame)
       frame.start_with?("#{LOOP_FILE}:")
+    end
+
+    # Runs the block inside the Initializer's `RailsLogReader.evaluation`, when the Host app has
+    # one.
+    def recorded(id, source, &block)
+      return yield unless defined?(::RailsLogReader) && ::RailsLogReader.respond_to?(:evaluation)
+
+      ::RailsLogReader.evaluation("repl-#{@token}-#{id}", source, sandbox: sandbox?, &block)
+    end
+
+    def sandbox?
+      Rails.application.respond_to?(:sandbox?) && Rails.application.sandbox? ? true : false
     end
 
     def interruptible

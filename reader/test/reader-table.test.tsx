@@ -375,6 +375,89 @@ describe("Run rows", () => {
 })
 
 /**
+ * An *Evaluation row*: one input the REPL ran, read where a request reads its method, path and
+ * outcome.
+ */
+describe("Evaluation rows", () => {
+  function evaluationRow() {
+    const found = activityRows().find((row) => row.getAttribute("data-kind") === "evaluation")
+    if (found === undefined) throw new Error("the table has no Evaluation row")
+    return found
+  }
+
+  test("reads REPL where a method goes, and the input's first line, with how many more, across the path and the action", () => {
+    const run = aRun("con-1")
+    theActivityTable(run.header("console"), run.evaluationStart("repl-a-1", "Post.count\nComment.count\nAuthor.count"))
+
+    const row = evaluationRow()
+    expect(cellUnder(row, "Method")).toHaveTextContent(/^REPL$/)
+    const input = cellUnder(row, "Path")
+    expect(input).toHaveTextContent("Post.count+2 lines")
+    expect(input).toHaveAttribute("colspan", "2")
+    expect(within(row).getAllByRole("cell")).toHaveLength(9)
+  })
+
+  test("adds sandbox to REPL when the console was sandboxed", () => {
+    const run = aRun("con-1")
+    theActivityTable(run.evaluationStart("repl-a-1", "Post.count", true))
+
+    expect(cellUnder(evaluationRow(), "Method")).toHaveTextContent("REPLsandbox")
+  })
+
+  test("shows the input alone when it is one line", () => {
+    const run = aRun("con-1")
+    theActivityTable(run.evaluationStart("repl-a-1", "Post.count"))
+
+    expect(cellUnder(evaluationRow(), "Path")).toHaveTextContent(/^Post\.count$/)
+  })
+
+  test("reads in flight as the live dot and a climbing Total", () => {
+    const run = aRun("con-1")
+    theActivityTable(run.evaluationStart("repl-a-1"))
+
+    const row = evaluationRow()
+    expect(within(cellUnder(row, "Status")).getByRole("img", { name: "In flight" })).toBeInTheDocument()
+    expect(within(cellUnder(row, "Total")).getByText(/^\d/)).toHaveAttribute("data-elapsed", "climbing")
+  })
+
+  test("reads finished as a faint ok, its counts, the DB time Rails counted, no view time, and how long it took", () => {
+    const run = aRun("con-1")
+    theActivityTable(
+      run.evaluationStart("repl-a-1"),
+      run.sql("repl-a-1"),
+      run.log("repl-a-1", "counted"),
+      run.evaluationFinish("repl-a-1", { outcome: "ok", db_runtime_ms: 0.8 }),
+    )
+
+    const row = evaluationRow()
+    expect(within(cellUnder(row, "Status")).getByText("ok")).toHaveAttribute("data-outcome", "ok")
+    expect(["SQL", "Log", "DB", "View", "Total"].map((heading) => cellUnder(row, heading).textContent)).toEqual([
+      "1",
+      "1",
+      "0.8ms",
+      "",
+      "300ms",
+    ])
+  })
+
+  test("reads raised in the error colour", () => {
+    const run = aRun("con-1")
+    theActivityTable(run.evaluationStart("repl-a-1"), run.evaluationFinish("repl-a-1", { outcome: "raised", class: "NameError", message: "nope" }))
+
+    expect(within(cellUnder(evaluationRow(), "Status")).getByText("raised")).toHaveAttribute("data-outcome", "raised")
+  })
+
+  test("reads Interrupted when its console's Run ended under it", () => {
+    const run = aRun("con-1")
+    theActivityTable(run.header("console"), run.evaluationStart("repl-a-1"), run.end())
+
+    const row = evaluationRow()
+    expect(row).toHaveAttribute("data-state", "interrupted")
+    expect(within(cellUnder(row, "Status")).getByRole("img", { name: "Interrupted" })).toBeInTheDocument()
+  })
+})
+
+/**
  * Tabs filter by row kind and by nothing else — never by method, status or controller, which
  * v1 rules out. Each carries a count of what it holds, whichever tab is showing.
  */
@@ -427,6 +510,20 @@ describe("the row-kind tabs", () => {
     await user.click(tab("Requests"))
 
     expect(activityRows().map((row) => cellUnder(row, "Path").textContent)).toEqual(["/first", "/second"])
+  })
+
+  test("counts an Evaluation row under All alone, and shows it there alone", async () => {
+    const run = aRun("con-1")
+    const { user } = theActivityTable(run.header("console"), run.evaluationStart("repl-a-1"), run.evaluationFinish("repl-a-1"))
+
+    expect(tabs()).toEqual(["Requests0", "Runs1", "All2"])
+    expect(activityRows().map((row) => row.getAttribute("data-kind"))).toEqual(["run", "evaluation"])
+
+    await user.click(tab("Requests"))
+    expect(activityRows()).toHaveLength(0)
+
+    await user.click(tab("Runs"))
+    expect(activityRows().map((row) => row.getAttribute("data-kind"))).toEqual(["run"])
   })
 
   test("filters to Run rows", async () => {

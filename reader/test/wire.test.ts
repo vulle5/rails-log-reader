@@ -6,6 +6,8 @@ import { SAMPLE_ENVELOPES } from "./wire.fixtures"
 
 const SPEC_EVENT_TYPES = [
   "app_log",
+  "evaluation_finish",
+  "evaluation_start",
   "request_finish",
   "request_route",
   "request_start",
@@ -26,11 +28,11 @@ describe("the wire contract", () => {
     expect(sampled.sort()).toEqual(SPEC_EVENT_TYPES)
   })
 
-  test("is at version 4 on both sides: the Reader and the Initializer's master copy", async () => {
+  test("is at version 5 on both sides: the Reader and the Initializer's master copy", async () => {
     const master = await Bun.file(join(import.meta.dir, "..", "rails", "rails_log_reader.rb")).text()
 
-    expect(WIRE_VERSION).toBe(4)
-    expect(master).toMatch(/^  WIRE_VERSION = 4$/m)
+    expect(WIRE_VERSION).toBe(5)
+    expect(master).toMatch(/^  WIRE_VERSION = 5$/m)
   })
 
   test("stamps every envelope with the schema version", () => {

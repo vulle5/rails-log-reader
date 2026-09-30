@@ -45,7 +45,7 @@ module RailsLogReader
   # including when a field a Reader could once count on becomes one it has to check for. The
   # Reader reads it to tell "the new file is loaded" from "the file on disk is new but the
   # process is not".
-  WIRE_VERSION = 4
+  WIRE_VERSION = 5
 
   SIDECAR = Rails.root.join("log/rails_log_reader.jsonl")
 
@@ -68,7 +68,8 @@ module RailsLogReader
 
   # Request-scoped handoff between the pieces below, which observe the same request on the
   # same thread but never share a method call: the middleware that opens it, and the
-  # subscribers that close it.
+  # subscribers that close it. `RailsLogReader.evaluation` sets `request_id` the same way, so
+  # `request_id` names whichever owns the events: a request or an *Evaluation*.
   #
   # Backed by `ActiveSupport::IsolatedExecutionState`, the same per-execution-context storage
   # `rails_log_reader_sql_starts` below already uses — which Rails does not clear at a request
@@ -738,6 +739,36 @@ module RailsLogReader
       nil
     end
 
+    # One *Evaluation* the Reader's REPL runs, around the block that runs it: `evaluation_start`
+    # with its input, then `evaluation_finish` with how it ended and the DB time Rails counted
+    # on this thread meanwhile. What the block's thread emits in between carries `id` as its
+    # `request_id`, as a request's events carry the request's. A thread the block starts has no
+    # `request_id` of its own, so what it emits is unattributed. The block's result and what it
+    # printed are never written.
+    #
+    # The block's exception, `Interrupt` included, is recorded as `raised` and raised again.
+    # A disabled Initializer only yields.
+    def evaluation(id, input, sandbox:)
+      return yield if @disabled
+
+      guard do
+        Current.request_id = id
+        emit("evaluation_start", { input:, sandbox: }, request_id: id)
+      end
+      db_before = sql_runtime
+      raised = nil
+
+      begin
+        yield
+      rescue Exception => e
+        raised = e
+        raise
+      ensure
+        guard { emit("evaluation_finish", evaluation_outcome(raised, db_before), request_id: id) }
+        guard { Current.reset }
+      end
+    end
+
     # Runs once, at the bottom of this file.
     def start
       guard_boot do
@@ -875,6 +906,22 @@ module RailsLogReader
         @disabled = true
         Rails.logger.warn("[rails_log_reader] disabled: #{e.class}: #{e.message}")
       end
+      def evaluation_outcome(raised, db_before)
+        outcome = raised ? { outcome: "raised", class: raised.class.name || raised.class.inspect, message: raised.message.to_s } : { outcome: "ok" }
+        db_after = sql_runtime
+        outcome[:db_runtime_ms] = db_after - db_before if db_before && db_after
+        outcome
+      end
+
+      # The milliseconds of SQL Active Record has counted on this thread. Rails 8.1 keeps them
+      # under `stats`, and 7.1 to 8.0 on the registry itself.
+      def sql_runtime
+        guard do
+          registry = ActiveRecord::RuntimeRegistry
+          registry.respond_to?(:stats) ? registry.stats.sql_runtime : registry.sql_runtime
+        end
+      end
+
       # A Run's identity is memoised with the pid it was derived under and re-derived when
       # that changes. The Initializer loads before a clustered Puma forks, so every worker
       # would otherwise inherit one run_id while keeping its own seq counter — two genuinely

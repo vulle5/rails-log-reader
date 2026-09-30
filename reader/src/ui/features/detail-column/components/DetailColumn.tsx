@@ -1,6 +1,6 @@
 import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
-import type { ActivityRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
+import type { ActivityRow, EvaluationRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
@@ -53,7 +53,7 @@ import type { ValueSource } from "../../value-viewer/lib/value-tree"
  */
 export function detailItems(row: ActivityRow | null, filter: DetailFilter) {
   if (row === null) return 0
-  const trailing = row.kind === "request" ? row.trailing : []
+  const trailing = row.kind === "run" ? [] : row.trailing
   return eventsShown(row.timeline, filter).length + eventsShown(trailing, filter).length
 }
 
@@ -89,6 +89,8 @@ export function DetailColumn({
     <OpenModifierHeld value={held}>
       {row.kind === "request" ? (
         <RequestDetail row={row} filter={filter} railsRoot={railsRoot} tab={tab} onTab={onTab} scroll={scroll} />
+      ) : row.kind === "evaluation" ? (
+        <EvaluationDetail row={row} filter={filter} railsRoot={railsRoot} scroll={scroll} />
       ) : (
         <RunDetail row={row} filter={filter} railsRoot={railsRoot} scroll={scroll} />
       )}
@@ -165,7 +167,7 @@ function RequestDetail({
                     block of nothing but SCHEMA queries, hidden, must not leave an empty "After the
                     request finished" section behind — the section is about there being something
                     to show under it. */}
-                {trailing.length > 0 && <Trailing events={trailing} railsRoot={railsRoot} />}
+                {trailing.length > 0 && <Trailing caption="After the request finished" events={trailing} railsRoot={railsRoot} />}
               </>
             ),
           },
@@ -240,6 +242,35 @@ function RunDetail({
     <Detail kind={<Highlight text={kind} />} name={row.appName ?? ""} facts={facts.join(" · ")}>
       <DetailScroller className="flex-auto" scroll={scroll}>
         <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      </DetailScroller>
+    </Detail>
+  )
+}
+
+/**
+ * An *Evaluation row*'s timeline: the queries and log lines it owns, and those that came after
+ * it finished in a trailing section of their own, as a request's do. Headed by `REPL` and its
+ * input's first line.
+ */
+function EvaluationDetail({
+  row,
+  filter,
+  railsRoot,
+  scroll,
+}: {
+  row: EvaluationRow
+  filter: DetailFilter
+  railsRoot: string | null
+  scroll: PanelScroll
+}) {
+  const trailing = eventsShown(row.trailing, filter)
+  const [first = ""] = (row.input ?? "").split("\n")
+
+  return (
+    <Detail kind="REPL" name={first} facts={row.sandbox ? "sandbox" : ""}>
+      <DetailScroller className="flex-auto" scroll={scroll}>
+        <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+        {trailing.length > 0 && <Trailing caption="After the evaluation finished" events={trailing} railsRoot={railsRoot} />}
       </DetailScroller>
     </Detail>
   )
@@ -852,16 +883,16 @@ function Callsite({
 }
 
 /**
- * The *trailing section*: events whose `seq` places them after the `request_finish`. Visibly
+ * The *trailing section*: events whose `seq` places them after their owner's finish. Visibly
  * separate and captioned, never silently at the end of the timeline — a log line arriving
  * after its request finished is genuinely surprising, and folding it in would read as a
  * Reader bug rather than as the truth about the file. Set apart by a rule as well as the
  * caption, so it cannot be mistaken for the timeline it sits below.
  */
-function Trailing({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
+function Trailing({ caption, events, railsRoot }: { caption: string; events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
-    <section className="mt-3 border-t border-dashed border-border" aria-label="After the request finished">
-      <Caption className="px-3 py-1.5">After the request finished</Caption>
+    <section className="mt-3 border-t border-dashed border-border" aria-label={caption}>
+      <Caption className="px-3 py-1.5">{caption}</Caption>
       <Timeline events={events} railsRoot={railsRoot} />
     </section>
   )

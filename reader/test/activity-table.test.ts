@@ -16,6 +16,7 @@ import {
   CLOCK_STEPPED_BACK,
   CONSOLE_RUN,
   DENSE_TRAFFIC,
+  EVALUATIONS,
   HANGS,
   NEVER_ROUTED,
   RAKE_RUN,
@@ -396,7 +397,23 @@ describe("a busy dev app's Sidecar", () => {
       }
     }
 
-    expect(requests(rows).map((candidate) => candidate.requestId)).toEqual(firstSeen)
+    const owners = rows.flatMap((candidate) => {
+      if (candidate.kind === "request") return [candidate.requestId]
+      return candidate.kind === "evaluation" ? [candidate.evaluationId] : []
+    })
+    expect(owners).toEqual(firstSeen)
+  })
+
+  test("gives the console Run's evaluations rows of their own, its boot line left in its Run row", async () => {
+    const { rows } = await theReaderReadsTheSeed()
+
+    const evaluations = rows.filter((candidate) => candidate.kind === "evaluation")
+    expect(evaluations.map((candidate) => [candidate.evaluationId, candidate.outcome, candidate.sqlCount])).toEqual([
+      [EVALUATIONS.lookup, "ok", 1],
+      [EVALUATIONS.count, "ok", 1],
+      [EVALUATIONS.update, "raised", 1],
+    ])
+    expect(runRow(rows, CONSOLE_RUN)).toMatchObject({ runKind: "console", sqlCount: 0, logCount: 1 })
   })
 
   test("leaves the request whose clock was stepped back where it was appended", async () => {
@@ -1050,7 +1067,7 @@ describe("Run rows", () => {
 
     // Two Runs writing at once, each row where the file put it — neither slabbed above or
     // below the other.
-    expect(rows.map((candidate) => (candidate.kind === "run" ? candidate.runId : candidate.path))).toEqual([
+    expect(rows.map((candidate) => (candidate.kind === "run" ? candidate.runId : candidate.kind === "request" ? candidate.path : candidate.input))).toEqual([
       "srv-1",
       "/first",
       "rake-2",
