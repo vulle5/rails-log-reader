@@ -37,7 +37,10 @@
 # An `error`'s `backtrace` runs from where it was raised down to the developer's last `(repl):N`
 # frame, so none of the loop's own frames bury theirs, and is empty when the error came before any
 # of their code ran, such as a SyntaxError. Its `causes` are the errors that led to it, nearest
-# first, each with its own `class`, `message` and `backtrace`, and empty when it had none.
+# first, each with its own `class`, `message` and `backtrace`, and empty when it had none. A
+# backtrace is kept whole up to 64 KB, then its far end is cut and the error says so with `cut`,
+# and only the nearest ten causes are sent, the error saying so with `causes_cut`. Neither key is
+# there when nothing was cut.
 #
 # `check` asks whether a text is a whole input or needs more lines, and is answered even while
 # an evaluation runs. It uses IRB's lexer, and `ready` lists "check" among its capabilities
@@ -66,6 +69,11 @@ module RailsLogReaderRepl
   # file's own path, which every frame of the loop does.
   EVAL_FILE = "(repl)"
   LOOP_FILE = __FILE__
+
+  # An error's backtrace is cut at this many bytes of frames, and only this many of its causes
+  # are sent.
+  BACKTRACE_LIMIT = 64 * 1024
+  CAUSE_LIMIT = 10
 
   # The width `pretty_inspect` wraps a result at.
   WIDTH = 80
@@ -254,38 +262,49 @@ module RailsLogReaderRepl
     rescue Exception => error
       raise if error.is_a?(SignalException) && !error.is_a?(Interrupt)
 
-      send_frame({ "type" => "error", "id" => id }.merge(failure(error)).merge("causes" => causes(error)))
+      causes, causes_cut = causes(error)
+      frame = { "type" => "error", "id" => id }.merge(failure(error)).merge("causes" => causes)
+      frame["causes_cut"] = true if causes_cut
+      send_frame(frame)
     end
 
-    # `error`'s class, message and backtrace.
+    # `error`'s class, message and backtrace, with `cut` when the backtrace was.
     def failure(error)
-      { "class" => class_name(error), "message" => utf8(error.message), "backtrace" => backtrace(error) }
+      frames, cut = backtrace(error)
+      failure = { "class" => class_name(error), "message" => utf8(error.message), "backtrace" => frames }
+      failure["cut"] = true if cut
+      failure
     end
 
-    # The errors behind `error`, nearest first, each as `failure` gives it. An error met again
-    # ends the chain.
+    # The errors behind `error`, nearest first, each as `failure` gives it, and whether more were
+    # left out. An error met again ends the chain.
     def causes(error)
       seen = { error => true }.compare_by_identity
       chain = []
       current = error
       while (cause = current.cause) && !seen.key?(cause)
+        return [chain, true] if chain.size == CAUSE_LIMIT
+
         seen[cause] = true
         chain << failure(cause)
         current = cause
       end
-      chain
+      [chain, false]
     end
 
     # `error`'s backtrace from its first frame that is not the loop's own, such as the trap that
     # raised an `Interrupt`, down to the developer's last `(repl)` frame, so the loop's frames
     # under it are left out. An error with no such frame is cut where the loop's own begin, which
-    # leaves nothing for a SyntaxError and everything for one raised on another thread.
+    # leaves nothing for a SyntaxError and everything for one raised on another thread. Then whole
+    # frames up to `BACKTRACE_LIMIT` bytes, and whether some were left out.
     def backtrace(error)
       frames = (error.backtrace || []).map { |frame| utf8(frame) }
       last = frames.rindex { |frame| frame.start_with?("#{EVAL_FILE}:") }
-      return frames.take_while { |frame| !loop_frame?(frame) } unless last
+      frames = last ? frames.first(last + 1).drop_while { |frame| loop_frame?(frame) } : frames.take_while { |frame| !loop_frame?(frame) }
 
-      frames.first(last + 1).drop_while { |frame| loop_frame?(frame) }
+      size = 0
+      kept = frames.take_while { |frame| (size += frame.bytesize) <= BACKTRACE_LIMIT }
+      [kept, kept.size < frames.size]
     end
 
     def loop_frame?(frame)

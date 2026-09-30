@@ -15,6 +15,7 @@ import { stubComplete } from "./repl.fixtures"
  *
  * - `puts TEXT` prints TEXT on fd 1, `warn TEXT` on fd 2, and each answers `nil`.
  * - `raise CLASS: MESSAGE` answers with that error, raised at `(repl):1`.
+ * - `cutoff CLASS: MESSAGE` answers with that error, its backtrace and its causes cut.
  * - `wrap CLASS: MESSAGE` answers with that error, raised at `(repl):2` over a `KeyError: root` cause.
  * - `sleep MS` answers `1` after MS milliseconds, or raises `Interrupt` on a SIGINT before then.
  * - `nap MS` prints `napping` on fd 1, then sleeps as `sleep` does.
@@ -98,6 +99,11 @@ async function evaluate({ id, input }: { id: number; input: string }) {
     case "raise": {
       const [className, message] = argument.split(": ")
       return send({ type: "error", id, class: className, message, backtrace: ["(repl):1:in '<main>'"], causes: [] })
+    }
+    case "cutoff": {
+      const [className, message] = argument.split(": ")
+      const cause = { class: "KeyError", message: "root", backtrace: ["(repl):1:in 'fetch'"], cut: true }
+      return send({ type: "error", id, class: className, message, backtrace: ["(repl):2:in '<main>'"], cut: true, causes: [cause], causes_cut: true })
     }
     case "wrap": {
       const [className, message] = argument.split(": ")

@@ -584,16 +584,63 @@ describe("an evaluation that raised", () => {
     expect(entry.queryByRole("list", { name: "Backtrace" })).not.toBeInTheDocument()
   })
 
-  test("shows a cause with no backtrace as its class and message alone", async () => {
-    const { user } = await openedOver({
+  test("shows a cause with no backtrace as a line of its own, with nothing to open", async () => {
+    await openedOver({
       state: READY,
       transcript: [evaluation({ outcome: raised("RuntimeError", "top", [], [{ className: "KeyError", message: "never raised", backtrace: [] }]) })],
     })
     const entry = within(transcriptEntries()[0]!)
 
-    await user.click(entry.getByRole("button", { name: "Caused by KeyError: never raised" }))
+    expect(entry.getByText("Caused by KeyError: never raised")).toBeInTheDocument()
+    expect(entry.queryByRole("button", { name: /Caused by/ })).not.toBeInTheDocument()
+  })
 
-    expect(entry.queryByRole("list", { name: "Backtrace" })).not.toBeInTheDocument()
+  test("says an error's backtrace was cut, under it", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [evaluation({ outcome: { ...raised("SystemStackError", "stack level too deep", [GEM, "(repl):1:in `deep'"]), cut: true } })],
+    })
+
+    expect(within(transcriptEntries()[0]!).getByText("Backtrace cut at 64 KB")).toBeInTheDocument()
+  })
+
+  test("says nothing was cut when nothing was", async () => {
+    await openedOver({ state: READY, transcript: [evaluation({ outcome: raised("RuntimeError", "boom") })] })
+
+    expect(within(transcriptEntries()[0]!).queryByText(/cut/)).not.toBeInTheDocument()
+  })
+
+  test("says a cause's backtrace was cut once the cause is opened", async () => {
+    const { user } = await openedOver({
+      state: READY,
+      transcript: [
+        evaluation({
+          outcome: raised("RuntimeError", "top", [], [{ className: "KeyError", message: "root", backtrace: ["(repl):1:in `deep'"], cut: true }]),
+        }),
+      ],
+    })
+    const entry = within(transcriptEntries()[0]!)
+    expect(entry.queryByText("Backtrace cut at 64 KB")).not.toBeInTheDocument()
+
+    await user.click(entry.getByRole("button", { name: "Caused by KeyError: root" }))
+
+    expect(entry.getByText("Backtrace cut at 64 KB")).toBeInTheDocument()
+  })
+
+  test("says causes past the nearest ten were left out, after the ones it shows", async () => {
+    await openedOver({
+      state: READY,
+      transcript: [
+        evaluation({
+          outcome: {
+            ...raised("RuntimeError", "top", [], [{ className: "KeyError", message: "root", backtrace: ["(repl):1:in `<main>'"] }]),
+            causesCut: true,
+          },
+        }),
+      ],
+    })
+
+    expect(within(transcriptEntries()[0]!).getByText("Further causes left out")).toBeInTheDocument()
   })
 })
 

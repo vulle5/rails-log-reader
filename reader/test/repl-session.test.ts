@@ -185,6 +185,31 @@ describe("the REPL session", () => {
     })
   })
 
+  test("keeps what an error says was cut, its backtrace's, a cause's and the causes'", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    const entry = await evaluate(listening, "cutoff TypeError: top")
+
+    expect(entry).toMatchObject({
+      outcome: { kind: "error", cut: true, causesCut: true, causes: [{ className: "KeyError", cut: true }] },
+    })
+  })
+
+  test("leaves an error that was cut nowhere without a cut", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    await booted(listening)
+
+    const entry = await evaluate(listening, "wrap TypeError: top")
+
+    if (entry?.kind !== "evaluation" || entry.outcome?.kind !== "error") throw new Error("the evaluation did not raise")
+    expect(entry.outcome).not.toHaveProperty("cut")
+    expect(entry.outcome).not.toHaveProperty("causesCut")
+    expect(entry.outcome.causes[0]).not.toHaveProperty("cut")
+  })
+
   test("interrupts a running evaluation with SIGINT, which ends it as raising Interrupt", async () => {
     const { root, session } = await aSession()
     const listening = listen(session)

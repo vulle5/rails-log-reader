@@ -352,6 +352,8 @@ class EvalLoopTest < ActiveSupport::TestCase
       assert_equal "ArgumentError", answer["class"]
       assert_equal "nope", answer["message"]
       assert_equal [], answer["causes"]
+      assert_not answer.key?("cut"), "nothing was cut"
+      assert_not answer.key?("causes_cut"), "nothing was cut"
       assert_equal ["(repl):1:in '<main>'"], answer["backtrace"].map { |frame| frame.tr("`", "'") }
       assert_equal "3", repl.evaluate("1 + 2")["text"], "the loop keeps going after a raise"
     end
@@ -410,6 +412,54 @@ class EvalLoopTest < ActiveSupport::TestCase
       assert_equal %w[middle root], answer["causes"].map { |cause| cause["message"] }
       assert_equal ["(repl):5", "(repl):3"], answer["causes"].map { |cause| cause["backtrace"].first[/\A\(repl\):\d+/] }
       assert answer["causes"].all? { |cause| cause["backtrace"].all? { |frame| frame.start_with?("(repl):") } }
+    end
+  end
+
+  test "cuts a backtrace at 64 KB from its far end, and says so" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate("def deep(depth); depth.zero? ? raise('bottom') : deep(depth - 1); end")
+      answer = repl.evaluate("deep(5000)")
+
+      assert_equal true, answer["cut"]
+      assert_operator answer["backtrace"].sum(&:bytesize), :<=, 64 * 1024
+      assert_operator answer["backtrace"].size, :>, 100
+      assert_match(/deep/, answer["backtrace"].first, "the raise site is what stays")
+    end
+  end
+
+  test "cuts a cause's backtrace on its own" do
+    DevelopmentRun.console_process do |repl|
+      repl.evaluate("def deep(depth); depth.zero? ? raise('bottom') : deep(depth - 1); end")
+      answer = repl.evaluate(<<~RUBY)
+        begin
+          deep(5000)
+        rescue
+          raise "top"
+        end
+      RUBY
+
+      assert_not answer.key?("cut")
+      assert_equal [true], answer["causes"].map { |cause| cause["cut"] }
+    end
+  end
+
+  test "answers the ten nearest causes and says there were more" do
+    DevelopmentRun.console_process do |repl|
+      answer = repl.evaluate(<<~RUBY)
+        error = nil
+        12.times do |at|
+          begin
+            raise "error \#{at}", cause: error
+          rescue => raised
+            error = raised
+          end
+        end
+        raise error
+      RUBY
+
+      assert_equal "error 11", answer["message"]
+      assert_equal (1..10).map { |at| "error #{11 - at}" }, answer["causes"].map { |cause| cause["message"] }
+      assert_equal true, answer["causes_cut"]
     end
   end
 

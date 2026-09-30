@@ -263,7 +263,9 @@ An entry that raised is drawn as an exception is in the *Detail column*: its cla
 then its backtrace with gem frames collapsed. The backtrace ends at the developer's last
 `(repl):N` frame, so the eval loop's own frames under it never bury theirs, and it is empty for
 an error that came before any of their code ran, a SyntaxError. Each error behind it, through
-`cause`, is folded as "Caused by" its class and message, and opens to its own backtrace.
+`cause`, is folded as "Caused by" its class and message, and opens to its own backtrace; one with
+no backtrace is that line alone. A backtrace is cut to 64 KB of frames from its far end, and only
+the nearest ten causes are kept, and the entry says so under what was cut.
 
 **Input history** — the inputs the *REPL* has submitted, kept apart from the *Transcript*
 because it outlives the console process: it survives a Restart and the Reader restarting. It is

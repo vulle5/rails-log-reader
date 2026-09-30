@@ -49,13 +49,13 @@ export type ReplSession = {
 }
 
 /** An error's own fields in an `error` frame, as a cause carries them. */
-type ErrorFrame = { class: string; message: string; backtrace: string[] }
+type ErrorFrame = { class: string; message: string; backtrace: string[]; cut?: true }
 
 /** A frame the eval loop sends on fd 3. */
 type Frame =
   | { type: "ready"; pid: number; capabilities: string[] }
   | { type: "result"; id: number; text: string; cut: boolean; tree: RubyNode; inspect_error?: string }
-  | { type: "error"; id: number; class: string; message: string; backtrace: string[]; causes: ErrorFrame[] }
+  | (ErrorFrame & { type: "error"; id: number; causes: ErrorFrame[]; causes_cut?: true })
   | { type: "checked"; id: number; complete: boolean }
 
 /** How long a stopped console process has to end on SIGTERM before it is sent SIGKILL. */
@@ -183,7 +183,12 @@ export function replSession(railsRoot: string): ReplSession {
     const outcome: Outcome =
       frame.type === "result"
         ? { kind: "result", text: frame.text, cut: frame.cut, tree: frame.tree, inspectError: frame.inspect_error ?? null }
-        : { kind: "error", ...rubyError(frame), causes: frame.causes.map(rubyError) }
+        : {
+            kind: "error",
+            ...rubyError(frame),
+            causes: frame.causes.map(rubyError),
+            ...(frame.causes_cut && { causesCut: true as const }),
+          }
     publish({ type: "finished", id: frame.id, outcome })
     become({ kind: "ready", pid: state.pid })
   }
@@ -275,8 +280,8 @@ export function replSession(railsRoot: string): ReplSession {
 }
 
 /** An error frame's fields, named as the Reader names them. */
-function rubyError({ class: className, message, backtrace }: ErrorFrame): RubyError {
-  return { className, message, backtrace }
+function rubyError({ class: className, message, backtrace, cut }: ErrorFrame): RubyError {
+  return { className, message, backtrace, ...(cut && { cut }) }
 }
 
 /** Calls `onText` with each piece of text `stream` carries, until it ends. */

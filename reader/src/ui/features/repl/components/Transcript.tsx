@@ -83,9 +83,11 @@ function Answer({ outcome, railsRoot }: { outcome: Outcome; railsRoot: string | 
         <>
           <Text className="text-error">{described(outcome)}</Text>
           <Backtrace className="mt-1" backtrace={outcome.backtrace} railsRoot={railsRoot} />
+          {outcome.cut && <Cut>Backtrace cut at 64 KB</Cut>}
           {outcome.causes.map((cause, at) => (
             <Cause key={at} cause={cause} railsRoot={railsRoot} />
           ))}
+          {outcome.causesCut && <Cut>Further causes left out</Cut>}
         </>
       )
     case "lost":
@@ -98,9 +100,17 @@ function described({ className, message }: RubyError) {
   return message === "" ? className : `${className}: ${message}`
 }
 
-/** An error's cause, folded to "Caused by" its class and message, and its backtrace once opened. */
+/**
+ * An error's cause: "Caused by" its class and message, folded, and its backtrace once opened. A
+ * cause with no backtrace has nothing to open, so it is only that line.
+ */
 function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | null }) {
   const [open, setOpen] = useState(false)
+  const label = `Caused by ${described(cause)}`
+
+  if (cause.backtrace.length === 0) {
+    return <p className="mt-1 pl-[2ch] text-xs text-muted">{label}</p>
+  }
 
   return (
     <div className="mt-1">
@@ -111,9 +121,14 @@ function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | nul
         onClick={() => setOpen(!open)}
       >
         <Marker>{open ? "▾ " : "▸ "}</Marker>
-        {`Caused by ${described(cause)}`}
+        {label}
       </button>
-      {open && <Backtrace className="mt-1" backtrace={cause.backtrace} railsRoot={railsRoot} />}
+      {open && (
+        <>
+          <Backtrace className="mt-1" backtrace={cause.backtrace} railsRoot={railsRoot} />
+          {cause.cut && <Cut>Backtrace cut at 64 KB</Cut>}
+        </>
+      )}
     </div>
   )
 }
