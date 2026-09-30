@@ -275,7 +275,8 @@ kept once at its latest. That cap is a guess, and too many entries would bury th
 surely as too few would starve the *History suggestion*. ↑ on the input's first line opens it as
 a list over the Transcript, newest nearest the prompt, filtered by what is typed while it is
 open. Picking an entry puts it in the input and never runs it. It is read once when the page
-loads and written only on submit, so a keystroke never touches storage.
+loads, and again only when another tab writes it. It is written on submit, and once more when
+that evaluation finishes, to mark that it raised, and never on a keystroke.
 _Avoid_: history (alone), which already means the load-on-open Events; command history.
 
 **History suggestion** — the grey text after the caret offering the newest *Input history*

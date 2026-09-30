@@ -1,9 +1,10 @@
 import { useEffect, useId, useState } from "react"
 
-import type { ExitedState, ReplSnapshot, ReplState } from "../../../../shared/repl"
+import { runningPid, type ExitedState, type ReplSnapshot, type ReplState } from "../../../../shared/repl"
 import { ColumnHeading } from "../../../components/Column"
 import { Tag } from "../../../components/Tag"
 import { cn } from "../../../lib/cn"
+import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
 import { ReplPrompt } from "./ReplPrompt"
 import { Transcript } from "./Transcript"
@@ -41,6 +42,8 @@ export function ReplDrawer({
   const body = useId()
   const label = folded ? "Open REPL" : "Fold REPL"
   const { boot } = repl
+  const history = useInputHistory(railsRoot, repl.snapshot)
+  const { state } = repl.snapshot
 
   useEffect(() => {
     if (!folded && actsOnlyFrom === null) boot()
@@ -82,7 +85,8 @@ export function ReplDrawer({
         </div>
       </header>
       {!folded && (
-        <div className="flex min-h-0 flex-auto flex-col" id={body}>
+        // A size container, so the Input history's list is as tall as the room over the prompt allows.
+        <div className="flex min-h-0 flex-auto flex-col [container-type:size]" id={body}>
           {actsOnlyFrom === null ? (
             <>
               <Transcript entries={repl.snapshot.transcript} railsRoot={railsRoot} />
@@ -92,7 +96,9 @@ export function ReplDrawer({
                 check={repl.check}
                 interrupt={repl.interrupt}
                 refusal={repl.refusal}
-                busy={repl.snapshot.state.kind === "busy"}
+                busy={state.kind === "busy"}
+                history={history}
+                pid={runningPid(state)}
                 // Keyed by the session's choice, so the toggle starts from it again whenever it changes.
                 actions={<RestartControls key={String(repl.snapshot.sandbox)} sandboxed={repl.snapshot.sandbox} restart={repl.restart} />}
               />

@@ -1,7 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 
 import { cn } from "../../../lib/cn"
+import type { InputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
+import type { HistoryEntry } from "../lib/input-history"
+import { InputHistoryList, rowId } from "./InputHistoryList"
 import { RubyCode } from "./RubyCode"
 
 const HINTS = "Enter to run · Shift+Enter for a new line"
@@ -11,6 +14,9 @@ const BUSY_HINTS = "Ctrl-C to interrupt"
 
 /** How long a refusal stands in the hint row before the key hints come back. */
 const REFUSAL_SHOWN_MS = 3_000
+
+/** The open *Input history*: what the developer has typed to narrow it, and how many entries back from the newest is chosen. */
+type Browsing = { filter: string; back: number }
 
 /**
  * The *REPL*'s input: a textarea that runs what is typed on Enter and empties, drawn over its
@@ -25,6 +31,11 @@ const REFUSAL_SHOWN_MS = 3_000
  *
  * Ctrl-C does what it does in a terminal: with a selection it copies it, while `busy` it
  * interrupts the running evaluation, and otherwise it clears the textarea.
+ *
+ * ↑ on the input's first line opens the *Input history* over the *Transcript*. While it is open
+ * what is typed narrows it and never reaches the textarea, ↑ and ↓ choose, Enter or Tab puts the
+ * chosen entry in the textarea without running it, and Esc, ↓ past the newest, or leaving the
+ * textarea closes it. Each input that runs is recorded in `history`.
  */
 export function ReplPrompt({
   submit,
@@ -32,9 +43,19 @@ export function ReplPrompt({
   interrupt,
   refusal,
   busy,
+  history,
+  pid,
   actions,
-}: Pick<ReplHandle, "submit" | "check" | "interrupt" | "refusal"> & { busy: boolean; actions?: ReactNode }) {
+}: Pick<ReplHandle, "submit" | "check" | "interrupt" | "refusal"> & {
+  busy: boolean
+  history: InputHistory
+  /** The console process running now, `null` when none is. */
+  pid: number | null
+  actions?: ReactNode
+}) {
   const [input, setInput] = useState("")
+  const [browsing, setBrowsing] = useState<Browsing | null>(null)
+  const listId = useId()
   // An object, so a second refusal for the same reason shows for its own moment.
   const [refused, setRefused] = useState<{ reason: string } | null>(null)
   const seen = useRef(refusal)
@@ -72,9 +93,22 @@ export function ReplPrompt({
     setInput((typed) => (typed === "" ? refusal.input : typed))
   }, [refusal])
 
+  // Oldest first, as the list draws them.
+  const matches = browsing === null ? [] : history.entries.filter((entry) => entry.input.toLowerCase().includes(browsing.filter.toLowerCase()))
+  const chosen = browsing === null || matches.length === 0 ? -1 : matches.length - 1 - Math.min(browsing.back, matches.length - 1)
+
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (isCtrlC(event)) {
+      setBrowsing(null)
       ctrlC(event)
+      return
+    }
+    if (browsing !== null) {
+      browse(event, browsing)
+      if (event.defaultPrevented) return
+    } else if (opensHistory(event)) {
+      event.preventDefault()
+      setBrowsing({ filter: "", back: 0 })
       return
     }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
@@ -90,10 +124,56 @@ export function ReplPrompt({
     })
   }
 
+  function opensHistory(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "ArrowUp" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return false
+    if (event.nativeEvent.isComposing || history.entries.length === 0) return false
+    const { value, selectionStart } = event.currentTarget
+    return !value.slice(0, selectionStart).includes("\n")
+  }
+
+  function browse(event: KeyboardEvent<HTMLTextAreaElement>, { filter, back }: Browsing) {
+    if (event.nativeEvent.isComposing) return
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault()
+      setBrowsing({ filter, back: Math.max(0, Math.min(back + 1, matches.length - 1)) })
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault()
+      setBrowsing(chosen === matches.length - 1 || matches.length === 0 ? null : { filter, back: back - 1 })
+    } else if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+      event.preventDefault()
+      const entry = matches[chosen]
+      if (entry !== undefined) pick(entry)
+      else setBrowsing(null)
+    } else if (event.key === "Escape") {
+      event.preventDefault()
+      setBrowsing(null)
+    } else if (event.key === "Backspace") {
+      event.preventDefault()
+      setBrowsing({ filter: filter.slice(0, -1), back: 0 })
+    } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault()
+      setBrowsing({ filter: filter + event.key, back: 0 })
+    }
+  }
+
+  function pick(entry: HistoryEntry) {
+    setBrowsing(null)
+    if (entry.input === input) {
+      box.current?.setSelectionRange(input.length, input.length)
+    } else {
+      caret.current = entry.input.length
+      setInput(entry.input)
+    }
+    box.current?.focus()
+  }
+
   function run() {
     const reason = submit(input)
-    if (reason === null) setInput("")
-    else setRefused({ reason })
+    if (reason === null) {
+      history.record(input)
+      setInput("")
+    } else setRefused({ reason })
   }
 
   function newLine(start: number, end: number) {
@@ -115,7 +195,8 @@ export function ReplPrompt({
   }
 
   return (
-    <div className="flex flex-none flex-col border-t border-border">
+    <div className="relative flex flex-none flex-col border-t border-border">
+      {browsing !== null && <InputHistoryList id={listId} entries={matches} filter={browsing.filter} selected={chosen} pid={pid} onPick={pick} />}
       <div className="relative h-14">
         {/* The input's highlighting, under a textarea whose own text is transparent. The two share
             their box, font and wrapping, so each glyph drawn here sits under the one it colours.
@@ -136,12 +217,15 @@ export function ReplPrompt({
           )}
           ref={box}
           aria-label="Ruby"
+          aria-controls={browsing === null ? undefined : listId}
+          aria-activedescendant={chosen === -1 ? undefined : rowId(listId, chosen)}
           spellCheck={false}
           autoCapitalize="off"
           autoComplete="off"
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={keyDown}
+          onBlur={() => setBrowsing(null)}
           onScroll={(event) => {
             if (highlighted.current !== null) highlighted.current.scrollTop = event.currentTarget.scrollTop
           }}

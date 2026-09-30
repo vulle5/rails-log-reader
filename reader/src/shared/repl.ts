@@ -186,6 +186,11 @@ export function applyReplUpdate(snapshot: ReplSnapshot, update: ReplUpdate): Rep
   }
 }
 
+/** The pid of the console process `state` has running, or `null` when none is. */
+export function runningPid(state: ReplState): number | null {
+  return state.kind === "ready" || state.kind === "busy" ? state.pid : null
+}
+
 /** Why an input submitted in `state` is refused, or `null` when it would run. */
 export function submitRefusal(state: ReplState): string | null {
   switch (state.kind) {
