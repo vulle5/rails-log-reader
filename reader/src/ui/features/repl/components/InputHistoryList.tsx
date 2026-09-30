@@ -15,7 +15,9 @@ const DAY = 24 * HOUR
  *
  * Each row is an entry's first line as Ruby, `+N lines` when it has more, `raised` when it did,
  * and when it ran. Above the first entry of every console process but `pid` is an
- * `earlier console · pid N` divider. `filter` is what the developer has typed to narrow it, and
+ * `earlier console · pid N` divider, and above the first of `pid`'s own, when entries of an
+ * earlier console come before it, is a `this console · pid N` divider, so where one ends and
+ * the other begins is marked. `filter` is what the developer has typed to narrow it, and
  * `entries` are already narrowed by it.
  */
 export function InputHistoryList({
@@ -52,11 +54,14 @@ export function InputHistoryList({
       <ul className="min-h-0 overflow-auto py-0.5 [scrollbar-width:thin]" role="listbox" aria-label="Input history">
         {entries.map((entry, index) => {
           const [first = "", ...more] = entry.input.split("\n")
-          const introduced = entry.pid !== pid && entries[index - 1]?.pid !== entry.pid
+          const before = entries[index - 1]
+          const introduced = entry.pid !== pid && before?.pid !== entry.pid
+          const resumed = entry.pid === pid && before !== undefined && before.pid !== pid
 
           return (
             <li key={entry.input} role="presentation">
               {introduced && <div className="border-t border-border px-2 pt-0.5 text-[0.6875rem] text-faint">earlier console · pid {entry.pid}</div>}
+              {resumed && <div className="border-t border-border px-2 pt-0.5 text-[0.6875rem] text-faint">this console · pid {entry.pid}</div>}
               <div
                 className={cn(
                   "flex cursor-pointer items-start gap-2 px-2 py-0.5 font-mono text-sm",

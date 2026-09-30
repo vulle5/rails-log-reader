@@ -274,7 +274,7 @@ turns on one port never share it. It is capped at the latest 200 distinct inputs
 kept once at its latest. That cap is a guess, and too many entries would bury the useful ones as
 surely as too few would starve the *History suggestion*. ↑ on the input's first line opens it as
 a list over the Transcript, newest nearest the prompt, filtered by what is typed while it is
-open. Picking an entry puts it in the input and never runs it. It is read once when the page
+open, with a divider above each console process's entries and the running one's marked "this console" where earlier entries come before it. Picking an entry puts it in the input and never runs it. It is read once when the page
 loads, and again only when another tab writes it. It is written on submit, and once more when
 that evaluation finishes, to mark that it raised, and never on a keystroke.
 _Avoid_: history (alone), which already means the load-on-open Events; command history.

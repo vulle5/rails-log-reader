@@ -190,6 +190,34 @@ describe("the REPL's Input history on ↑", () => {
     expect(secondDivider!.compareDocumentPosition(historyRows()[2]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  test("marks where the running console's own entries begin below an earlier console's, and nowhere else", async () => {
+    kept([
+      { input: "old", pid: 100, minutes: 90 },
+      { input: "now one", pid: PID, minutes: 5 },
+      { input: "now two", pid: PID, minutes: 4 },
+    ])
+    const { user } = await opened()
+
+    await user.click(prompt())
+    await user.keyboard("{ArrowUp}")
+    const list = within(within(replDrawer()).getByRole("listbox", { name: "Input history" }))
+
+    expect(list.getAllByText(/^this console · pid/).map((divider) => divider.textContent)).toEqual([`this console · pid ${PID}`])
+    const [divider] = list.getAllByText(/^this console · pid/)
+    expect(divider!.compareDocumentPosition(historyRows()[0]!)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
+    expect(divider!.compareDocumentPosition(historyRows()[1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  test("marks no start of the running console's entries when it has all of them", async () => {
+    kept([{ input: "now one" }, { input: "now two" }])
+    const { user } = await opened()
+
+    await user.click(prompt())
+    await user.keyboard("{ArrowUp}")
+
+    expect(within(replDrawer()).queryByText(/^this console · pid/)).not.toBeInTheDocument()
+  })
+
   test("filters by substring as it is typed, leaving the input alone", async () => {
     kept([{ input: "Post.count" }, { input: "User.first" }, { input: "post = Post.last" }])
     const { user } = await opened()
