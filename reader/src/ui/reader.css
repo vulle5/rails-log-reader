@@ -29,6 +29,9 @@
   /* `accent` leaning 12% toward `foreground`: darker in the light theme, lighter in the dark. */
   --color-accent-hover: #2c65d2;
   --color-selected: #e8effc;
+  /* Selected text in an input: `accent`, translucent, so the text it covers keeps its colours.
+     `selected` is opaque, and would hide them. */
+  --color-selection: rgb(47 111 235 / 28%);
   /* *Hover grouping*'s two marks: `accent` mixed 7% into `background` for the hovered group,
      and 14% for the pinned one. */
   --color-lit: #f0f5fe;
@@ -126,6 +129,7 @@
     --color-accent: #6ea0ff;
     --color-accent-hover: #7ca9fd;
     --color-selected: #1c2432;
+    --color-selection: rgb(110 160 255 / 35%);
     --color-lit: #161c26;
     --color-pinned: #1c2637;
     --color-elapsed: #1c2637;

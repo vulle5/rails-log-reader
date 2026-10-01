@@ -439,8 +439,8 @@ export function ReplPrompt({
         <textarea
           className={cn(
             "absolute inset-0 resize-none overflow-y-auto bg-transparent px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap outline-none [scrollbar-gutter:stable]",
-            // The caret and a selection's text are the textarea's own; the rest of its text is drawn under it.
-            "text-transparent caret-strong selection:text-strong",
+            // The caret and a selection's tint are the textarea's own; all of its text is drawn under it, a selection's too.
+            "text-transparent caret-strong selection:bg-selection selection:text-transparent",
           )}
           ref={box}
           aria-label="Ruby"
