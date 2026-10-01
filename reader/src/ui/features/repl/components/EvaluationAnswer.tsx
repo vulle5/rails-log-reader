@@ -1,9 +1,11 @@
-import { useState } from "react"
+import { useContext, useState } from "react"
 
 import type { Outcome, RubyError } from "../../../../shared/repl"
 import { Backtrace } from "../../../components/Backtrace"
+import { Highlight, SearchContext, type Search } from "../../../hooks/search"
+import { described, framesMatches } from "../lib/entry-matches"
 import { CutText, useEntryCut, type EntryCut } from "./EntryCut"
-import { EvaluationResult } from "./EvaluationResult"
+import { EvaluationResult, type RawView } from "./EvaluationResult"
 import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
 
 /**
@@ -28,17 +30,29 @@ export function Printed({ output, cut, entryCut }: { output: string; cut: boolea
 }
 
 /**
- * An evaluation's result, cut by `entryCut` when given, or its error drawn as the *Detail
- * column* draws an exception's backtrace.
+ * An evaluation's result, cut by `entryCut` when given, and shown raw or pretty by `rawView` when
+ * given, or its error drawn as the *Detail column* draws an exception's backtrace.
  */
-export function Answer({ outcome, railsRoot, entryCut }: { outcome: Outcome; railsRoot: string | null; entryCut?: EntryCut }) {
+export function Answer({
+  outcome,
+  railsRoot,
+  entryCut,
+  rawView,
+}: {
+  outcome: Outcome
+  railsRoot: string | null
+  entryCut?: EntryCut
+  rawView?: RawView
+}) {
   switch (outcome.kind) {
     case "result":
-      return <EvaluationResult outcome={outcome} entryCut={entryCut} />
+      return <EvaluationResult outcome={outcome} entryCut={entryCut} rawView={rawView} />
     case "error":
       return (
         <>
-          <Text className="text-error">{described(outcome)}</Text>
+          <Text className="text-error">
+            <Highlight text={described(outcome)} />
+          </Text>
           <Backtrace className="mt-1" backtrace={outcome.backtrace} railsRoot={railsRoot} />
           {outcome.cut && <Cut>Backtrace cut at 64 KB</Cut>}
           {outcome.causes.map((cause, at) => (
@@ -52,18 +66,26 @@ export function Answer({ outcome, railsRoot, entryCut }: { outcome: Outcome; rai
   }
 }
 
-/** An error as its class, then its message when it has one. */
-function described({ className, message }: RubyError) {
-  return message === "" ? className : `${className}: ${message}`
-}
-
 /**
  * An error's cause: "Caused by" its class and message, folded, and its backtrace once opened. A
  * cause with no backtrace has nothing to open, so it is only that line.
+ *
+ * *Search* lights its class and message, and opens it for a match in its backtrace until the
+ * developer folds it, which holds until the term changes, its line lit and counting the matches.
  */
 function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | null }) {
-  const [open, setOpen] = useState(false)
-  const label = `Caused by ${described(cause)}`
+  const search = useContext(SearchContext)
+  const [opened, setOpened] = useState(false)
+  // The search the developer folded it under, over a match.
+  const [foldedUnder, setFoldedUnder] = useState<Search | null>(null)
+  const found = framesMatches(search, cause)
+  const open = opened || (found > 0 && foldedUnder !== search)
+  const label = (
+    <>
+      {"Caused by "}
+      <Highlight text={described(cause)} />
+    </>
+  )
 
   if (cause.backtrace.length === 0) {
     return <p className="mt-1 pl-[2ch] text-xs text-muted">{label}</p>
@@ -75,10 +97,22 @@ function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | nul
         type="button"
         className="cursor-pointer text-left text-xs text-muted hover:text-foreground"
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpened(!open)
+          setFoldedUnder(open && found > 0 ? search : null)
+        }}
       >
         <Marker>{open ? "▾ " : "▸ "}</Marker>
         {label}
+        {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
+        {!open && found > 0 && (
+          <>
+            {" "}
+            <span className="rounded-xs bg-match" data-lit>
+              {`· ${found} ${found === 1 ? "match" : "matches"}`}
+            </span>
+          </>
+        )}
       </button>
       {open && (
         <>

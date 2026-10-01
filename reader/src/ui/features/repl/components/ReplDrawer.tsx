@@ -1,15 +1,18 @@
-import { useEffect, useId, useState } from "react"
+import { useContext, useEffect, useId, useMemo, useState } from "react"
 
 import type { EvaluationRow } from "../../../../shared/activity"
 import { runningPid, type EntryRow, type ExitedState, type ReplSnapshot, type ReplState } from "../../../../shared/repl"
 import { ColumnHeading } from "../../../components/Column"
+import { MatchesBadge } from "../../../components/MatchesBadge"
 import { Tag } from "../../../components/Tag"
 import type { CompletionTrigger } from "../../../hooks/completion-trigger"
+import { SearchContext } from "../../../hooks/search"
 import { cn } from "../../../lib/cn"
 import type { DetailTabId } from "../../detail-column/components/DetailTabs"
 import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
 import { useUnseenResult, type UnseenResult } from "../hooks/unseen-result"
+import { transcriptMatches } from "../lib/entry-matches"
 import { ReplPrompt } from "./ReplPrompt"
 import { Transcript, type Reveal } from "./Transcript"
 
@@ -19,8 +22,9 @@ import { Transcript, type Reveal } from "./Transcript"
  * the body. Folded, the whole header opens it; its fold button is the keyboard's way in.
  *
  * A folded header carries the *Unseen result* after the name: a `new` mark, in the error colour
- * when the latest unseen evaluation raised or lost its console process. Nothing here unfolds the
- * drawer.
+ * when the latest unseen evaluation raised or lost its console process. After it, it counts the
+ * *Search* matches the *Transcript* would light, the fold button's description. Nothing here
+ * unfolds the drawer.
  *
  * The header's right side is the status slot, before the fold button: what the console
  * process is doing, open or folded. The body is the *Transcript* over the prompt, with how the
@@ -64,11 +68,15 @@ export function ReplDrawer({
   className?: string
 }) {
   const body = useId()
+  const badge = useId()
   const label = folded ? "Open REPL" : "Fold REPL"
   const { boot } = repl
   const history = useInputHistory(railsRoot, repl.snapshot)
   const { state } = repl.snapshot
   const unseen = useUnseenResult(repl.snapshot.transcript, folded && repl.loaded)
+  const search = useContext(SearchContext)
+  const { transcript } = repl.snapshot
+  const found = useMemo(() => (folded ? transcriptMatches(search, transcript) : 0), [folded, search, transcript])
 
   useEffect(() => {
     if (!folded && actsOnlyFrom === null) boot()
@@ -92,6 +100,7 @@ export function ReplDrawer({
         <div className="flex min-w-0 items-center gap-2">
           <ColumnHeading>REPL</ColumnHeading>
           {unseen !== null && <UnseenMark result={unseen} />}
+          {found > 0 && <MatchesBadge id={badge} count={found} />}
         </div>
         <div className="flex min-w-0 items-center gap-3">
           <ReplStatus snapshot={repl.snapshot} />
@@ -102,6 +111,7 @@ export function ReplDrawer({
             title={label}
             aria-expanded={!folded}
             aria-controls={folded ? undefined : body}
+            aria-describedby={found > 0 ? badge : undefined}
             onClick={(event) => {
               event.stopPropagation()
               if (folded) onUnfold()

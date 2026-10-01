@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 
+import { Marked, type Match } from "../../../hooks/search"
 import { cn } from "../../../lib/cn"
 import { tokenizeRuby } from "../lib/ruby-highlight"
 
@@ -8,9 +9,19 @@ import { tokenizeRuby } from "../lib/ruby-highlight"
  * Every kind keeps the font's own weight and slant, so the prompt's highlighting lines up with
  * the textarea over it glyph for glyph. An identifier and the plain text between tokens take
  * the colour around them.
+ *
+ * `matches`, found on the whole of `source`, are lit across the tokens, each token marking its own
+ * share, so a match keeps the colours it crosses.
  */
-export function RubyCode({ source }: { source: string }) {
-  const tokens = useMemo(() => tokenizeRuby(source), [source])
+export function RubyCode({ source, matches = NO_MATCHES }: { source: string; matches?: readonly Match[] }) {
+  const tokens = useMemo(() => {
+    let start = 0
+    return tokenizeRuby(source).map((token) => {
+      const placed = { ...token, start }
+      start += token.text.length
+      return placed
+    })
+  }, [source])
 
   return tokens.map((token, at) => (
     // The colour of each kind of token the Ruby tokenizer names, read off its `data-token`.
@@ -26,7 +37,9 @@ export function RubyCode({ source }: { source: string }) {
       )}
       data-token={token.kind}
     >
-      {token.text}
+      <Marked text={token.text} from={token.start} matches={matches} />
     </span>
   ))
 }
+
+const NO_MATCHES: readonly Match[] = []

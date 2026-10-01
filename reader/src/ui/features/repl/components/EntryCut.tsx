@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
 
 import { LinkButton } from "../../../components/LinkButton"
+import { Marked, useMatches } from "../../../hooks/search"
 import { cutLines, ENTRY_LINES } from "../lib/entry-cut"
 import { Cut, Text } from "./TranscriptText"
 
@@ -31,15 +32,21 @@ export function useEntryCut(entryCut: EntryCut | undefined): CutNote | null {
   )
 }
 
-/** `text` after `children`, cut at `ENTRY_LINES` lines with `note` under it, unless `note` is `null`. */
+/**
+ * `text` after `children`, cut at `ENTRY_LINES` lines with `note` under it, unless `note` is
+ * `null`. *Search* lights `text`, and never `children`, and a match past the cut draws `text`
+ * whole while the term matches there.
+ */
 export function CutText({ text, note, className, children }: { text: string; note: CutNote | null; className?: string; children?: ReactNode }) {
-  const kept = note === null ? null : cutLines(text, ENTRY_LINES)
+  const matches = useMatches(text)
+  const cut = note === null ? null : cutLines(text, ENTRY_LINES)
+  const kept = cut !== null && matches.some(([, stop]) => stop > cut.shown.length) ? null : cut
 
   return (
     <>
       <Text className={className}>
         {children}
-        {kept === null ? text : kept.shown}
+        <Marked text={kept === null ? text : kept.shown} matches={matches} />
       </Text>
       {kept !== null && note?.(kept.more)}
     </>

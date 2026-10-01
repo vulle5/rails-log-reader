@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useState } from "react"
 
 import type { Outcome } from "../../../../shared/repl"
 import { Copyable } from "../../../components/CopyButton"
@@ -19,10 +19,21 @@ import { Cut, ErrorNote, Marker } from "./TranscriptText"
  *
  * An `entryCut` cuts the value, its tree, its text or its Raw text, at `ENTRY_LINES` lines as
  * first drawn, and the one note under the cut opens the rest wherever the value shows.
+ *
+ * A `rawView` holds the toggle in its owner's place instead, for an owner that counts what it lights.
  */
-export function EvaluationResult({ outcome, entryCut }: { outcome: Extract<Outcome, { kind: "result" }>; entryCut?: EntryCut }) {
-  const source = useMemo(() => rubySource(outcome.tree), [outcome.tree])
-  const [raw, setRaw] = useState(false)
+export function EvaluationResult({
+  outcome,
+  entryCut,
+  rawView,
+}: {
+  outcome: Extract<Outcome, { kind: "result" }>
+  entryCut?: EntryCut
+  rawView?: RawView
+}) {
+  const source = rubySource(outcome.tree)
+  const [ownRaw, setOwnRaw] = useState(false)
+  const [raw, setRaw] = rawView ?? [ownRaw, setOwnRaw]
   const showsRaw = source === null || raw
   const note = useEntryCut(entryCut)
 
@@ -40,6 +51,9 @@ export function EvaluationResult({ outcome, entryCut }: { outcome: Extract<Outco
     </>
   )
 }
+
+/** Whether a result shows Raw, and what chooses. */
+export type RawView = readonly [raw: boolean, onRaw: (raw: boolean) => void]
 
 /**
  * `=>`, then the result beside it, with Pretty | Raw and the copy control at the right of its

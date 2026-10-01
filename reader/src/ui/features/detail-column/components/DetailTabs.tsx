@@ -1,5 +1,6 @@
 import { useId, type KeyboardEvent, type ReactNode } from "react"
 
+import { MatchesBadge } from "../../../components/MatchesBadge"
 import type { ColumnAutoScroll } from "../../../hooks/auto-scroll"
 import { cn } from "../../../lib/cn"
 
@@ -147,15 +148,6 @@ export function DetailTabs({
         )}
       </div>
     </>
-  )
-}
-
-/** What Search found behind a tab, lit the way a match is: the tab's description, never its name. */
-function MatchesBadge({ id, count }: { id: string; count: number }) {
-  return (
-    <span id={id} className="rounded-xs bg-match px-1 text-2xs text-foreground tabular-nums" aria-hidden="true">
-      {count === 1 ? "1 match" : `${count} matches`}
-    </span>
   )
 }
 

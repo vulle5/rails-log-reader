@@ -1,5 +1,6 @@
 import { TRANSCRIPT_LIMIT, type HeldEntry } from "../../../../shared/repl"
 import { Answer, Printed } from "./EvaluationAnswer"
+import type { RawView } from "./EvaluationResult"
 
 /**
  * An *Evaluation row*'s Result tab: its *Transcript* entry with more room, what it printed and
@@ -8,16 +9,21 @@ import { Answer, Printed } from "./EvaluationAnswer"
  *
  * `held` is where the entry is, or `null` while this page holds no session to look in. An entry
  * that is gone says why in plain words, so the tab is never an unexplained blank.
+ *
+ * Its result shows raw or pretty as `rawView` says, so the tab's count of *Search* matches is
+ * of what it shows.
  */
 export function ResultPanel({
   held,
   actsOnlyFrom,
   railsRoot,
+  rawView,
 }: {
   held: HeldEntry | null
   /** Where acts can be made from, when this page is not there, else `null`. */
   actsOnlyFrom: string | null
   railsRoot: string | null
+  rawView: RawView
 }) {
   if (held === null) {
     return <Note>{actsOnlyFrom === null ? "Connecting to the REPL…" : `Results are shown on ${actsOnlyFrom}, where the REPL runs.`}</Note>
@@ -31,7 +37,7 @@ export function ResultPanel({
       {entry.outcome === null ? (
         <p className="font-ui text-faint">Waiting for the evaluation to finish…</p>
       ) : (
-        <Answer outcome={entry.outcome} railsRoot={railsRoot} />
+        <Answer outcome={entry.outcome} railsRoot={railsRoot} rawView={rawView} />
       )}
     </div>
   )

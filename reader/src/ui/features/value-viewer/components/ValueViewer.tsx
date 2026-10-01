@@ -3,7 +3,7 @@ import { useCallback, useContext, useId, useMemo, useRef, useState, type Keyboar
 import { Copyable, LineCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
-import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
+import { countMatches, keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
 import { cutTree, isEmpty } from "../lib/tree-cut"
 import type {
   ContainerKind,
@@ -43,7 +43,7 @@ import type {
  *
  * A `cut` draws the top level only as far as fits in its `lines` as first drawn, and its `note`
  * under it, given how many lines it left out. What the developer opens inside the lines it draws
- * is drawn whole.
+ * is drawn whole, and so is the whole top level while a match lies past the cut.
  */
 export function ValueViewer({
   label,
@@ -83,7 +83,7 @@ export function ValueViewer({
   }, [])
   const view: ViewState = { source, search, inside, isOpen, onToggle: toggle, whole, onOpenWhole: openWhole }
   const wholeText = useMemo(() => source.copyText(value), [source, value])
-  const kept = cut === undefined ? null : cutTree(value, cut.lines)
+  const kept = useMemo(() => (cut === undefined ? null : keptUnder(search, value, cut.lines)), [search, value, cut?.lines])
 
   if (value.type === "container" && isEmpty(value)) {
     return (
@@ -123,6 +123,19 @@ const LONG_STRING = 80
 
 /** One character of a string as drawn: an escape, or a code point. */
 const CHARACTER = /\\u[0-9a-fA-F]{4}|\\[\s\S]|[\s\S]/gu
+
+/**
+ * Where `value` is cut to `lines`, as `cutTree` cuts it, unless a match lies in a child past the
+ * cut, when it is drawn whole while the term matches there.
+ */
+function keptUnder(search: Search, value: ValueNode, lines: number) {
+  const kept = cutTree(value, lines)
+  if (kept === null || value.type !== "container") return kept
+
+  const past = value.children.slice(kept.children)
+  const matched = past.some((child) => (keysMatch(value) && search.find(child.key).length > 0) || countMatches(search, child.node) > 0)
+  return matched ? null : kept
+}
 
 /** The developer's folds over a match, and the search they were made under. */
 type HeldFolds = { search: Search; paths: ReadonlySet<string> }

@@ -16,8 +16,21 @@ import type { ContainerKind, LeafType, PathStep, TokenClass, ValueNode, ValueSou
  *
  * A node copies as its own `inspect`, the whole value included. A path is the `[…]` steps that
  * reach the node: `["b"][2]`. A node below a Set's member, a Data's member or an ivar has none.
+ *
+ * Built once for each result, so everything that draws or counts one reads the same source.
  */
 export function rubySource(tree: RubyNode): ValueSource | null {
+  const built = sources.get(tree)
+  if (built !== undefined) return built
+
+  const source = sourceOf(tree)
+  sources.set(tree, source)
+  return source
+}
+
+const sources = new WeakMap<RubyNode, ValueSource | null>()
+
+function sourceOf(tree: RubyNode): ValueSource | null {
   if (!hasChildren(tree)) return null
 
   const nodes = new Map<ValueNode, RubyNode>()

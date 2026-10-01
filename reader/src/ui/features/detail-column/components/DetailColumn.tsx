@@ -29,6 +29,7 @@ import { evaluationEntry, type HeldEntry } from "../../../../shared/repl"
 import type { ReplHandle } from "../../repl/hooks/repl-session"
 import { RubyCode } from "../../repl/components/RubyCode"
 import { ResultPanel, resultLabel } from "../../repl/components/ResultPanel"
+import { resultMatches } from "../../repl/lib/entry-matches"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines
@@ -303,6 +304,17 @@ function EvaluationDetail({
 }) {
   const trailing = eventsShown(row.trailing, filter)
   const label = resultLabel(row.outcome, held)
+  const search = useContext(SearchContext)
+  // Whether Raw was chosen on the Result tab. Any new Selection, one shown before included,
+  // opens pretty.
+  const [raw, setRaw] = useState(false)
+  const [rawFor, setRawFor] = useState(row.id)
+  if (rawFor !== row.id) {
+    setRawFor(row.id)
+    setRaw(false)
+  }
+  const entry = held?.kind === "held" ? held.entry : null
+  const matches = useMemo(() => (entry === null ? 0 : resultMatches(search, entry, raw)), [search, entry, raw])
 
   return (
     <Detail
@@ -353,7 +365,8 @@ function EvaluationDetail({
             ...(label !== null && { hint: { text: label, tone: "strong" as const } }),
             // Another Selection's result opens at its top, and folded.
             subject: row.id,
-            panel: <ResultPanel held={held} actsOnlyFrom={actsOnlyFrom} railsRoot={railsRoot} />,
+            matches,
+            panel: <ResultPanel held={held} actsOnlyFrom={actsOnlyFrom} railsRoot={railsRoot} rawView={[raw, setRaw]} />,
           },
         ]}
       />

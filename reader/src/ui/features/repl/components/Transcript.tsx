@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from "react"
 import type { EvaluationRow } from "../../../../shared/activity"
 import type { EntryRow, EvaluationEntry, TranscriptEntry } from "../../../../shared/repl"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
+import { useMatches } from "../../../hooks/search"
 import { cn } from "../../../lib/cn"
 import { LinkButton } from "../../../components/LinkButton"
 import type { DetailTabId } from "../../detail-column/components/DetailTabs"
@@ -114,6 +115,7 @@ function Evaluation({
   onShowRow: (row: EvaluationRow, tab: DetailTabId) => void
 }) {
   const entryCut: EntryCut = row?.kind === "held" ? { openResult: () => onShowRow(row.row, "result") } : IN_PLACE
+  const inputMatches = useMatches(entry.input)
 
   return (
     <>
@@ -122,7 +124,7 @@ function Evaluation({
       <div className="mb-1 flex items-baseline gap-3">
         <Text className="min-w-0 flex-auto text-strong">
           <Marker>{"› "}</Marker>
-          <RubyCode source={entry.input} />
+          <RubyCode source={entry.input} matches={inputMatches} />
         </Text>
         {row?.kind === "held" && (
           <LinkButton className="flex-none" onClick={() => onShowRow(row.row, "timeline")}>
