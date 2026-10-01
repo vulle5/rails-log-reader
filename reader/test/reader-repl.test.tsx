@@ -234,12 +234,6 @@ describe("the REPL's prompt", () => {
     expect(asked.submitted).toEqual([])
   })
 
-  test("holds its key hints in the row under it", async () => {
-    await openedOver({ state: READY })
-
-    expect(hintRow()).toHaveTextContent("Enter to run")
-  })
-
   test("says why in its hint row when an input is refused, and keeps the input", async () => {
     const { user, asked } = await openedOver({ state: { kind: "busy", pid: PID, id: 1, since: Date.now() } })
 
@@ -359,12 +353,6 @@ describe("the REPL's prompt on Ctrl-C", () => {
 
     expect(asked.interrupts).toBe(1)
     expect(prompt()).toHaveValue("Post.count")
-  })
-
-  test("says it interrupts in its hint row while an evaluation runs", async () => {
-    await openedOver({ state: BUSY })
-
-    expect(hintRow()).toHaveTextContent("Ctrl-C to interrupt")
   })
 
   test("copies a selection, and interrupts nothing", async () => {

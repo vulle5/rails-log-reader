@@ -60,4 +60,11 @@ describe("the Reader's stylesheet", () => {
     expect(light).toContain("--color-selection")
     expect(dark).toContain("--color-selection")
   })
+
+  test("shows the hint row's extra wording only in a container wide enough for the whole row", async () => {
+    const css = await compiledFor(["hidden", "@min-[44rem]:inline", "@container"])
+
+    expect(css).toMatch(/@container\s*\(width >= 44rem\)/)
+    expect(css).toMatch(/\.\\@min-\\\[44rem\\\]\\:inline/)
+  })
 })

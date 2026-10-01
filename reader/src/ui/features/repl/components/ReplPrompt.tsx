@@ -10,14 +10,6 @@ import { CompletionList } from "./CompletionList"
 import { InputHistoryList, rowId } from "./InputHistoryList"
 import { RubyCode } from "./RubyCode"
 
-const HINTS = "Enter to run · Shift+Enter for a new line"
-
-/** The key hints while the completion popover is open. */
-const COMPLETING_HINTS = "↑↓ to choose · Tab to insert · Esc to close"
-
-/** The key hints while an evaluation runs. */
-const BUSY_HINTS = "Ctrl-C to interrupt"
-
 /** How long a refusal, or why nothing completed, stands in the hint row before the key hints come back. */
 const NOTICE_SHOWN_MS = 3_000
 
@@ -48,8 +40,11 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
  * does. An Enter whose check answers after the input has changed, or after a later Enter, does
  * nothing.
  *
- * The row is always there at one height, holding the key hints, or for a moment why an input
- * was refused, with `actions` at its end. A refused input stays in the textarea. One the server
+ * The row is always there at one line and one height, holding the keys that work in the input's
+ * current state, or for a moment why an input was refused, with `actions` at its end. The keys
+ * are ordered most important first and clip on a narrow drawer, and the wording that is not a
+ * key drops before any key does. `completes` is whether the console process has a completor,
+ * and without one there is no Tab hint. A refused input stays in the textarea. One the server
  * refused after the textarea emptied is put back, unless something new has been typed since.
  *
  * Ctrl-C does what it does in a terminal: with a selection it copies it, while `busy` it
@@ -88,6 +83,7 @@ export function ReplPrompt({
   history,
   trigger,
   suggesting,
+  completes,
   pid,
   actions,
 }: Pick<ReplHandle, "submit" | "check" | "complete" | "interrupt" | "refusal"> & {
@@ -97,6 +93,8 @@ export function ReplPrompt({
   trigger: CompletionTrigger
   /** Whether the *History suggestion* is offered; the popover's preview of its chosen candidate is not part of it. */
   suggesting: boolean
+  /** Whether the console process has a completor, which is what Tab asks. */
+  completes: boolean
   /** The console process running now, `null` when none is. */
   pid: number | null
   actions?: ReactNode
@@ -107,6 +105,8 @@ export function ReplPrompt({
   const [place, setPlace] = useState({ left: 0, top: 0 })
   // Whether the caret is at the end of the text with nothing selected, which is the only place grey text can follow it.
   const [atEnd, setAtEnd] = useState(true)
+  // Whether the caret is on the input's first line, which is the only place ↑ opens the *Input history*.
+  const [onFirstLine, setOnFirstLine] = useState(true)
   // An input method is composing, whose text the textarea has yet to settle.
   const [composing, setComposing] = useState(false)
   const listId = useId()
@@ -186,6 +186,7 @@ export function ReplPrompt({
 
   function markCaret(textarea: HTMLTextAreaElement) {
     setAtEnd(caretAtEnd(textarea))
+    setOnFirstLine(caretOnFirstLine(textarea))
   }
 
   /** The grey text to draw: the chosen candidate's rest while the popover is open, else the newest matching history entry's. */
@@ -321,8 +322,7 @@ export function ReplPrompt({
   function opensHistory(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "ArrowUp" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return false
     if (event.nativeEvent.isComposing || history.entries.length === 0) return false
-    const { value, selectionStart } = event.currentTarget
-    return !value.slice(0, selectionStart).includes("\n")
+    return caretOnFirstLine(event.currentTarget)
   }
 
   function browse(event: KeyboardEvent<HTMLTextAreaElement>, { filter, back }: Browsing) {
@@ -389,6 +389,54 @@ export function ReplPrompt({
     event.preventDefault()
     if (busy) interrupt()
     else setInput("")
+  }
+
+  /** The keys that work now, most important first. */
+  function keyHints() {
+    const opensHistoryHere = history.entries.length > 0 && onFirstLine
+    if (browsing !== null) {
+      return (
+        <>
+          <Hint keys="↑↓">choose</Hint>
+          <Hint keys="↵">put in input</Hint>
+          <Hint keys="esc">close</Hint>
+        </>
+      )
+    }
+    if (open !== null) {
+      return (
+        <>
+          <Hint keys="⇥">
+            take <span className="font-mono">{shown[Math.max(picked, 0)]!.text}</span>
+          </Hint>
+          <Hint keys="↑↓">choose</Hint>
+          <Hint keys="esc">close</Hint>
+        </>
+      )
+    }
+    if (busy) {
+      return (
+        <>
+          <Hint keys="^C">interrupt</Hint>
+          <Hint keys="⇧↵">newline</Hint>
+          {opensHistoryHere && <Hint keys="↑">history</Hint>}
+        </>
+      )
+    }
+    return (
+      <>
+        <Hint keys="↵">
+          run
+          {/* The first wording to go: it shows only where the whole row fits with it. */}
+          <span className="hidden @min-[44rem]:inline"> (newline if unfinished)</span>
+        </Hint>
+        <Hint keys="⇧↵">newline</Hint>
+        {completes && <Hint keys="⇥">complete</Hint>}
+        {suggested !== null && <Hint keys="→">take the grey text</Hint>}
+        {opensHistoryHere && <Hint keys="↑">history</Hint>}
+        <Hint keys="^C">clear</Hint>
+      </>
+    )
   }
 
   return (
@@ -475,13 +523,33 @@ export function ReplPrompt({
         />
       </div>
       <div className="flex h-5 flex-none items-center gap-3 px-3">
-        <p className={cn("min-w-0 flex-auto truncate text-xs", notice === null ? "text-faint" : notice.error ? "text-error" : "text-muted")} role="status">
-          {notice?.reason ?? (open !== null ? COMPLETING_HINTS : busy ? BUSY_HINTS : HINTS)}
-        </p>
+        <div
+          className={cn("min-w-0 flex-auto truncate text-xs @container", notice === null ? "text-faint" : notice.error ? "text-error" : "text-muted")}
+          role="status"
+        >
+          {notice?.reason ?? (
+            // The hints do not wrap: a drawer too narrow for them clips the last ones.
+            <ul className="flex gap-3 overflow-hidden whitespace-nowrap" aria-live="off">{keyHints()}</ul>
+          )}
+        </div>
         {actions}
       </div>
     </div>
   )
+}
+
+/** One key hint: the key drawn as a chip, and what it does. */
+function Hint({ keys, children }: { keys: string; children: ReactNode }) {
+  return (
+    <li className="flex-none">
+      <kbd className="rounded border border-border px-1 font-mono text-muted">{keys}</kbd> {children}
+    </li>
+  )
+}
+
+/** Whether nothing before the caret is a line break. */
+function caretOnFirstLine({ value, selectionStart }: HTMLTextAreaElement) {
+  return !value.slice(0, selectionStart).includes("\n")
 }
 
 /** Whether the caret is at the end of the text with nothing selected. */

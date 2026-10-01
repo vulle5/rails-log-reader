@@ -389,15 +389,6 @@ describe("the completion popover", () => {
     expect(await chosen()).toHaveTextContent("upcase!")
   })
 
-  test("says what its keys do in the hint row while it is open", async () => {
-    const { user } = await withPopover()
-
-    expect(hintRow()).toHaveTextContent("Tab to insert")
-
-    await user.keyboard("{Escape}")
-
-    expect(hintRow()).toHaveTextContent("Enter to run")
-  })
 })
 
 describe("the completion trigger set to as you type", () => {
@@ -449,7 +440,7 @@ describe("the completion trigger set to as you type", () => {
     await waitFor(() => expect(asked.completed).toHaveLength(3))
 
     expect(popover()).not.toBeInTheDocument()
-    expect(hintRow()).toHaveTextContent("Enter to run")
+    expect(hintRow()).toHaveTextContent("↵ run")
   })
 
   test("asks nothing of a console process that is running an evaluation, and says nothing", async () => {

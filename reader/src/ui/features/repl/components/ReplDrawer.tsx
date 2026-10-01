@@ -146,6 +146,7 @@ export function ReplDrawer({
                 history={history}
                 trigger={completionTrigger}
                 suggesting={historySuggestion}
+                completes={repl.snapshot.capabilities.includes("complete")}
                 pid={runningPid(state)}
                 // Keyed by the session's choice, so the toggle starts from it again whenever it changes.
                 actions={<RestartControls key={String(repl.snapshot.sandbox)} sandboxed={repl.snapshot.sandbox} restart={repl.restart} />}
