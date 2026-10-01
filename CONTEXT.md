@@ -283,7 +283,9 @@ _Avoid_: history (alone), which already means the load-on-open Events; command h
 **Completion** — what Tab offers in the *REPL*'s input: the names the word before the caret could
 be, with what kind of name each is, and what it was asked of when it follows a `.` or a `::`. One
 candidate is inserted, and several open a popover at the word that narrows as it is typed and
-closes when the word ends. It comes from IRB's own completor, run by the eval loop in the console
+closes when the word ends. The popover never offers only what is already typed: when every
+candidate left is the word itself it stays shut, or closes, and Tab on such a word does nothing.
+A candidate equal to the word stays in the list while others are beside it. It comes from IRB's own completor, run by the eval loop in the console
 process: `TypeCompletor` when `repl_type_completor` is in the Host app's bundle, and
 `RegexpCompletor` otherwise, which reads a receiver off its text and never calls a method to do
 it. The loop says which it has when it is ready, and without either there is no completion. It
