@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 
 import type { EvaluationRow } from "../../../../shared/activity"
 import { LOAD_ON_OPEN_EVENTS } from "../../../../shared/bounds"
@@ -23,7 +23,8 @@ export type Reveal = { entry: number }
  * The *REPL*'s *Transcript*: each evaluation's input highlighted as Ruby, then what it printed,
  * then its result or its error, with what the console process printed outside any evaluation as
  * entries of their own. Scrolled to its end as entries arrive and grow, unless it was scrolled up
- * away from it. An error's backtrace is drawn as the *Detail column* draws an exception's.
+ * away from it, and likewise when its own height changes, as it does while the prompt grows or
+ * shrinks. An error's backtrace is drawn as the *Detail column* draws an exception's.
  *
  * An evaluation links to its *Evaluation row*, by `entryRows`, with the row's counts, and says so
  * once the *Memory bound* has taken it. What an entry printed and its result are each cut at
@@ -57,6 +58,18 @@ export function Transcript({
     const element = list.current
     if (element !== null && following.current) element.scrollTop = element.scrollHeight
   }, [entries])
+
+  // The prompt growing or shrinking under it changes its height without a scroll or an entry.
+  useEffect(() => {
+    const element = list.current
+    if (element === null || typeof ResizeObserver === "undefined") return
+
+    const observer = new ResizeObserver(() => {
+      if (following.current) element.scrollTop = element.scrollHeight
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   // After following, so a Transcript drawn by the same click that asks lands on the entry.
   useLayoutEffect(() => {

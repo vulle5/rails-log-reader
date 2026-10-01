@@ -47,6 +47,9 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
  * and without one there is no Tab hint. A refused input stays in the textarea. One the server
  * refused after the textarea emptied is put back, unless something new has been typed since.
  *
+ * The textarea is as tall as its text, from one line up to the smaller of 12 lines and half the
+ * drawer's body, and scrolls past that. Its height follows the text and nothing else.
+ *
  * Ctrl-C does what it does in a terminal: with a selection it copies it, while `busy` it
  * interrupts the running evaluation, and otherwise it clears the textarea.
  *
@@ -442,7 +445,7 @@ export function ReplPrompt({
   return (
     <div className="relative flex flex-none flex-col border-t border-border">
       {browsing !== null && <InputHistoryList id={listId} entries={matches} filter={browsing.filter} selected={chosen} pid={pid} onPick={pick} />}
-      <div className="relative h-14">
+      <div className="relative">
         {open !== null && (
           <CompletionList
             id={completionId}
@@ -467,9 +470,12 @@ export function ReplPrompt({
         {/* The input's highlighting, under a textarea whose own text is transparent. The two share
             their box, font and wrapping, so each glyph drawn here sits under the one it colours.
             The trailing space gives a final empty line a height, as the textarea gives it one, and
-            the stable gutter keeps the wrap width the same whether or not the textarea scrolls. */}
+            the stable gutter keeps the wrap width the same whether or not the textarea scrolls.
+            This is the one of the two that is in the flow, so the input is as tall as its text,
+            up to the cap: the smaller of 12 lines and half the drawer's body, which is its
+            container less the hint row's `h-5`, in whole lines, and never less than one. */}
         <pre
-          className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
+          className="pointer-events-none max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.25rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
           ref={highlighted}
           aria-hidden="true"
         >
