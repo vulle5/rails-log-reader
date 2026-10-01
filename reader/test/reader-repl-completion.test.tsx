@@ -298,16 +298,14 @@ describe("the completion popover", () => {
   })
 
   test("narrows as the developer types, and widens again on Backspace", async () => {
-    const { user } = await withPopover()
+    const { user } = await withPopover('"abc".')
+    expect(await options()).toEqual(["downcase", "each", "upcase", "upcase!"])
 
-    await user.keyboard("case")
+    await user.keyboard("u")
     expect(await options()).toEqual(["upcase", "upcase!"])
-
-    await user.keyboard("!")
-    expect(await options()).toEqual(["upcase!"])
 
     await user.keyboard("{Backspace}")
-    expect(await options()).toEqual(["upcase", "upcase!"])
+    expect(await options()).toEqual(["downcase", "each", "upcase", "upcase!"])
   })
 
   test("chooses the first candidate again when something is typed after another was chosen", async () => {
@@ -531,5 +529,100 @@ describe("the completion trigger set to as you type", () => {
     await user.type(prompt(), "up")
 
     expect(asked.completed).toEqual([])
+  })
+})
+
+describe("a word that is already complete", () => {
+  const TO_NAMES = ["end", "to_s", "to_str", "to_sym"]
+
+  /** A completor of `TO_NAMES`: those that start with the word before the caret. */
+  function completingNames(text: string, caret: number): Completion {
+    const [word = ""] = text.slice(0, caret).match(/\w*$/) ?? []
+    const candidates: Candidate[] = TO_NAMES.filter((name) => name.startsWith(word)).map((name) => ({ text: name, kind: "method" }))
+    return candidates.length === 0 ? { kind: "none", reason: "Nothing completes." } : { kind: "candidates", from: caret - word.length, receiver: null, candidates }
+  }
+
+  async function onTab() {
+    return await opened(READY, COMPLETES, completingNames)
+  }
+
+  async function onTyping() {
+    localStorage.setItem("rails-log-reader.completion-trigger", "typing")
+    return await opened(READY, COMPLETES, completingNames)
+  }
+
+  test("opens no popover for a word that is the only candidate, as it is typed", async () => {
+    const { user, asked } = await onTyping()
+
+    await user.type(prompt(), "end")
+    await waitFor(() => expect(asked.completed).toHaveLength(3))
+
+    expect(popover()).not.toBeInTheDocument()
+    expect(hintRow()).toHaveTextContent("↵ run")
+  })
+
+  test("closes an open popover once typing narrows it to only the word", async () => {
+    const { user } = await onTyping()
+    await user.type(prompt(), "to_")
+    expect(await options()).toEqual(["to_s", "to_str", "to_sym"])
+
+    await user.type(prompt(), "str")
+
+    await waitFor(() => expect(popover()).not.toBeInTheDocument())
+    expect(prompt()).toHaveValue("to_str")
+  })
+
+  test("closes a popover opened by Tab once typing narrows it to only the word", async () => {
+    const { user } = await onTab()
+    await user.type(prompt(), "to_")
+    await user.keyboard("{Tab}")
+    expect(await options()).toEqual(["to_s", "to_str", "to_sym"])
+
+    await user.keyboard("str")
+
+    expect(popover()).not.toBeInTheDocument()
+    expect(prompt()).toHaveValue("to_str")
+  })
+
+  test("keeps a word that is a candidate in the list while others are beside it", async () => {
+    const { user } = await onTab()
+    await user.type(prompt(), "to_s")
+
+    await user.keyboard("{Tab}")
+
+    expect(await options()).toEqual(["to_s", "to_str", "to_sym"])
+  })
+
+  test("keeps a word that is a candidate in the list as it is typed too", async () => {
+    const { user } = await onTyping()
+
+    await user.type(prompt(), "to_s")
+
+    expect(await options()).toEqual(["to_s", "to_str", "to_sym"])
+  })
+
+  test("does nothing on Tab, and shows no notice", async () => {
+    const { user, asked } = await onTab()
+    await user.type(prompt(), "end")
+
+    await user.keyboard("{Tab}")
+    await waitFor(() => expect(asked.completed).toHaveLength(1))
+
+    expect(popover()).not.toBeInTheDocument()
+    expect(prompt()).toHaveValue("end")
+    expect(hintRow()).toHaveTextContent("↵ run")
+  })
+
+  test("does nothing on Tab with the trigger set to each word typed either", async () => {
+    const { user, asked } = await onTyping()
+    await user.type(prompt(), "end")
+    await waitFor(() => expect(asked.completed).toHaveLength(3))
+
+    await user.keyboard("{Tab}")
+    await waitFor(() => expect(asked.completed).toHaveLength(4))
+
+    expect(popover()).not.toBeInTheDocument()
+    expect(prompt()).toHaveValue("end")
+    expect(hintRow()).toHaveTextContent("↵ run")
   })
 })

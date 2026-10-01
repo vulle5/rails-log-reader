@@ -62,11 +62,12 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
  * open a popover at the word, and none says why in the hint row, as does an evaluation running.
  * An answer that arrives after a newer request, or after the input or the caret has moved, is
  * dropped. The popover narrows to the candidates that start with what is typed of the word, and
- * closes when none do, which is when the word ends. ↑ and ↓ choose, Enter or Tab inserts the
- * chosen candidate without running the input, and Esc, the caret moving off the word, editing
- * before it, or leaving the textarea closes it. With `trigger` `typing`, each thing typed asks
- * for itself: the popover opens for a single candidate too, and says
- * nothing when it cannot. Either way the first candidate is chosen when the popover opens, and
+ * closes when none do, which is when the word ends. It never offers only the word itself: when
+ * that is all that is left it stays shut, or closes, and Tab on such a word does nothing. ↑ and ↓
+ * choose, Enter or Tab inserts the chosen candidate without running the input, and Esc, the caret
+ * moving off the word, editing before it, or leaving the textarea closes it. With `trigger`
+ * `typing`, each thing typed asks for itself: the popover opens for a single candidate too, and
+ * says nothing when it cannot. Either way the first candidate is chosen when the popover opens, and
  * again whenever something is typed, so Enter inserts it.
  *
  * Grey text follows the caret while the caret is at the end of the text. With `suggesting` it is
@@ -164,7 +165,8 @@ export function ReplPrompt({
   // What of the popover's candidates matches what is typed of the word, and the popover itself
   // once it has any, still holds, and has not been left behind by the caret.
   const word = completing === null ? "" : input.slice(completing.from, completing.caret)
-  const shown = completing === null ? [] : completing.candidates.filter((candidate) => candidate.text.startsWith(word))
+  const matching = completing === null ? [] : completing.candidates.filter((candidate) => candidate.text.startsWith(word))
+  const shown = onlyThe(word, matching) ? [] : matching
   const holds = completing !== null && shown.length > 0 && input.startsWith(completing.prefix) && completing.caret >= completing.from
   const open = holds ? completing : null
   const picked = open === null || open.selected < 0 ? -1 : Math.min(open.selected, shown.length - 1)
@@ -273,6 +275,8 @@ export function ReplPrompt({
       if (completion.kind === "none" || completion.candidates.length === 0) {
         setCompleting(null)
         if (explicit) setNotice({ reason: completion.kind === "none" ? completion.reason : "Nothing completes here.", error: false })
+      } else if (onlyThe(text.slice(completion.from, caret), completion.candidates)) {
+        setCompleting(null)
       } else if (explicit && completion.candidates.length === 1) {
         setCompleting(null)
         insert(completion.from, caret, completion.candidates[0]!)
@@ -542,6 +546,11 @@ export function ReplPrompt({
       </div>
     </div>
   )
+}
+
+/** Whether `candidates` offer nothing but `word` itself, which is already typed. */
+function onlyThe(word: string, candidates: readonly Candidate[]) {
+  return candidates.every((candidate) => candidate.text === word)
 }
 
 /** One key hint: the key drawn as a chip, and what it does. */
