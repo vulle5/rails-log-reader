@@ -61,6 +61,7 @@ export function aFold() {
         rows: [...activity.rows],
         lines: [...stream.lines],
         evictedRows,
+        evictedEvaluations: new Map(activity.evictedEvaluations),
         railsRoot: identity?.railsRoot ?? null,
       }
     },

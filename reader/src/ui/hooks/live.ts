@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { activityTable, type ActivityRow } from "../../shared/activity"
+import { activityTable, type ActivityRow, type EvictedEvaluations } from "../../shared/activity"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
 import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
@@ -30,6 +30,8 @@ export type WireStatus = {
    * Console has none of its own to report.
    */
   evictedRows: number
+  /** The *Evaluation rows* the *Memory bound* has taken: `ActivityTable.evictedEvaluations`, copied when it changes. */
+  evictedEvaluations: EvictedEvaluations
   liveWireVersion: number | null
   liveRunId: string | null
   /**
@@ -91,10 +93,11 @@ export function useSidecar(): WireStatus {
     rows: readonly ActivityRow[]
     lines: readonly ConsoleLine[]
     evictedRows: number
+    evictedEvaluations: EvictedEvaluations
     liveWireVersion: number | null
     liveRunId: string | null
     identity: RunIdentity
-  }>({ rows: [], lines: [], evictedRows: 0, liveWireVersion: null, liveRunId: null, identity: null })
+  }>({ rows: [], lines: [], evictedRows: 0, evictedEvaluations: new Map(), liveWireVersion: null, liveRunId: null, identity: null })
   const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
   // Never set back: a reconnection re-reads a history the folds already hold, so what it
   // would be waiting for is already on screen.
@@ -126,6 +129,7 @@ export function useSidecar(): WireStatus {
         // copied for the one reason the rows' is: React is told by identity.
         lines: [...stream.lines],
         evictedRows: previous.evictedRows + evicted.length,
+        evictedEvaluations: evicted.length === 0 ? previous.evictedEvaluations : new Map(activity.evictedEvaluations),
         liveWireVersion: latest?.v ?? previous.liveWireVersion,
         liveRunId: latest?.run_id ?? previous.liveRunId,
         identity: latchRunIdentity(previous.identity, envelopes),
@@ -186,6 +190,7 @@ export function useSidecar(): WireStatus {
         rows: [...activity.rows],
         lines: [...stream.lines],
         evictedRows: previous.evictedRows + evicted.length,
+        evictedEvaluations: evicted.length === 0 ? previous.evictedEvaluations : new Map(activity.evictedEvaluations),
         // A pull that reaches back far enough can turn up an earlier Run's own `run_header`
         // — this is latched exactly as the live stream's is, not only reached from it.
         identity: latchRunIdentity(previous.identity, block.envelopes),

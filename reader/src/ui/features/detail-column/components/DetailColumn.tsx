@@ -5,6 +5,7 @@ import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../.
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
+import { LinkButton } from "../../../components/LinkButton"
 import { Tag } from "../../../components/Tag"
 import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
 import { cn } from "../../../lib/cn"
@@ -310,13 +311,9 @@ function EvaluationDetail({
       facts={row.sandbox ? "sandbox" : ""}
       action={
         held?.kind === "held" && (
-          <button
-            type="button"
-            className="flex-none cursor-pointer font-ui text-xs text-accent hover:underline"
-            onClick={() => onShowInRepl(held.entry.id)}
-          >
+          <LinkButton className="flex-none" onClick={() => onShowInRepl(held.entry.id)}>
             Show in REPL
-          </button>
+          </LinkButton>
         )
       }
       below={

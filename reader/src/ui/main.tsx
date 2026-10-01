@@ -23,7 +23,7 @@ if (container === null) throw new Error("index.html is missing its #root element
  * each console process's exit to the Sidecar's fold.
  */
 function LiveReader() {
-  const { rows, lines, evictedRows, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier, consoleExited } =
+  const { rows, lines, evictedRows, evictedEvaluations, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier, consoleExited } =
     useSidecar()
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
@@ -45,6 +45,7 @@ function LiveReader() {
       rows={rows}
       lines={lines}
       evictedRows={evictedRows}
+      evictedEvaluations={evictedEvaluations}
       mismatch={detectMismatch(fileStatus, liveWireVersion)}
       liveWireVersion={liveWireVersion}
       repairState={repairState}

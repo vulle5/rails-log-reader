@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
-import type { ActivityRow } from "../shared/activity"
+import type { ActivityRow, EvictedEvaluations } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
 import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
@@ -25,6 +25,7 @@ import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { ReplDrawer } from "./features/repl/components/ReplDrawer"
 import { FOLDED, useReplDrawer } from "./features/repl/hooks/repl-drawer"
 import { DETACHED_REPL, type ReplHandle } from "./features/repl/hooks/repl-session"
+import { entryRows } from "../shared/repl"
 import type { Reveal } from "./features/repl/components/Transcript"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"
@@ -78,6 +79,8 @@ type ReaderProps = {
    * Console's auto-scrolls, and to neither of the other two — see `AutoScrollOptions.evicted`.
    */
   evictedRows?: number
+  /** The *Evaluation rows* the *Memory bound* has taken, as `ActivityTable.evictedEvaluations`. */
+  evictedEvaluations?: EvictedEvaluations
   /** File-on-disk vs. process-still-running, from `detectMismatch`. */
   mismatch?: Mismatch
   /** `v` off the most recently observed envelope, whichever process wrote it. */
@@ -114,10 +117,13 @@ type ReaderProps = {
   repl?: ReplHandle
 }
 
+const NONE_EVICTED: EvictedEvaluations = new Map()
+
 export function Reader({
   rows = [],
   lines = [],
   evictedRows = 0,
+  evictedEvaluations = NONE_EVICTED,
   mismatch = { kind: "none" },
   liveWireVersion = null,
   repairState = { phase: "idle" },
@@ -235,6 +241,7 @@ export function Reader({
   // The Transcript entry Show in REPL asked for, until the drawer it unfolds has scrolled to it.
   const [reveal, setReveal] = useState<Reveal | null>(null)
   const revealed = useCallback(() => setReveal(null), [])
+  const transcriptRows = useMemo(() => entryRows(repl.snapshot, rows, evictedEvaluations), [repl.snapshot, rows, evictedEvaluations])
   const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
@@ -263,6 +270,17 @@ export function Reader({
     setSelected(line.owner)
     if (row !== undefined && !showsRow(showingKind, row)) setShowingKind("all")
     setJumpTo({ row: line.owner })
+  }
+
+  /**
+   * A *Transcript* entry's link to its *Evaluation row*: selects the row on `tab`, and takes you
+   * to it, showing All first when the row-kind tab showing hides it, as a Console click does.
+   */
+  function showRow(row: ActivityRow, tab: DetailTabId) {
+    selectRow(row.id)
+    setDetailTab(tab)
+    if (!showsRow(showingKind, row)) setShowingKind("all")
+    setJumpTo({ row: row.id })
   }
 
   function showInRepl(entry: number) {
@@ -484,6 +502,8 @@ export function Reader({
                 historySuggestion={historySuggestion.on}
                 reveal={reveal}
                 onRevealed={revealed}
+                entryRows={transcriptRows}
+                onShowRow={showRow}
                 className="col-span-3 row-start-3"
               />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's

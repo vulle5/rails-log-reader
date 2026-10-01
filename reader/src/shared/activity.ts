@@ -301,9 +301,17 @@ export type EvictedRow = {
   requestId: string | null
 }
 
+/** *Evaluation rows* the *Memory bound* has taken, by `evaluationId`, each with its console process's pid. */
+export type EvictedEvaluations = ReadonlyMap<string, number | null>
+
 export type ActivityTable = {
   /** The same array throughout, mutated in place: rows are appended and never reordered. */
   readonly rows: readonly ActivityRow[]
+  /**
+   * The *Evaluation rows* the *Memory bound* has taken, oldest first. The same map throughout,
+   * mutated in place, and kept to the bound's ceiling as its other memories of what it took are.
+   */
+  readonly evictedEvaluations: EvictedEvaluations
   /**
    * Fold a batch of envelopes, in append order. Safe to hand the same bytes twice.
    *
@@ -373,6 +381,7 @@ export function activityTable(): ActivityTable {
    * unmarked row rather than a wrong one.
    */
   const evictedRuns = new Set<string>()
+  const evictedEvaluations = new Map<string, number | null>()
   /**
    * The latest `console` Run to boot under each pid, by its `run_header`. Kept apart from the
    * Run rows because the bound can take a Run row while its Evaluation row is still in flight.
@@ -949,6 +958,7 @@ export function activityTable(): ActivityTable {
     keepLatest(folded, ceiling)
     keepLatest(evicted, ceiling)
     keepLatest(evictedRuns, ceiling)
+    keepLatest(evictedEvaluations, ceiling)
     keepLatest(consoleRuns, ceiling)
     keepLatest(exitedRuns, ceiling)
 
@@ -1009,10 +1019,11 @@ export function activityTable(): ActivityTable {
     const folding = byRequest.get(requestId)
     byRequest.delete(requestId)
     evicted.add(requestId)
+    if (row.kind === "evaluation") evictedEvaluations.set(requestId, row.pid)
     return folding?.events ?? 0
   }
 
-  return { rows, fold, foldEarlier, consoleExited }
+  return { rows, evictedEvaluations, fold, foldEarlier, consoleExited }
 }
 
 function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {

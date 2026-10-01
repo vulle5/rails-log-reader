@@ -1,8 +1,12 @@
 import { useLayoutEffect, useRef } from "react"
 
-import type { TranscriptEntry } from "../../../../shared/repl"
+import type { EvaluationRow } from "../../../../shared/activity"
+import type { EntryRow, EvaluationEntry, TranscriptEntry } from "../../../../shared/repl"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { cn } from "../../../lib/cn"
+import { LinkButton } from "../../../components/LinkButton"
+import type { DetailTabId } from "../../detail-column/components/DetailTabs"
+import { type EntryCut } from "./EntryCut"
 import { Answer, Printed } from "./EvaluationAnswer"
 import { RubyCode } from "./RubyCode"
 import { Marker, Text } from "./TranscriptText"
@@ -19,16 +23,27 @@ export type Reveal = { entry: number }
  * entries of their own. Scrolled to its end as entries arrive and grow, unless it was scrolled up
  * away from it. An error's backtrace is drawn as the *Detail column* draws an exception's.
  *
+ * An evaluation links to its *Evaluation row*, by `entryRows`, with the row's counts, and says so
+ * once the *Memory bound* has taken it. What an entry printed and its result are each cut at
+ * `ENTRY_LINES` lines as first drawn: the cut opens the row on its Result tab, or, with no row
+ * held, shows the rest in place.
+ *
  * Asked to `reveal` an entry, it scrolls to it, once it is drawn, and then tells `onRevealed`.
  */
 export function Transcript({
   entries,
   railsRoot,
+  entryRows = NO_ROWS,
+  onShowRow = () => {},
   reveal = null,
   onRevealed = () => {},
 }: {
   entries: readonly TranscriptEntry[]
   railsRoot: string | null
+  /** Each evaluation's *Evaluation row*, by its entry's id: `entryRows`. */
+  entryRows?: ReadonlyMap<number, EntryRow>
+  /** Selects `row`, on its Detail tab `tab`. */
+  onShowRow?: (row: EvaluationRow, tab: DetailTabId) => void
   reveal?: Reveal | null
   onRevealed?: () => void
 }) {
@@ -71,20 +86,56 @@ export function Transcript({
             data-entry={entry.id}
           >
             {entry.kind === "evaluation" ? (
-              <>
-                <Text className="text-strong">
-                  <Marker>{"› "}</Marker>
-                  <RubyCode source={entry.input} />
-                </Text>
-                <Printed output={entry.output} cut={entry.outputCut} />
-                {entry.outcome !== null && <Answer outcome={entry.outcome} railsRoot={railsRoot} />}
-              </>
+              <Evaluation entry={entry} row={entryRows.get(entry.id) ?? null} railsRoot={railsRoot} onShowRow={onShowRow} />
             ) : (
-              <Printed output={entry.output} cut={entry.outputCut} />
+              <Printed output={entry.output} cut={entry.outputCut} entryCut={IN_PLACE} />
             )}
           </li>
         ))}
       </ol>
     </OpenModifierHeld>
   )
+}
+
+const NO_ROWS: ReadonlyMap<number, EntryRow> = new Map()
+
+const IN_PLACE: EntryCut = { openResult: null }
+
+/** An evaluation's entry: its input and the link to its row, then what it printed, then its answer. */
+function Evaluation({
+  entry,
+  row,
+  railsRoot,
+  onShowRow,
+}: {
+  entry: EvaluationEntry
+  row: EntryRow | null
+  railsRoot: string | null
+  onShowRow: (row: EvaluationRow, tab: DetailTabId) => void
+}) {
+  const entryCut: EntryCut = row?.kind === "held" ? { openResult: () => onShowRow(row.row, "result") } : IN_PLACE
+
+  return (
+    <>
+      <div className="flex items-baseline gap-3">
+        <Text className="min-w-0 flex-auto text-strong">
+          <Marker>{"› "}</Marker>
+          <RubyCode source={entry.input} />
+        </Text>
+        {row?.kind === "held" && (
+          <LinkButton className="flex-none" onClick={() => onShowRow(row.row, "timeline")}>
+            {counts(row.row)}
+          </LinkButton>
+        )}
+        {row?.kind === "evicted" && <span className="flex-none font-ui text-xs text-faint">timeline no longer held</span>}
+      </div>
+      <Printed output={entry.output} cut={entry.outputCut} entryCut={entryCut} />
+      {entry.outcome !== null && <Answer outcome={entry.outcome} railsRoot={railsRoot} entryCut={entryCut} />}
+    </>
+  )
+}
+
+/** A row's SQL and log counts: `3 queries · 1 log`. */
+function counts({ sqlCount, logCount }: EvaluationRow) {
+  return `${sqlCount} ${sqlCount === 1 ? "query" : "queries"} · ${logCount} ${logCount === 1 ? "log" : "logs"}`
 }

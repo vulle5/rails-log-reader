@@ -5,6 +5,8 @@
  * Transcript they hold is the same.
  */
 
+import type { ActivityRow, EvaluationRow, EvictedEvaluations } from "./activity"
+
 /** The most entries the Transcript holds. The oldest drop first. */
 export const TRANSCRIPT_LIMIT = 100
 
@@ -247,13 +249,51 @@ export type HeldEntry = { kind: "held"; entry: EvaluationEntry } | { kind: "gone
  * `repl-<token>-<id>`, where `id` is its entry's. `pid` is `null` when it is not known.
  */
 export function evaluationEntry(snapshot: ReplSnapshot, pid: number | null, evaluationId: string): HeldEntry {
-  const id = Number(/^repl-[^-]+-(\d+)$/.exec(evaluationId)?.[1] ?? Number.NaN)
+  const id = entryId(evaluationId)
   const ranIn = snapshot.consoles.filter((started) => started.pid === pid)
-  if (ranIn.length === 0 || Number.isNaN(id)) return { kind: "gone", reason: "elsewhere" }
+  if (ranIn.length === 0 || id === null) return { kind: "gone", reason: "elsewhere" }
   if (ranIn.every((started) => started.cleared)) return { kind: "gone", reason: "restarted" }
 
   const entry = snapshot.transcript.find((each) => each.kind === "evaluation" && each.id === id)
   return entry?.kind === "evaluation" ? { kind: "held", entry } : { kind: "gone", reason: "dropped" }
+}
+
+/**
+ * Where an evaluation entry's *Evaluation row* is: `held` in the Activity table, or `evicted`
+ * by the *Memory bound*. An entry with neither has no row: its console process ran it with no
+ * Initializer recording it, or with one that was disabled.
+ */
+export type EntryRow = { kind: "held"; row: EvaluationRow } | { kind: "evicted" }
+
+/**
+ * The *Evaluation row* of each Transcript entry that has one, by the entry's id: a row of
+ * `rows` the Transcript's console process ran, or one `evicted` names with that process's pid,
+ * as `ActivityTable.evictedEvaluations` does.
+ */
+export function entryRows(
+  snapshot: ReplSnapshot,
+  rows: readonly ActivityRow[],
+  evicted: EvictedEvaluations,
+): ReadonlyMap<number, EntryRow> {
+  const found = new Map<number, EntryRow>()
+  const pid = snapshot.consoles.find((started) => !started.cleared)?.pid
+  if (pid === undefined) return found
+
+  for (const [evaluationId, ranBy] of evicted) {
+    const id = entryId(evaluationId)
+    if (ranBy === pid && id !== null) found.set(id, { kind: "evicted" })
+  }
+  for (const row of rows) {
+    const id = row.kind === "evaluation" && row.pid === pid ? entryId(row.evaluationId) : null
+    if (row.kind === "evaluation" && id !== null) found.set(id, { kind: "held", row })
+  }
+  return found
+}
+
+/** The id of the entry the eval loop recorded as `evaluationId`, `repl-<token>-<id>`, or `null` when it is not one of its. */
+function entryId(evaluationId: string) {
+  const id = /^repl-[^-]+-(\d+)$/.exec(evaluationId)?.[1]
+  return id === undefined ? null : Number(id)
 }
 
 /** `consoles` with the console process `state` says is ready, unless it is already there and not cleared. */

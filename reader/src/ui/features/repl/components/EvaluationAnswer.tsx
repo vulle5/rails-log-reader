@@ -2,6 +2,7 @@ import { useState } from "react"
 
 import type { Outcome, RubyError } from "../../../../shared/repl"
 import { Backtrace } from "../../../components/Backtrace"
+import { CutText, useEntryCut, type EntryCut } from "./EntryCut"
 import { EvaluationResult } from "./EvaluationResult"
 import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
 
@@ -10,23 +11,30 @@ import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
  * the Result tab draws it with more room. Each instance's folds and Pretty | Raw are its own.
  */
 
-/** What an evaluation, or the console process outside one, printed. Nothing when it printed nothing. */
-export function Printed({ output, cut }: { output: string; cut: boolean }) {
+/**
+ * What an evaluation, or the console process outside one, printed, cut by `entryCut` when given.
+ * Nothing when it printed nothing.
+ */
+export function Printed({ output, cut, entryCut }: { output: string; cut: boolean; entryCut?: EntryCut }) {
+  const note = useEntryCut(entryCut)
   if (output === "") return null
 
   return (
     <>
-      <Text className="text-muted">{output}</Text>
+      <CutText className="text-muted" text={output} note={note} />
       {cut && <Cut>Output cut at 64K characters</Cut>}
     </>
   )
 }
 
-/** An evaluation's result, or its error drawn as the *Detail column* draws an exception's backtrace. */
-export function Answer({ outcome, railsRoot }: { outcome: Outcome; railsRoot: string | null }) {
+/**
+ * An evaluation's result, cut by `entryCut` when given, or its error drawn as the *Detail
+ * column* draws an exception's backtrace.
+ */
+export function Answer({ outcome, railsRoot, entryCut }: { outcome: Outcome; railsRoot: string | null; entryCut?: EntryCut }) {
   switch (outcome.kind) {
     case "result":
-      return <EvaluationResult outcome={outcome} />
+      return <EvaluationResult outcome={outcome} entryCut={entryCut} />
     case "error":
       return (
         <>

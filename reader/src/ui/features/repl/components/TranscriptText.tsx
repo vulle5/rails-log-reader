@@ -17,7 +17,7 @@ export function Marker({ children }: { children: string }) {
 }
 
 /** A line saying what was cut. */
-export function Cut({ children }: { children: string }) {
+export function Cut({ children }: { children: ReactNode }) {
   return <p className="font-ui text-xs text-faint">{children}</p>
 }
 

@@ -306,6 +306,17 @@ describe("an Evaluation row under the Memory bound", () => {
     expect(activity.rows.at(-1)).toMatchObject({ kind: "run", runId: "con-1", logCount: 1 })
   })
 
+  test("is remembered by its id and its console process's pid once evicted", () => {
+    const run = aRun("con-1")
+    const activity = activityTable()
+    activity.fold([run.header("console", 92_014), run.evaluationStart("repl-a-1"), run.evaluationFinish("repl-a-1")])
+    expect(activity.evictedEvaluations.size).toBe(0)
+
+    activity.fold(traffic(LOAD_ON_OPEN_EVENTS))
+
+    expect([...activity.evictedEvaluations]).toEqual([["repl-a-1", 92_014]])
+  })
+
   test("carries its console process's pid though the bound took its Run row before it opened", () => {
     const run = aRun("con-1")
     const activity = activityTable()

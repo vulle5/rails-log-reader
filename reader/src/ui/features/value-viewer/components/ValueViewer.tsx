@@ -4,6 +4,7 @@ import { Copyable, LineCopy } from "../../../components/CopyButton"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
 import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
+import { cutTree, isEmpty } from "../lib/tree-cut"
 import type {
   ContainerKind,
   ContainerNode,
@@ -39,17 +40,23 @@ import type {
  *
  * A `caption` is drawn over the tree. The copy control sits at the right of the first line, the
  * caption's or the tree's, with `controls` before it.
+ *
+ * A `cut` draws the top level only as far as fits in its `lines` as first drawn, and its `note`
+ * under it, given how many lines it left out. What the developer opens inside the lines it draws
+ * is drawn whole.
  */
 export function ValueViewer({
   label,
   source,
   caption,
   controls,
+  cut,
 }: {
   label: string
   source: ValueSource
   caption?: ReactNode
   controls?: ReactNode
+  cut?: { lines: number; note: (more: number) => ReactNode }
 }) {
   const value = source.tree
   const search = useContext(SearchContext)
@@ -76,6 +83,7 @@ export function ValueViewer({
   }, [])
   const view: ViewState = { source, search, inside, isOpen, onToggle: toggle, whole, onOpenWhole: openWhole }
   const wholeText = useMemo(() => source.copyText(value), [source, value])
+  const kept = cut === undefined ? null : cutTree(value, cut.lines)
 
   if (value.type === "container" && isEmpty(value)) {
     return (
@@ -93,7 +101,7 @@ export function ValueViewer({
       {caption}
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (
-          <Children node={value} path={[]} {...view} />
+          <Children node={value} path={[]} shown={kept?.children} {...view} />
         ) : (
           <li className="group/line" role="treeitem">
             <Leaf leaf={value} path={[]} {...view} />
@@ -101,6 +109,7 @@ export function ValueViewer({
           </li>
         )}
       </ul>
+      {kept !== null && cut?.note(kept.more)}
     </Copyable>
   )
 }
@@ -146,10 +155,16 @@ type ViewState = {
   onOpenWhole: (path: string) => void
 }
 
-function Children({ node, path, ...view }: { node: ContainerNode; path: readonly PathStep[] } & ViewState) {
+/** `node`'s children, or only the first `shown` of them, and then no line for what its source cut. */
+function Children({
+  node,
+  path,
+  shown,
+  ...view
+}: { node: ContainerNode; path: readonly PathStep[]; shown?: number } & ViewState) {
   return (
     <>
-      {node.children.map((child) => (
+      {node.children.slice(0, shown).map((child) => (
         <Item
           key={child.key}
           child={child}
@@ -158,7 +173,7 @@ function Children({ node, path, ...view }: { node: ContainerNode; path: readonly
           {...view}
         />
       ))}
-      {node.cut !== undefined && (
+      {node.cut !== undefined && shown === undefined && (
         <li className="pl-4 text-faint italic" role="treeitem">
           {node.cut.more === null ? "…more" : `…${node.cut.more} more ${noun(node, node.cut.more)}`}
         </li>
@@ -292,11 +307,6 @@ function Key({ text, type, keyed, search }: { text: string; type?: LeafType; key
       {": "}
     </Token>
   )
-}
-
-/** A container holding nothing, and not cut short: there is nothing more to it than it shows. */
-function isEmpty(node: ContainerNode) {
-  return node.children.length === 0 && node.cut === undefined
 }
 
 /** An empty container, said as its brackets alone: `{}`, `[]`, or `Comment {}`. */

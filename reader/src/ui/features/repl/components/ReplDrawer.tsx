@@ -1,10 +1,12 @@
 import { useEffect, useId, useState } from "react"
 
-import { runningPid, type ExitedState, type ReplSnapshot, type ReplState } from "../../../../shared/repl"
+import type { EvaluationRow } from "../../../../shared/activity"
+import { runningPid, type EntryRow, type ExitedState, type ReplSnapshot, type ReplState } from "../../../../shared/repl"
 import { ColumnHeading } from "../../../components/Column"
 import { Tag } from "../../../components/Tag"
 import type { CompletionTrigger } from "../../../hooks/completion-trigger"
 import { cn } from "../../../lib/cn"
+import type { DetailTabId } from "../../detail-column/components/DetailTabs"
 import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
 import { useUnseenResult, type UnseenResult } from "../hooks/unseen-result"
@@ -37,6 +39,8 @@ export function ReplDrawer({
   historySuggestion,
   reveal,
   onRevealed,
+  entryRows,
+  onShowRow,
   className,
 }: {
   folded: boolean
@@ -54,6 +58,9 @@ export function ReplDrawer({
   /** The *Transcript* entry to scroll to, once the drawer is open, and what is told once it has. */
   reveal: Reveal | null
   onRevealed: () => void
+  /** Each *Transcript* evaluation's *Evaluation row*, by its entry's id, and what selects one on a Detail tab. */
+  entryRows: ReadonlyMap<number, EntryRow>
+  onShowRow: (row: EvaluationRow, tab: DetailTabId) => void
   className?: string
 }) {
   const body = useId()
@@ -110,7 +117,14 @@ export function ReplDrawer({
         <div className="flex min-h-0 flex-auto flex-col [container-type:size]" id={body}>
           {actsOnlyFrom === null ? (
             <>
-              <Transcript entries={repl.snapshot.transcript} railsRoot={railsRoot} reveal={reveal} onRevealed={onRevealed} />
+              <Transcript
+                entries={repl.snapshot.transcript}
+                railsRoot={railsRoot}
+                entryRows={entryRows}
+                onShowRow={onShowRow}
+                reveal={reveal}
+                onRevealed={onRevealed}
+              />
               {repl.snapshot.state.kind === "exited" && <ExitNotice state={repl.snapshot.state} />}
               <ReplPrompt
                 submit={repl.submit}

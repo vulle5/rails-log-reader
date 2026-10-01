@@ -5,8 +5,10 @@ import { Copyable } from "../../../components/CopyButton"
 import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
+import { ENTRY_LINES } from "../lib/entry-cut"
+import { CutText, useEntryCut, type CutNote, type EntryCut } from "./EntryCut"
 import { rubySource } from "../lib/ruby-source"
-import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
+import { Cut, ErrorNote, Marker } from "./TranscriptText"
 
 /**
  * An *Evaluation*'s result: its value drawn in the *Value viewer* as Pretty, with Raw beside it
@@ -14,21 +16,24 @@ import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
  * structure to draw is its text alone, with no toggle. The toggle is this instance's own, and
  * every instance opens pretty. An `inspect` that raised while the result was built is noted
  * under it.
+ *
+ * An `entryCut` cuts the value, its tree, its text or its Raw text, at `ENTRY_LINES` lines as
+ * first drawn, and the one note under the cut opens the rest wherever the value shows.
  */
-export function EvaluationResult({ outcome }: { outcome: Extract<Outcome, { kind: "result" }> }) {
+export function EvaluationResult({ outcome, entryCut }: { outcome: Extract<Outcome, { kind: "result" }>; entryCut?: EntryCut }) {
   const source = useMemo(() => rubySource(outcome.tree), [outcome.tree])
   const [raw, setRaw] = useState(false)
   const showsRaw = source === null || raw
+  const note = useEntryCut(entryCut)
 
   return (
     <>
       {source === null ? (
-        <Text>
+        <CutText text={outcome.text} note={note}>
           <Marker>{"=> "}</Marker>
-          {outcome.text}
-        </Text>
+        </CutText>
       ) : (
-        <ResultView source={source} text={outcome.text} raw={raw} onRaw={setRaw} />
+        <ResultView source={source} text={outcome.text} raw={raw} onRaw={setRaw} note={note} />
       )}
       {showsRaw && outcome.cut && <Cut>Result cut at 64 KB</Cut>}
       {outcome.inspectError !== null && <ErrorNote>{`inspect raised ${outcome.inspectError}`}</ErrorNote>}
@@ -45,11 +50,13 @@ function ResultView({
   text,
   raw,
   onRaw,
+  note,
 }: {
   source: ValueSource
   text: string
   raw: boolean
   onRaw: (raw: boolean) => void
+  note: CutNote | null
 }) {
   const toggles = (
     <ToggleGroup label="Show the result as">
@@ -69,10 +76,10 @@ function ResultView({
       <div className="min-w-0 flex-1">
         {raw ? (
           <Copyable text={text} label="Copy result" controls={toggles}>
-            <Text>{text}</Text>
+            <CutText text={text} note={note} />
           </Copyable>
         ) : (
-          <ValueViewer label="Result" source={source} controls={toggles} />
+          <ValueViewer label="Result" source={source} controls={toggles} cut={note === null ? undefined : { lines: ENTRY_LINES, note }} />
         )}
       </div>
     </div>
