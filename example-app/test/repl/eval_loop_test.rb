@@ -268,11 +268,20 @@ class EvalLoopTest < ActiveSupport::TestCase
     end
   end
 
-  test "answers an evaluation with its value's pretty_inspect and its tree, tied to its id" do
+  test "answers an evaluation with its value's class, its pretty_inspect and its tree, tied to its id" do
     DevelopmentRun.console_process do |repl|
       answer = repl.evaluate("1 + 1")
 
-      assert_equal({ "type" => "result", "id" => 1, "text" => "2", "cut" => false, "tree" => { "type" => "integer", "inspect" => "2" } }, answer)
+      assert_equal({ "type" => "result", "id" => 1, "class" => "Integer", "text" => "2", "cut" => false, "tree" => { "type" => "integer", "inspect" => "2" } }, answer)
+    end
+  end
+
+  test "names the class of every value it answers with, a record's, a Relation's, a BasicObject's and an anonymous class's instance's" do
+    DevelopmentRun.console_process do |repl|
+      classes = ["nil", "Post.new", "Post.all", "BasicObject.new", "Class.new.new"].map { |input| repl.evaluate(input)["class"] }
+
+      assert_equal ["NilClass", "Post", "ActiveRecord::Relation", "BasicObject"], classes.first(4)
+      assert_match(/\A#<Class:0x\h+>\z/, classes.last)
     end
   end
 

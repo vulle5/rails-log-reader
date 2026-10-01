@@ -12,16 +12,16 @@
 #        {"type":"check","id":2,"text":"[1, 2].each do |x|"}
 #        {"type":"complete","id":3,"text":"\"abc\".up","caret":8}
 #   out: {"type":"ready","pid":48213,"capabilities":["check","complete"],"completor":"TypeCompletor"}
-#        {"type":"result","id":1,"text":"2","cut":false,"tree":{"type":"integer","inspect":"2"}}
+#        {"type":"result","id":1,"class":"Integer","text":"2","cut":false,"tree":{"type":"integer","inspect":"2"}}
 #        {"type":"error","id":1,"class":"NameError","message":"undefined local variable ...",
 #         "backtrace":["(repl):1:in `<main>'"],"causes":[]}
 #        {"type":"checked","id":2,"complete":false}
 #        {"type":"completions","id":3,"from":6,"receiver":"String",
 #         "candidates":[{"text":"upcase","kind":"method"},{"text":"upcase!","kind":"method"}]}
 #
-# A result's `tree` is its value laid out, and `inspect_error` says what an `inspect` raised while
-# it was built, when one did. A node carries its own `inspect` text, `cut` when that was cut, and
-# its type class: one that is laid out, or a leaf's, such as `symbol`, `float` or `time`. Under
+# A result's `class` names its value's class, its `tree` is its value laid out, and
+# `inspect_error` says what an `inspect` raised while it was built, when one did. A node carries
+# its own `inspect` text, `cut` when that was cut, and its type class: one that is laid out, or a leaf's, such as `symbol`, `float` or `time`. Under
 # the whole value, each node carries the `[…]` step that reaches it from its container, when one
 # does: a Set's member, a Data's member and an ivar have none. A Hash's entries are `pairs` of
 # `[key, value]`, the key a leaf that is never laid out. An Array's, a Set's and a Relation's are
@@ -555,7 +555,7 @@ module RailsLogReaderRepl
       @shown = {}.compare_by_identity
       tree = tree(value)
       text, cut = pretty(value) { tree["inspect"] }
-      frame = { "text" => text, "cut" => cut, "tree" => tree }
+      frame = { "class" => class_name(value), "text" => text, "cut" => cut, "tree" => tree }
       frame["inspect_error"] = @inspect_error if @inspect_error
       frame
     ensure
@@ -771,8 +771,10 @@ module RailsLogReaderRepl
       @inspect_error ||= utf8("#{class_name(error)}: #{error.message}".byteslice(0, INSPECT_LIMIT))
     end
 
-    def class_name(error)
-      error.class.name || error.class.inspect
+    # The name of `value`'s class, or its `inspect` for an anonymous class.
+    def class_name(value)
+      klass = class_of(value)
+      klass.name || klass.inspect
     end
 
     # JSON carries UTF-8 alone. A string that is not, or is cut inside a character, keeps what

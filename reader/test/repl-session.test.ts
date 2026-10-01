@@ -3,7 +3,16 @@ import { chmod, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 import { REPL_LOOP, replSession, type ReplSession } from "../src/server/repl-session"
-import { applyReplUpdate, isReplUpdate, TRANSCRIPT_LIMIT, type ReplMessage, type ReplSnapshot, type ReplState } from "../src/shared/repl"
+import {
+  applyReplUpdate,
+  evaluationEntry,
+  isReplUpdate,
+  type EvaluationEntry,
+  TRANSCRIPT_LIMIT,
+  type ReplMessage,
+  type ReplSnapshot,
+  type ReplState,
+} from "../src/shared/repl"
 import {
   stubConsoleCompleted,
   stubConsoleFailsToBoot,
@@ -151,7 +160,7 @@ describe("the REPL session", () => {
       input: "1 + 1",
       output: "",
       outputCut: false,
-      outcome: { kind: "result", text: "1 + 1", cut: false, tree: { type: "object", inspect: "1 + 1" }, inspectError: null },
+      outcome: { kind: "result", className: "Object", text: "1 + 1", cut: false, tree: { type: "object", inspect: "1 + 1" }, inspectError: null },
     })
   })
 
@@ -479,6 +488,78 @@ describe("the REPL session's Restart", () => {
     const { session } = await aSession()
 
     expect(listen(session).snapshot.sandbox).toBe(false)
+  })
+})
+
+describe("the REPL session's hold on an evaluation's entry", () => {
+  /** The id the eval loop records an evaluation in the Sidecar under, its token its own. */
+  const recordedAs = (id: number) => `repl-0a1b2c3d-${id}`
+  const isRestarted = (pid: number) => (snapshot: ReplSnapshot) => snapshot.state.kind === "ready" && snapshot.state.pid !== pid
+
+  test("finds an evaluation's entry by its console process's pid and the id it was recorded under", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    const entry = await evaluate(listening, "1 + 1")
+
+    expect(evaluationEntry(listening.snapshot, pid, recordedAs(entry?.id ?? 0))).toEqual({ kind: "held", entry: entry as EvaluationEntry })
+  })
+
+  test("finds an evaluation still running", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    listening.submit("sleep 300")
+    const busy = listening.snapshot.state
+    if (busy.kind !== "busy") throw new Error(`submitted, but the session is ${busy.kind}`)
+
+    expect(evaluationEntry(listening.snapshot, pid, recordedAs(busy.id))).toMatchObject({ kind: "held", entry: { input: "sleep 300", outcome: null } })
+  })
+
+  test("says an evaluation a Restart cleared was cleared by a Restart", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    const entry = await evaluate(listening, "1 + 1")
+
+    listening.restart(false)
+    await listening.until(isRestarted(pid))
+
+    expect(evaluationEntry(listening.snapshot, pid, recordedAs(entry?.id ?? 0))).toEqual({ kind: "gone", reason: "restarted" })
+  })
+
+  test("says an evaluation the Transcript dropped was one of the oldest", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    const first = await evaluate(listening, "first")
+
+    for (let n = 1; n <= TRANSCRIPT_LIMIT; n++) await evaluate(listening, `${n}`)
+
+    expect(evaluationEntry(listening.snapshot, pid, recordedAs(first?.id ?? 0))).toEqual({ kind: "gone", reason: "dropped" })
+  })
+
+  test("says an evaluation from a console process it never started is from a console this Reader didn't run", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    const entry = await evaluate(listening, "1 + 1")
+
+    expect(evaluationEntry(listening.snapshot, pid + 1, recordedAs(entry?.id ?? 0))).toEqual({ kind: "gone", reason: "elsewhere" })
+    expect(evaluationEntry(listening.snapshot, null, recordedAs(entry?.id ?? 0))).toEqual({ kind: "gone", reason: "elsewhere" })
+  })
+
+  test("shows a late attachment the console processes it has started", async () => {
+    const { session } = await aSession()
+    const listening = listen(session)
+    const pid = pidOf((await booted(listening)).state)
+    const entry = await evaluate(listening, "1 + 1")
+    listening.restart(false)
+    await listening.until(isRestarted(pid))
+
+    const late = listen(session)
+
+    expect(evaluationEntry(late.snapshot, pid, recordedAs(entry?.id ?? 0))).toEqual({ kind: "gone", reason: "restarted" })
   })
 })
 

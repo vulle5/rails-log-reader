@@ -63,7 +63,7 @@ type ErrorFrame = { class: string; message: string; backtrace: string[]; cut?: t
 /** A frame the eval loop sends on fd 3. */
 type Frame =
   | { type: "ready"; pid: number; capabilities: string[] }
-  | { type: "result"; id: number; text: string; cut: boolean; tree: RubyNode; inspect_error?: string }
+  | { type: "result"; id: number; class: string; text: string; cut: boolean; tree: RubyNode; inspect_error?: string }
   | (ErrorFrame & { type: "error"; id: number; causes: ErrorFrame[]; causes_cut?: true })
   | { type: "checked"; id: number; complete: boolean }
   | { type: "completions"; id: number; from?: number; receiver?: string | null; candidates?: Candidate[]; reason?: string }
@@ -196,7 +196,14 @@ export function replSession(railsRoot: string): ReplSession {
 
     const outcome: Outcome =
       frame.type === "result"
-        ? { kind: "result", text: frame.text, cut: frame.cut, tree: frame.tree, inspectError: frame.inspect_error ?? null }
+        ? {
+            kind: "result",
+            className: frame.class,
+            text: frame.text,
+            cut: frame.cut,
+            tree: frame.tree,
+            inspectError: frame.inspect_error ?? null,
+          }
         : {
             kind: "error",
             ...rubyError(frame),

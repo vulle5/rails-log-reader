@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 const READY: ReplState = { kind: "ready", pid: 48213 }
-const RESULT: Outcome = { kind: "result", text: "2", cut: false, tree: { type: "integer", inspect: "2" }, inspectError: null }
+const RESULT: Outcome = { kind: "result", className: "Integer", text: "2", cut: false, tree: { type: "integer", inspect: "2" }, inspectError: null }
 const RAISED: Outcome = { kind: "error", className: "RuntimeError", message: "boom", backtrace: ["(repl):1:in `<main>'"], causes: [] }
 const LOST: Outcome = { kind: "lost" }
 

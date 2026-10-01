@@ -12,7 +12,7 @@ import { cn } from "../../../lib/cn"
  */
 
 /** Every tab a row can have. Which ones a row has, and which of them are enabled, is its own. */
-export type DetailTabId = "timeline" | "params" | "headers" | "response"
+export type DetailTabId = "timeline" | "params" | "headers" | "response" | "result"
 
 export type DetailTab = {
   id: DetailTabId

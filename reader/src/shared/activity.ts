@@ -171,6 +171,11 @@ export type EvaluationRow = {
   /** The `request_id` its events carry. */
   evaluationId: string
   runId: string
+  /**
+   * The pid of the console process that ran it, off its Run's `run_header`, even once the
+   * *Memory bound* has taken its Run row. `null` while that header has not been seen.
+   */
+  pid: number | null
   /** Interrupted only by its own Run ending: a server booting beside a console ends nothing. */
   state: RequestState
   /** Opened by its children, its `evaluation_start` not held: as `RequestRow.partial`. */
@@ -416,7 +421,7 @@ export function activityTable(): ActivityTable {
     if (existing !== undefined) return existing
 
     const folding: Folding = {
-      row: isEvaluationEvent(envelope) ? evaluationRow(requestId, envelope) : {
+      row: isEvaluationEvent(envelope) ? evaluationRow(requestId, envelope, consolePid(envelope.run_id)) : {
         kind: "request",
         id: requestRowId(requestId),
         requestId,
@@ -475,7 +480,7 @@ export function activityTable(): ActivityTable {
 
   /** `folding`'s Request row replaced, where it stands, by an Evaluation row holding what it held. */
   function becomeEvaluation(folding: Folding, row: FoldingRow & RequestRow, envelope: Envelope) {
-    const evaluation = evaluationRow(row.requestId, envelope)
+    const evaluation = evaluationRow(row.requestId, envelope, consolePid(row.runId))
     evaluation.state = row.state
     evaluation.overBound = row.overBound
     evaluation.sqlCount = row.sqlCount
@@ -713,9 +718,11 @@ export function activityTable(): ActivityTable {
       row.appName = envelope.payload.app_name
       row.railsRoot = envelope.payload.rails_root
       if (envelope.payload.kind === "console") consoleBooted(envelope.payload.pid, envelope.run_id)
-      // A load-earlier pull can bring this header in after one of its requests already opened.
+      // A load-earlier pull can bring this header in after one of its rows already opened.
       for (const folding of byRequest.values()) {
-        if (folding.row.kind === "request" && folding.row.runId === envelope.run_id) folding.row.railsRoot = envelope.payload.rails_root
+        if (folding.row.runId !== envelope.run_id) continue
+        if (folding.row.kind === "request") folding.row.railsRoot = envelope.payload.rails_root
+        else folding.row.pid = envelope.payload.pid
       }
 
       if (bootsAWebProcess(envelope.payload.kind)) {
@@ -826,6 +833,12 @@ export function activityTable(): ActivityTable {
     // Deleted first, so a reused pid moves to the newest end, which `keepLatest` trims last.
     consoleRuns.delete(pid)
     consoleRuns.set(pid, runId)
+  }
+
+  /** The pid the `run_header` of console Run `runId` carried, or `null` when no header held says. */
+  function consolePid(runId: string) {
+    for (const [pid, run] of consoleRuns) if (run === runId) return pid
+    return null
   }
 
   function consoleExited(pid: number) {
@@ -1006,13 +1019,17 @@ function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent
   return envelope.type === "evaluation_start" || envelope.type === "evaluation_finish"
 }
 
-/** An Evaluation row, opened by `envelope`: partial unless that is its `evaluation_start`. */
-function evaluationRow(evaluationId: string, envelope: Envelope): FoldingRow & EvaluationRow {
+/**
+ * An Evaluation row, opened by `envelope`, run by the console process `pid`: partial unless that
+ * is its `evaluation_start`.
+ */
+function evaluationRow(evaluationId: string, envelope: Envelope, pid: number | null): FoldingRow & EvaluationRow {
   return {
     kind: "evaluation",
     id: requestRowId(evaluationId),
     evaluationId,
     runId: envelope.run_id,
+    pid,
     state: "in-flight",
     partial: envelope.type !== "evaluation_start",
     overBound: false,

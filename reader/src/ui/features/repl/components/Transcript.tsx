@@ -1,23 +1,37 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef } from "react"
 
-import type { Outcome, RubyError, TranscriptEntry } from "../../../../shared/repl"
-import { Backtrace } from "../../../components/Backtrace"
+import type { TranscriptEntry } from "../../../../shared/repl"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { cn } from "../../../lib/cn"
-import { EvaluationResult } from "./EvaluationResult"
+import { Answer, Printed } from "./EvaluationAnswer"
 import { RubyCode } from "./RubyCode"
-import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
+import { Marker, Text } from "./TranscriptText"
 
 /** How near its end the Transcript can be scrolled and still follow what arrives. */
 const FOLLOWING_SLACK = 24
+
+/** An entry the Transcript is asked to scroll to. A new object for each ask. */
+export type Reveal = { entry: number }
 
 /**
  * The *REPL*'s *Transcript*: each evaluation's input highlighted as Ruby, then what it printed,
  * then its result or its error, with what the console process printed outside any evaluation as
  * entries of their own. Scrolled to its end as entries arrive and grow, unless it was scrolled up
  * away from it. An error's backtrace is drawn as the *Detail column* draws an exception's.
+ *
+ * Asked to `reveal` an entry, it scrolls to it, once it is drawn, and then tells `onRevealed`.
  */
-export function Transcript({ entries, railsRoot }: { entries: readonly TranscriptEntry[]; railsRoot: string | null }) {
+export function Transcript({
+  entries,
+  railsRoot,
+  reveal = null,
+  onRevealed = () => {},
+}: {
+  entries: readonly TranscriptEntry[]
+  railsRoot: string | null
+  reveal?: Reveal | null
+  onRevealed?: () => void
+}) {
   const list = useRef<HTMLOListElement>(null)
   const following = useRef(true)
   const held = useOpenModifierHeld()
@@ -26,6 +40,14 @@ export function Transcript({ entries, railsRoot }: { entries: readonly Transcrip
     const element = list.current
     if (element !== null && following.current) element.scrollTop = element.scrollHeight
   }, [entries])
+
+  // After following, so a Transcript drawn by the same click that asks lands on the entry.
+  useLayoutEffect(() => {
+    if (reveal === null) return
+
+    list.current?.querySelector(`[data-entry="${reveal.entry}"]`)?.scrollIntoView({ block: "start" })
+    onRevealed()
+  }, [reveal, onRevealed])
 
   function scrolled() {
     const element = list.current
@@ -43,7 +65,11 @@ export function Transcript({ entries, railsRoot }: { entries: readonly Transcrip
         {entries.map((entry) => (
           // An evaluation is a raised block edged in the accent, so where one ends and the next
           // begins reads at a glance, and so does which one a control at its far edge belongs to.
-          <li key={entry.id} className={cn(entry.kind === "evaluation" && "bg-raised px-3 py-1.5 shadow-pinned")}>
+          <li
+            key={entry.id}
+            className={cn(entry.kind === "evaluation" && "bg-raised px-3 py-1.5 shadow-pinned")}
+            data-entry={entry.id}
+          >
             {entry.kind === "evaluation" ? (
               <>
                 <Text className="text-strong">
@@ -60,75 +86,5 @@ export function Transcript({ entries, railsRoot }: { entries: readonly Transcrip
         ))}
       </ol>
     </OpenModifierHeld>
-  )
-}
-
-function Printed({ output, cut }: { output: string; cut: boolean }) {
-  if (output === "") return null
-
-  return (
-    <>
-      <Text className="text-muted">{output}</Text>
-      {cut && <Cut>Output cut at 64K characters</Cut>}
-    </>
-  )
-}
-
-function Answer({ outcome, railsRoot }: { outcome: Outcome; railsRoot: string | null }) {
-  switch (outcome.kind) {
-    case "result":
-      return <EvaluationResult outcome={outcome} />
-    case "error":
-      return (
-        <>
-          <Text className="text-error">{described(outcome)}</Text>
-          <Backtrace className="mt-1" backtrace={outcome.backtrace} railsRoot={railsRoot} />
-          {outcome.cut && <Cut>Backtrace cut at 64 KB</Cut>}
-          {outcome.causes.map((cause, at) => (
-            <Cause key={at} cause={cause} railsRoot={railsRoot} />
-          ))}
-          {outcome.causesCut && <Cut>Further causes left out</Cut>}
-        </>
-      )
-    case "lost":
-      return <ErrorNote>The REPL exited before it answered.</ErrorNote>
-  }
-}
-
-/** An error as its class, then its message when it has one. */
-function described({ className, message }: RubyError) {
-  return message === "" ? className : `${className}: ${message}`
-}
-
-/**
- * An error's cause: "Caused by" its class and message, folded, and its backtrace once opened. A
- * cause with no backtrace has nothing to open, so it is only that line.
- */
-function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | null }) {
-  const [open, setOpen] = useState(false)
-  const label = `Caused by ${described(cause)}`
-
-  if (cause.backtrace.length === 0) {
-    return <p className="mt-1 pl-[2ch] text-xs text-muted">{label}</p>
-  }
-
-  return (
-    <div className="mt-1">
-      <button
-        type="button"
-        className="cursor-pointer text-left text-xs text-muted hover:text-foreground"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-      >
-        <Marker>{open ? "▾ " : "▸ "}</Marker>
-        {label}
-      </button>
-      {open && (
-        <>
-          <Backtrace className="mt-1" backtrace={cause.backtrace} railsRoot={railsRoot} />
-          {cause.cut && <Cut>Backtrace cut at 64 KB</Cut>}
-        </>
-      )}
-    </div>
   )
 }

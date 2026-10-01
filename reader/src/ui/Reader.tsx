@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type { ActivityRow } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
@@ -25,6 +25,7 @@ import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { ReplDrawer } from "./features/repl/components/ReplDrawer"
 import { FOLDED, useReplDrawer } from "./features/repl/hooks/repl-drawer"
 import { DETACHED_REPL, type ReplHandle } from "./features/repl/hooks/repl-session"
+import type { Reveal } from "./features/repl/components/Transcript"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"
 import type { RepairState } from "./features/setup-status/lib/initializer-repair"
@@ -231,6 +232,9 @@ export function Reader({
   const viewport = useRef<HTMLDivElement>(null)
   const widths = useColumnWidths(viewport)
   const drawer = useReplDrawer(viewport)
+  // The Transcript entry Show in REPL asked for, until the drawer it unfolds has scrolled to it.
+  const [reveal, setReveal] = useState<Reveal | null>(null)
+  const revealed = useCallback(() => setReveal(null), [])
   const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
@@ -259,6 +263,11 @@ export function Reader({
     setSelected(line.owner)
     if (row !== undefined && !showsRow(showingKind, row)) setShowingKind("all")
     setJumpTo({ row: line.owner })
+  }
+
+  function showInRepl(entry: number) {
+    drawer.unfold()
+    setReveal({ entry })
   }
 
   /** Clicking a row says nothing about the Console, so it takes the pin down rather than moving it. */
@@ -450,6 +459,9 @@ export function Reader({
                   tab={detailTab}
                   onTab={setDetailTab}
                   scroll={detailScroll}
+                  repl={repl}
+                  actsOnlyFrom={actsOnlyFrom}
+                  onShowInRepl={showInRepl}
                 />
               </Column>
               {/* Outside the drawer, so a drag that folds it carries on over its header. */}
@@ -470,6 +482,8 @@ export function Reader({
                 actsOnlyFrom={actsOnlyFrom}
                 completionTrigger={completionTrigger.trigger}
                 historySuggestion={historySuggestion.on}
+                reveal={reveal}
+                onRevealed={revealed}
                 className="col-span-3 row-start-3"
               />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's

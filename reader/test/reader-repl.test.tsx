@@ -49,7 +49,7 @@ function transcriptEntries() {
 
 /** A result whose value is `tree`, by default a structureless leaf of its text. */
 function result(text: string, tree: RubyNode = { type: "object", inspect: text }, inspectError: string | null = null): Extract<Outcome, { kind: "result" }> {
-  return { kind: "result", text, cut: false, tree, inspectError }
+  return { kind: "result", className: "Object", text, cut: false, tree, inspectError }
 }
 
 /** An evaluation's error, raised at `(repl):1` unless it says otherwise, with no causes unless it has them. */

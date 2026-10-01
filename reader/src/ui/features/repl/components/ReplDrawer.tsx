@@ -9,7 +9,7 @@ import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
 import { useUnseenResult, type UnseenResult } from "../hooks/unseen-result"
 import { ReplPrompt } from "./ReplPrompt"
-import { Transcript } from "./Transcript"
+import { Transcript, type Reveal } from "./Transcript"
 
 /**
  * The *REPL* drawer: an outlined panel under the Console and the Activity table, headed "REPL"
@@ -35,6 +35,8 @@ export function ReplDrawer({
   actsOnlyFrom,
   completionTrigger,
   historySuggestion,
+  reveal,
+  onRevealed,
   className,
 }: {
   folded: boolean
@@ -49,6 +51,9 @@ export function ReplDrawer({
   completionTrigger: CompletionTrigger
   /** Whether the prompt offers the *History suggestion*. */
   historySuggestion: boolean
+  /** The *Transcript* entry to scroll to, once the drawer is open, and what is told once it has. */
+  reveal: Reveal | null
+  onRevealed: () => void
   className?: string
 }) {
   const body = useId()
@@ -105,7 +110,7 @@ export function ReplDrawer({
         <div className="flex min-h-0 flex-auto flex-col [container-type:size]" id={body}>
           {actsOnlyFrom === null ? (
             <>
-              <Transcript entries={repl.snapshot.transcript} railsRoot={railsRoot} />
+              <Transcript entries={repl.snapshot.transcript} railsRoot={railsRoot} reveal={reveal} onRevealed={onRevealed} />
               {repl.snapshot.state.kind === "exited" && <ExitNotice state={repl.snapshot.state} />}
               <ReplPrompt
                 submit={repl.submit}

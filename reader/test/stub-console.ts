@@ -25,6 +25,8 @@ import { stubComplete, stubCompletion } from "./repl.fixtures"
  * - `broken` answers `#<Broken>`, noting that its `inspect` raised.
  * - Anything else answers with itself as the result's text, and as its tree's one leaf.
  *
+ * Every result names its class as `Object`.
+ *
  * It answers a check at once, even while an evaluation runs, by `stubComplete`. When
  * `log/stub-console.uncheckable` is there, it says it has no multi-line check, and answers none.
  *
@@ -72,7 +74,7 @@ process.on("SIGINT", () => {
 const channel = connect({ fd: 3 } as never)
 const send = (frame: object) => channel.write(`${JSON.stringify(frame)}\n`)
 const answer = (id: number, text: string, extra: object = {}) =>
-  send({ type: "result", id, text, cut: false, tree: { type: "object", inspect: text }, ...extra })
+  send({ type: "result", id, class: "Object", text, cut: false, tree: { type: "object", inspect: text }, ...extra })
 
 const checkable = !existsSync("log/stub-console.uncheckable")
 const completable = !existsSync("log/stub-console.uncompletable")

@@ -172,6 +172,29 @@ describe("an Evaluation row", () => {
     expect(theOnlyEvaluation(rows)).toMatchObject({ partial: true, input: null, outcome: "ok", sqlCount: 1 })
   })
 
+  test("carries the pid of the console process that ran it, off its Run's run_header", () => {
+    const run = aRun("con-1")
+    const { rows } = folded(run.header("console", 92_014), run.evaluationStart("repl-a-1"))
+
+    expect(theOnlyEvaluation(rows).pid).toBe(92_014)
+  })
+
+  test("carries no pid while its Run's run_header has not been seen", () => {
+    const run = aRun("con-1")
+    const { rows } = folded(run.evaluationStart("repl-a-1"))
+
+    expect(theOnlyEvaluation(rows).pid).toBeNull()
+  })
+
+  test("learns its console process's pid from a run_header a load-earlier pull brings in", () => {
+    const run = aRun("con-1")
+    const activity = folded(run.evaluationStart("repl-a-1"))
+
+    activity.foldEarlier([run.header("console", 92_014)])
+
+    expect(theOnlyEvaluation(activity.rows).pid).toBe(92_014)
+  })
+
   test("lands an old-wire console's queries in its Run row", () => {
     const run = aRun("con-1")
     const { rows } = folded(run.header("console"), run.sql(null, 'SELECT COUNT(*) FROM "posts"'))
@@ -281,6 +304,18 @@ describe("an Evaluation row under the Memory bound", () => {
 
     activity.fold([run.log("repl-a-1", "too late")])
     expect(activity.rows.at(-1)).toMatchObject({ kind: "run", runId: "con-1", logCount: 1 })
+  })
+
+  test("carries its console process's pid though the bound took its Run row before it opened", () => {
+    const run = aRun("con-1")
+    const activity = activityTable()
+    activity.fold([run.header("console", 92_014), run.log(null, "Loading development environment")])
+    activity.fold(traffic(LOAD_ON_OPEN_EVENTS))
+    expect(activity.rows.some((row) => row.kind === "run" && row.runId === "con-1")).toBe(false)
+
+    activity.fold([run.evaluationStart("repl-a-1")])
+
+    expect(theOnlyEvaluation(activity.rows).pid).toBe(92_014)
   })
 
   test("is Interrupted by its console's exit after the bound took its Run row", () => {

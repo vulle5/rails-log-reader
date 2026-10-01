@@ -44,10 +44,11 @@ export type RubyError = { className: string; message: string; backtrace: string[
  */
 export type Outcome =
   /**
-   * Its value's `pretty_inspect`, cut to 64 KB when `cut`, and the value laid out as `tree`.
-   * `inspectError` says what an `inspect` raised while the result was built, when one did.
+   * The name of its value's class, its value's `pretty_inspect`, cut to 64 KB when `cut`, and
+   * the value laid out as `tree`. `inspectError` says what an `inspect` raised while the result
+   * was built, when one did.
    */
-  | { kind: "result"; text: string; cut: boolean; tree: RubyNode; inspectError: string | null }
+  | { kind: "result"; className: string; text: string; cut: boolean; tree: RubyNode; inspectError: string | null }
   | ({ kind: "error" } & RubyError & { causes: RubyError[]; causesCut?: true })
   /** The console process ended before the evaluation answered. */
   | { kind: "lost" }
@@ -134,11 +135,19 @@ export type Completion =
   | { kind: "candidates"; from: number; receiver: string | null; candidates: Candidate[] }
   | { kind: "none"; reason: string }
 
+/** One *Evaluation*: its input, what it printed, and how it ended, once it has. */
+export type EvaluationEntry = { kind: "evaluation"; id: number; input: string; output: string; outputCut: boolean; outcome: Outcome | null }
+
 export type TranscriptEntry =
-  /** One *Evaluation*: its input, what it printed, and how it ended, once it has. */
-  | { kind: "evaluation"; id: number; input: string; output: string; outputCut: boolean; outcome: Outcome | null }
+  | EvaluationEntry
   /** What the console process printed outside any evaluation, such as while it booted. */
   | { kind: "output"; id: number; output: string; outputCut: boolean }
+
+/**
+ * A console process the session has started, by its pid, from when it said it was ready.
+ * `cleared` once a Restart has emptied the Transcript of its entries.
+ */
+export type StartedConsole = { pid: number; cleared: boolean }
 
 export type ReplSnapshot = {
   state: ReplState
@@ -147,6 +156,11 @@ export type ReplSnapshot = {
   /** What the eval loop said it can do besides evaluate, when it was ready. */
   capabilities: readonly string[]
   transcript: readonly TranscriptEntry[]
+  /**
+   * Every console process the session has started, oldest first. The Transcript's entries are
+   * all the one's that is not `cleared`, if any.
+   */
+  consoles: readonly StartedConsole[]
 }
 
 export type ReplUpdate =
@@ -186,7 +200,7 @@ export type ReplCommand =
   | { type: "interrupt" }
   | { type: "restart"; sandbox: boolean }
 
-export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, sandbox: false, capabilities: [], transcript: [] }
+export const EMPTY_SNAPSHOT: ReplSnapshot = { state: { kind: "idle" }, sandbox: false, capabilities: [], transcript: [], consoles: [] }
 
 /** Whether `message` is an update `applyReplUpdate` folds, rather than a snapshot, a refusal, an answer or an exit notice. */
 export function isReplUpdate(message: ReplMessage): message is ReplUpdate {
@@ -203,7 +217,7 @@ export function isReplUpdate(message: ReplMessage): message is ReplUpdate {
 export function applyReplUpdate(snapshot: ReplSnapshot, update: ReplUpdate): ReplSnapshot {
   switch (update.type) {
     case "state":
-      return { ...snapshot, state: update.state, capabilities: update.capabilities }
+      return { ...snapshot, state: update.state, capabilities: update.capabilities, consoles: started(snapshot.consoles, update.state) }
     case "entry":
       return { ...snapshot, transcript: [...snapshot.transcript, update.entry].slice(-TRANSCRIPT_LIMIT) }
     case "output":
@@ -211,8 +225,41 @@ export function applyReplUpdate(snapshot: ReplSnapshot, update: ReplUpdate): Rep
     case "finished":
       return replacing(snapshot, update.id, (entry) => (entry.kind === "evaluation" ? { ...entry, outcome: update.outcome } : entry))
     case "restarted":
-      return { ...snapshot, sandbox: update.sandbox, transcript: [] }
+      return {
+        ...snapshot,
+        sandbox: update.sandbox,
+        transcript: [],
+        consoles: snapshot.consoles.map((started) => ({ ...started, cleared: true })),
+      }
   }
+}
+
+/**
+ * Where an *Evaluation*'s entry is: `held` in the Transcript, or why it is gone. A Restart
+ * cleared it, or the Transcript dropped it as one of its oldest, or it was run `elsewhere`: by a
+ * console process this session never started, such as one an earlier Reader started.
+ */
+export type HeldEntry = { kind: "held"; entry: EvaluationEntry } | { kind: "gone"; reason: "restarted" | "dropped" | "elsewhere" }
+
+/**
+ * The entry of the evaluation the console process `pid` recorded in the Sidecar as
+ * `evaluationId`, or why there is none. The eval loop records an evaluation as
+ * `repl-<token>-<id>`, where `id` is its entry's. `pid` is `null` when it is not known.
+ */
+export function evaluationEntry(snapshot: ReplSnapshot, pid: number | null, evaluationId: string): HeldEntry {
+  const id = Number(/^repl-[^-]+-(\d+)$/.exec(evaluationId)?.[1] ?? Number.NaN)
+  const ranIn = snapshot.consoles.filter((started) => started.pid === pid)
+  if (ranIn.length === 0 || Number.isNaN(id)) return { kind: "gone", reason: "elsewhere" }
+  if (ranIn.every((started) => started.cleared)) return { kind: "gone", reason: "restarted" }
+
+  const entry = snapshot.transcript.find((each) => each.kind === "evaluation" && each.id === id)
+  return entry?.kind === "evaluation" ? { kind: "held", entry } : { kind: "gone", reason: "dropped" }
+}
+
+/** `consoles` with the console process `state` says is ready, unless it is already there and not cleared. */
+function started(consoles: readonly StartedConsole[], state: ReplState) {
+  if (state.kind !== "ready" || consoles.some((each) => each.pid === state.pid && !each.cleared)) return consoles
+  return [...consoles, { pid: state.pid, cleared: false }]
 }
 
 /** The pid of the console process `state` has running, or `null` when none is. */

@@ -454,7 +454,7 @@ describe("what the REPL keeps of its Input history", () => {
     const finished = aReplSession({
       state: READY,
       transcript: [
-        evaluation({ id: 7, input: "1 + 1", outcome: { kind: "result", text: "2", cut: false, tree: { type: "integer", inspect: "2" }, inspectError: null } }),
+        evaluation({ id: 7, input: "1 + 1", outcome: { kind: "result", className: "Integer", text: "2", cut: false, tree: { type: "integer", inspect: "2" }, inspectError: null } }),
       ],
     })
     rerender(<Reader {...fold.props} railsRoot={ROOT} repl={finished.repl} />)

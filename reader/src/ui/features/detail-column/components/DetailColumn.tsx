@@ -24,6 +24,10 @@ import { DetailScroller, DetailTabs, type DetailTab, type DetailTabId, type Pane
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import { countMatches } from "../../value-viewer/lib/value-matches"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
+import { evaluationEntry, type HeldEntry } from "../../../../shared/repl"
+import type { ReplHandle } from "../../repl/hooks/repl-session"
+import { RubyCode } from "../../repl/components/RubyCode"
+import { ResultPanel, resultLabel } from "../../repl/components/ResultPanel"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines
@@ -64,6 +68,9 @@ export function DetailColumn({
   tab,
   onTab,
   scroll,
+  repl,
+  actsOnlyFrom,
+  onShowInRepl,
 }: {
   row: ActivityRow | null
   filter: DetailFilter
@@ -74,6 +81,12 @@ export function DetailColumn({
   onTab: (tab: DetailTabId) => void
   /** The column's *auto-scroll*, which follows the timeline's own scrollport. */
   scroll: PanelScroll
+  /** The *REPL* session, whose *Transcript* an *Evaluation row*'s Result tab reads. */
+  repl: Pick<ReplHandle, "snapshot" | "loaded">
+  /** Where acts can be made from, when this page is not there, else `null`. */
+  actsOnlyFrom: string | null
+  /** Opens the REPL drawer at the Transcript entry `entry`. */
+  onShowInRepl: (entry: number) => void
 }) {
   const held = useOpenModifierHeld()
 
@@ -90,7 +103,17 @@ export function DetailColumn({
       {row.kind === "request" ? (
         <RequestDetail row={row} filter={filter} railsRoot={railsRoot} tab={tab} onTab={onTab} scroll={scroll} />
       ) : row.kind === "evaluation" ? (
-        <EvaluationDetail row={row} filter={filter} railsRoot={railsRoot} scroll={scroll} />
+        <EvaluationDetail
+          row={row}
+          filter={filter}
+          railsRoot={railsRoot}
+          tab={tab}
+          onTab={onTab}
+          scroll={scroll}
+          held={repl.loaded ? evaluationEntry(repl.snapshot, row.pid, row.evaluationId) : null}
+          actsOnlyFrom={actsOnlyFrom}
+          onShowInRepl={onShowInRepl}
+        />
       ) : (
         <RunDetail row={row} filter={filter} railsRoot={railsRoot} scroll={scroll} />
       )}
@@ -248,30 +271,95 @@ function RunDetail({
 }
 
 /**
- * An *Evaluation row*'s timeline: the queries and log lines it owns, and those that came after
- * it finished in a trailing section of their own, as a request's do. Headed by `REPL` and its
- * input's first line.
+ * An *Evaluation row*: headed by `REPL`, its whole input highlighted as Ruby, and what it raised,
+ * all off the Sidecar, so the header says what ran after the *Transcript* is gone. While the
+ * Transcript holds its entry, Show in REPL opens the drawer at it.
+ *
+ * Its Timeline holds the queries and log lines it owns, and those that came after it finished in
+ * a trailing section of their own, as a request's do. Its Result shows its Transcript entry.
  */
 function EvaluationDetail({
   row,
   filter,
   railsRoot,
+  tab,
+  onTab,
   scroll,
+  held,
+  actsOnlyFrom,
+  onShowInRepl,
 }: {
   row: EvaluationRow
   filter: DetailFilter
   railsRoot: string | null
+  tab: DetailTabId
+  onTab: (tab: DetailTabId) => void
   scroll: PanelScroll
+  /** Where its Transcript entry is, or `null` while this page holds no session to look in. */
+  held: HeldEntry | null
+  actsOnlyFrom: string | null
+  onShowInRepl: (entry: number) => void
 }) {
   const trailing = eventsShown(row.trailing, filter)
-  const [first = ""] = (row.input ?? "").split("\n")
+  const label = resultLabel(row.outcome, held)
 
   return (
-    <Detail kind="REPL" name={first} facts={row.sandbox ? "sandbox" : ""}>
-      <DetailScroller className="flex-auto" scroll={scroll}>
-        <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
-        {trailing.length > 0 && <Trailing caption="After the evaluation finished" events={trailing} railsRoot={railsRoot} />}
-      </DetailScroller>
+    <Detail
+      kind="REPL"
+      name=""
+      facts={row.sandbox ? "sandbox" : ""}
+      action={
+        held?.kind === "held" && (
+          <button
+            type="button"
+            className="flex-none cursor-pointer font-ui text-xs text-accent hover:underline"
+            onClick={() => onShowInRepl(held.entry.id)}
+          >
+            Show in REPL
+          </button>
+        )
+      }
+      below={
+        <>
+          {row.input !== null && (
+            // Held to a few lines, so a long input never pushes the tabs out of reach.
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap wrap-anywhere">
+              <code>
+                <RubyCode source={row.input} />
+              </code>
+            </pre>
+          )}
+          <Cut field="input" original={row.inputCutFrom ?? undefined} />
+          {row.exception !== null && <ExceptionLine className="mt-1" exception={row.exception} />}
+          <Cut field="message" original={row.messageCutFrom ?? undefined} />
+        </>
+      }
+    >
+      <DetailTabs
+        chosen={tab}
+        onChoose={onTab}
+        tabs={[
+          {
+            id: "timeline",
+            label: "Timeline",
+            scroll,
+            panel: (
+              <>
+                <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+                {trailing.length > 0 && <Trailing caption="After the evaluation finished" events={trailing} railsRoot={railsRoot} />}
+              </>
+            ),
+          },
+          {
+            id: "result",
+            label: "Result",
+            ...(label !== null && { hint: { text: label, tone: "strong" as const } }),
+            // Another Selection's result opens at its top, and folded.
+            subject: row.id,
+            panel: <ResultPanel held={held} actsOnlyFrom={actsOnlyFrom} railsRoot={railsRoot} />,
+          },
+        ]}
+      />
     </Detail>
   )
 }
@@ -577,21 +665,39 @@ function BodyView({ hasTree, raw, onRaw }: { hasTree: boolean; raw: boolean; onR
 /**
  * The whole of one row's detail: a heading saying which row is being read, so the column says
  * so without the table beside it, then what it holds. The heading never scrolls: what is under
- * it is its own scrollport.
+ * it is its own scrollport. `action` sits at the heading line's far end, and `below` under it.
  */
-function Detail({ kind, name, facts, children }: { kind: ReactNode; name: string; facts: string; children: ReactNode }) {
+function Detail({
+  kind,
+  name,
+  facts,
+  action,
+  below,
+  children,
+}: {
+  kind: ReactNode
+  name: string
+  facts: string
+  action?: ReactNode
+  below?: ReactNode
+  children: ReactNode
+}) {
   return (
     <article className="flex min-h-0 flex-auto flex-col">
-      <header className="flex flex-none items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm">
-        {/* A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */}
-        <span className="font-bold text-accent">{kind}</span>
-        <span className="truncate">
-          <Highlight text={name} />
-        </span>
-        {/* The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */}
-        <span className="ml-auto whitespace-nowrap text-muted">
-          <Highlight text={facts} />
-        </span>
+      <header className="flex-none border-b border-border bg-raised px-3 py-2 font-mono text-sm">
+        <div className="flex items-baseline gap-2">
+          {/* A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */}
+          <span className="font-bold text-accent">{kind}</span>
+          <span className="truncate">
+            <Highlight text={name} />
+          </span>
+          {/* The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */}
+          <span className="ml-auto whitespace-nowrap text-muted">
+            <Highlight text={facts} />
+          </span>
+          {action}
+        </div>
+        {below}
       </header>
       {children}
     </article>
@@ -844,15 +950,24 @@ function Exception({
           somewhere else, so it alone gets a control for it — a query or a log line is easy
           enough to select by hand. */}
       <CopyButton text={exceptionText(exception, cutFrom)} label="Copy exception" />
-      <p className="font-mono text-sm text-error">
-        <span className="font-bold">
-          <Highlight text={exception.class} />
-        </span>{" "}
-        <Highlight text={exception.message} />
-      </p>
+      <ExceptionLine className="font-mono text-sm" exception={exception} />
       <Backtrace className="mt-1.5" backtrace={exception.backtrace} railsRoot={railsRoot} />
       <Cut field="backtrace" original={cutFrom ?? undefined} />
     </section>
+  )
+}
+
+/** An exception's class, bold, then its message, in the error colour. */
+function ExceptionLine({ className, exception }: { className?: string; exception: { class: string; message: string } }) {
+  return (
+    <p className={cn("text-error", className)}>
+      <span className="font-bold">
+        <Highlight text={exception.class} />
+      </span>{" "}
+      <span>
+        <Highlight text={exception.message} />
+      </span>
+    </p>
   )
 }
 
