@@ -1,6 +1,6 @@
 import { useId, type KeyboardEvent, type ReactNode } from "react"
 
-import { MatchesBadge } from "../../../components/MatchesBadge"
+import { MatchesBadge } from "../../../components/Matches"
 import type { ColumnAutoScroll } from "../../../hooks/auto-scroll"
 import { cn } from "../../../lib/cn"
 

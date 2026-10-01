@@ -1,6 +1,7 @@
 import type { EvaluationEntry, Outcome, RubyError, TranscriptEntry } from "../../../../shared/repl"
 import type { Search } from "../../../hooks/search"
 import { countMatches } from "../../value-viewer/lib/value-matches"
+import { described } from "./ruby-error"
 import { rubySource } from "./ruby-source"
 
 /**
@@ -39,11 +40,6 @@ function answerMatches(search: Search, outcome: Outcome | null, raw: boolean) {
     case undefined:
       return 0
   }
-}
-
-/** An error as its class, then its message when it has one. */
-export function described({ className, message }: RubyError) {
-  return message === "" ? className : `${className}: ${message}`
 }
 
 /** How many matches of the current term lie in an error's frames. */

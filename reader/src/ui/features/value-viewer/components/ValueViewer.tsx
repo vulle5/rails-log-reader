@@ -1,6 +1,7 @@
 import { useCallback, useContext, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
 import { Copyable, LineCopy } from "../../../components/CopyButton"
+import { FoldedOverMatches } from "../../../components/Matches"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
 import { countMatches, keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
@@ -255,14 +256,12 @@ function Item({
         </span>
         <span id={line}>
           <Key text={child.key} type={child.keyType} keyed={keyed} search={search} />
-          {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
           {open ? (
             <Opening node={node} />
           ) : found !== undefined ? (
-            <span className="rounded-xs bg-match" data-lit>
+            <FoldedOverMatches count={found}>
               <Summary node={node} />
-              {` · ${found} ${found === 1 ? "match" : "matches"}`}
-            </span>
+            </FoldedOverMatches>
           ) : (
             <Summary node={node} />
           )}

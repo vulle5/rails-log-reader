@@ -116,9 +116,9 @@ function openButton() {
   return within(replDrawer()).getByRole("button", { name: "Open REPL" })
 }
 
-/** Whether the drawer's header shows a count of matches. */
-function drawerCounts() {
-  return within(replDrawer()).queryByText(/\bmatch(es)?$/) !== null
+/** The drawer header's count of matches, when it shows one. */
+function drawerCount() {
+  return within(replDrawer()).queryByText(/\bmatch(es)?$/)
 }
 
 function transcript() {
@@ -313,13 +313,13 @@ describe("a folded REPL drawer's count of Search matches", () => {
     const { user } = theFoldedReader([], { transcript: [entry({ output: lines(25), outcome: { kind: "lost" } })] })
 
     await search(user, "REPL")
-    expect(drawerCounts()).toBe(false)
+    expect(drawerCount()).not.toBeInTheDocument()
 
     await search(user, "more lines")
-    expect(drawerCounts()).toBe(false)
+    expect(drawerCount()).not.toBeInTheDocument()
 
     await search(user, "exited")
-    expect(drawerCounts()).toBe(false)
+    expect(drawerCount()).not.toBeInTheDocument()
   })
 
   test("is gone once the term is cleared", async () => {
@@ -329,7 +329,7 @@ describe("a folded REPL drawer's count of Search matches", () => {
 
     await search(user, "")
 
-    expect(drawerCounts()).toBe(false)
+    expect(drawerCount()).not.toBeInTheDocument()
   })
 })
 

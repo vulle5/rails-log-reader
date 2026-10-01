@@ -2,8 +2,10 @@ import { useContext, useState } from "react"
 
 import type { Outcome, RubyError } from "../../../../shared/repl"
 import { Backtrace } from "../../../components/Backtrace"
+import { FoldedOverMatches } from "../../../components/Matches"
 import { Highlight, SearchContext, type Search } from "../../../hooks/search"
-import { described, framesMatches } from "../lib/entry-matches"
+import { framesMatches } from "../lib/entry-matches"
+import { described } from "../lib/ruby-error"
 import { CutText, useEntryCut, type EntryCut } from "./EntryCut"
 import { EvaluationResult, type RawView } from "./EvaluationResult"
 import { Cut, ErrorNote, Marker, Text } from "./TranscriptText"
@@ -103,16 +105,7 @@ function Cause({ cause, railsRoot }: { cause: RubyError; railsRoot: string | nul
         }}
       >
         <Marker>{open ? "▾ " : "▸ "}</Marker>
-        {label}
-        {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
-        {!open && found > 0 && (
-          <>
-            {" "}
-            <span className="rounded-xs bg-match" data-lit>
-              {`· ${found} ${found === 1 ? "match" : "matches"}`}
-            </span>
-          </>
-        )}
+        {!open && found > 0 ? <FoldedOverMatches count={found}>{label}</FoldedOverMatches> : label}
       </button>
       {open && (
         <>
