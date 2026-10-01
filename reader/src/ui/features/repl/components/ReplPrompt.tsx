@@ -471,15 +471,23 @@ export function ReplPrompt({
             <span ref={wordStart} />
           </div>
         )}
-        {/* The input's highlighting, under a textarea whose own text is transparent. The two share
-            their box, font and wrapping, so each glyph drawn here sits under the one it colours.
-            The trailing space gives a final empty line a height, as the textarea gives it one, and
-            the stable gutter keeps the wrap width the same whether or not the textarea scrolls.
-            This is the one of the two that is in the flow, so the input is as tall as its text,
-            up to the cap: the smaller of 12 lines and half the drawer's body, which is its
-            container less the hint row's `h-5`, in whole lines, and never less than one. */}
+        {/* The input is as tall as its text, which this invisible copy of it sets: the one of the
+            three boxes in the flow. Grey text is drawn but never sizes it. Its height is capped at
+            the smaller of 12 lines and half the drawer's body, which is its container less the
+            hint row's `h-5`, in whole lines, and never less than one. */}
+        <div
+          className="pointer-events-none invisible max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.25rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
+          aria-hidden="true"
+        >
+          {input}{" "}
+        </div>
+        {/* The input's highlighting, under a textarea whose own text is transparent. The three
+            share their box, font and wrapping, so each glyph drawn here sits under the one it
+            colours. The trailing space gives a final empty line a height, as the textarea gives
+            it one, and the stable gutter keeps the wrap width the same whether or not the
+            textarea scrolls. */}
         <pre
-          className="pointer-events-none max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.25rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
+          className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
           ref={highlighted}
           aria-hidden="true"
         >
