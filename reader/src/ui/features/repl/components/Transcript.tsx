@@ -117,7 +117,9 @@ function Evaluation({
 
   return (
     <>
-      <div className="flex items-baseline gap-3">
+      {/* Spaced from what follows, so a result's controls, which stand taller than its first line,
+          clear the row link at the same edge. */}
+      <div className="mb-1 flex items-baseline gap-3">
         <Text className="min-w-0 flex-auto text-strong">
           <Marker>{"› "}</Marker>
           <RubyCode source={entry.input} />
