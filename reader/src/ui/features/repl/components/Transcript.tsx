@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react"
 
 import type { EvaluationRow } from "../../../../shared/activity"
+import { LOAD_ON_OPEN_EVENTS } from "../../../../shared/bounds"
 import type { EntryRow, EvaluationEntry, TranscriptEntry } from "../../../../shared/repl"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { useMatches } from "../../../hooks/search"
@@ -131,7 +132,14 @@ function Evaluation({
             {counts(row.row)}
           </LinkButton>
         )}
-        {row?.kind === "evicted" && <span className="flex-none font-ui text-xs text-faint">timeline no longer held</span>}
+        {row?.kind === "evicted" && (
+          <span
+            className="flex-none font-ui text-xs text-faint"
+            title={`The Reader keeps only its latest ${LOAD_ON_OPEN_EVENTS.toLocaleString("en")} events, and let go of the queries and log lines this ran as some of the oldest`}
+          >
+            queries cleared to save memory
+          </span>
+        )}
       </div>
       <Printed output={entry.output} cut={entry.outputCut} entryCut={entryCut} />
       {entry.outcome !== null && <Answer outcome={entry.outcome} railsRoot={railsRoot} entryCut={entryCut} />}

@@ -153,14 +153,14 @@ describe("a Transcript entry's row link", () => {
     expect(rowShowing("Post.count")).toHaveAttribute("aria-selected", "true")
   })
 
-  test("reads timeline no longer held, and links to nothing, once the Memory bound took the row", async () => {
+  test("says its queries were cleared, and links to nothing, once the Memory bound took the row", async () => {
     const { run, header } = consoleRun()
     await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)], traffic(LOAD_ON_OPEN_EVENTS)], {
       transcript: [entry({ id: 1, outcome: INTEGER })],
     })
     expect(activityRows().some((row) => within(row).queryByText("Post.count") !== null)).toBe(false)
 
-    expect(within(theEntry()).getByText("timeline no longer held")).toBeInTheDocument()
+    expect(within(theEntry()).getByText("queries cleared to save memory")).toBeInTheDocument()
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
   })
 
@@ -168,7 +168,7 @@ describe("a Transcript entry's row link", () => {
     await theReader([[]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
 
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
-    expect(within(theEntry()).queryByText("timeline no longer held")).not.toBeInTheDocument()
+    expect(within(theEntry()).queryByText("queries cleared to save memory")).not.toBeInTheDocument()
   })
 
   test("is absent for what was printed outside any evaluation", async () => {
