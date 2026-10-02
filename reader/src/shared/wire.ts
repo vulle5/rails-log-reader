@@ -7,7 +7,7 @@
  * Reader built before the change reads the absence as `undefined` and renders straight
  * through it, which is the exact failure `isWireVersionUnderstood` exists to refuse.
  */
-export const WIRE_VERSION = 3
+export const WIRE_VERSION = 5
 
 export const EVENT_TYPES = [
   "run_header",
@@ -17,6 +17,9 @@ export const EVENT_TYPES = [
   "request_finish",
   "sql",
   "app_log",
+  "response",
+  "evaluation_start",
+  "evaluation_finish",
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -43,7 +46,10 @@ type EventEnvelope<T extends EventType, Payload> = {
    * written, which is what carries an in-flight request's elapsed through a silence.
    */
   at_wall: number
-  /** `null` means unattributed: its Run owns it. */
+  /**
+   * The owner's id: a request's, or an *Evaluation*'s, which its start event's type tells
+   * apart. `null` means unattributed: its Run owns it.
+   */
   request_id: string | null
   /**
    * Field name -> original byte length. Backtraces are exempt from the 64 KB per-field cap,
@@ -74,14 +80,38 @@ export type RequestStartPayload = {
 }
 
 /**
+ * A params Hash, as its pairs in the order the app had them. The tag tells it apart from an
+ * Array of two-element Arrays.
+ */
+export interface ParamsHash {
+  pairs: [string, ParamValue][]
+}
+
+/** A params value: every Hash in it is a `ParamsHash`, and an Array stays an Array. */
+export type ParamValue = string | number | boolean | null | ParamValue[] | ParamsHash
+
+/** An object whose one key is `pairs`, holding only `[string, value]` pairs. */
+export function isParamsHash(value: unknown): value is ParamsHash {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const keys = Object.keys(value)
+  if (keys.length !== 1 || keys[0] !== "pairs") return false
+  const pairs: unknown = (value as { pairs: unknown }).pairs
+  return (
+    Array.isArray(pairs) &&
+    pairs.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string")
+  )
+}
+
+/**
  * Emitted only when a controller is entered, so its *absence* is how a routing failure
- * is read. `params` arrives already filtered by the app's own `filter_parameters`.
+ * is read. `params` arrives already filtered by the app's own `filter_parameters`. Before
+ * v4 it is a plain object, its integer-like keys already moved first by `JSON.parse`.
  */
 export type RequestRoutePayload = {
   controller: string
   action: string
   format: string | null
-  params: Record<string, unknown>
+  params: ParamsHash | Record<string, unknown>
 }
 
 export type RequestException = {
@@ -165,6 +195,65 @@ export type AppLogPayload = {
   callsite?: string
 }
 
+/** Why a response has no body on the wire. */
+export type NoBody =
+  | {
+      /** Anything but JSON or XML. */
+      reason: "type"
+      /** The response's own `content-type`, `null` when it sent none. */
+      content_type: string | null
+    }
+  /** Never whole in memory: sent in pieces as the app wrote them. */
+  | { reason: "streamed" }
+  /** Compressed by the app before sending. */
+  | { reason: "encoded"; content_encoding: string }
+  /** A HEAD request, a 1xx, 204 or 304, or a body of no bytes, such as a redirect's. */
+  | { reason: "empty" }
+  /** The app took the connection and wrote whatever followed itself: `headers` is empty. */
+  | { reason: "hijacked" }
+
+/**
+ * What a request sent back, emitted when its body closes, which is after its `request_finish`.
+ * It carries a body only when the response was JSON or XML, whole in memory, not encoded and
+ * not empty. Otherwise `no_body` says why.
+ */
+export type ResponsePayload = {
+  /** The Rack-final status, which can differ from `request_finish`'s. */
+  status: number
+  /** Every header, unfiltered, in the order the app set them. A repeated header is repeated here. */
+  headers: [string, string][]
+  content_type: string | null
+  /** The bytes the app sent. Absent when that is not known without reading a stream. */
+  size?: number
+} & (
+  | {
+      format: "json" | "xml"
+      /** The text the app sent, never parsed on the wire. Cut at 64 KB, with the original size under `truncated.body`. */
+      body: string
+    }
+  | { no_body: NoBody }
+)
+
+/**
+ * An *Evaluation* the REPL's console process began, under the evaluation's id. `input` is cut at
+ * 64 KB, with the original size under `truncated.input`. `sandbox` says the console runs
+ * sandboxed, so what the evaluation writes is rolled back when the console ends. Its result and
+ * what it printed are never on the wire.
+ */
+export type EvaluationStartPayload = {
+  input: string
+  sandbox: boolean
+}
+
+/**
+ * How an *Evaluation* ended: `ok`, or `raised` with the exception's class and its message, cut at
+ * 64 KB with the original size under `truncated.message`. Ctrl-C is a `raised` `Interrupt`.
+ */
+export type EvaluationFinishPayload = ({ outcome: "ok" } | { outcome: "raised"; class: string; message: string }) & {
+  /** The SQL time Active Record counted on the evaluation's thread. Absent when the Initializer could not read it. */
+  db_runtime_ms?: number
+}
+
 export type RunHeaderEvent = EventEnvelope<"run_header", RunHeaderPayload>
 export type RunEndEvent = EventEnvelope<"run_end", RunEndPayload>
 export type RequestStartEvent = EventEnvelope<"request_start", RequestStartPayload>
@@ -172,6 +261,9 @@ export type RequestRouteEvent = EventEnvelope<"request_route", RequestRoutePaylo
 export type RequestFinishEvent = EventEnvelope<"request_finish", RequestFinishPayload>
 export type SqlEvent = EventEnvelope<"sql", SqlPayload>
 export type AppLogEvent = EventEnvelope<"app_log", AppLogPayload>
+export type ResponseEvent = EventEnvelope<"response", ResponsePayload>
+export type EvaluationStartEvent = EventEnvelope<"evaluation_start", EvaluationStartPayload>
+export type EvaluationFinishEvent = EventEnvelope<"evaluation_finish", EvaluationFinishPayload>
 
 /**
  * What identifies one Event: the Run it came from and its `seq` within that Run. `seq`
@@ -192,3 +284,6 @@ export type Envelope =
   | RequestFinishEvent
   | SqlEvent
   | AppLogEvent
+  | ResponseEvent
+  | EvaluationStartEvent
+  | EvaluationFinishEvent

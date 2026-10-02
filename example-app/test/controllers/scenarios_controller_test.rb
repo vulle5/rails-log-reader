@@ -22,6 +22,22 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
     assert_select "button[data-scenario=?]", scenario_flood_path
     assert_select "button[data-scenario=?]", scenario_partial_request_path
     assert_select "button[data-scenario=?]", scenario_trailing_event_path
+    assert_select "button[data-scenario=?]", scenario_json_path
+    assert_select "button[data-scenario=?]", scenario_xml_path
+    assert_select "button[data-scenario=?]", scenario_big_json_path
+    assert_select "button[data-scenario=?]", scenario_streamed_csv_path
+    assert_select "button[data-scenario=?]", scenario_gzip_json_path
+    assert_select "button[data-scenario=?]", scenario_pdf_path
+    assert_select "button[data-scenario=?]", scenario_no_content_path
+    assert_select "button[data-scenario=?]", scenario_redirect_path
+    assert_select "button[data-scenario=?]", scenario_hijack_path
+  end
+
+  test "the 304's button sends the If-Modified-Since that makes it one" do
+    get scenarios_path
+
+    assert_select "button[data-scenario=?][data-headers=?]", scenario_conditional_get_path,
+      { "If-Modified-Since" => ScenariosController::UNCHANGED_SINCE.httpdate }.to_json
   end
 
   # 8, 10 (twice) 12 and 14 get no button — none of them is a path a browser can fetch — so
@@ -111,5 +127,83 @@ class ScenariosControllerTest < ActionDispatch::IntegrationTest
     get scenario_trailing_event_path
 
     assert_response :success
+  end
+
+  test "scenario 15: json — a JSON body" do
+    get scenario_json_path
+
+    assert_response :success
+    assert_equal "application/json", response.media_type
+    assert_kind_of Array, response.parsed_body["posts"]
+  end
+
+  test "scenario 16: xml — an XML body" do
+    get scenario_xml_path
+
+    assert_response :success
+    assert_equal "application/xml", response.media_type
+    assert_match(/\A<\?xml version="1.0" encoding="UTF-8"\?>\n<posts>/, response.body)
+  end
+
+  test "scenario 17: big_json — a JSON body over 64 KB" do
+    get scenario_big_json_path
+
+    assert_response :success
+    assert_equal "application/json", response.media_type
+    assert_operator response.body.bytesize, :>, 64 * 1024
+  end
+
+  test "scenario 18: streamed_csv — a CSV body that is never whole in memory" do
+    get scenario_streamed_csv_path
+
+    assert_response :success
+    assert_equal "text/csv", response.media_type
+    assert_match(/\Aid,title,comments\n\d+,/, response.body)
+  end
+
+  test "scenario 19: gzip_json — a JSON body the app gzipped itself" do
+    get scenario_gzip_json_path
+
+    assert_response :success
+    assert_equal "gzip", response.headers["content-encoding"]
+    assert_equal "application/json", response.media_type
+    assert_kind_of Array, JSON.parse(ActiveSupport::Gzip.decompress(response.body))["posts"]
+  end
+
+  test "scenario 20: pdf — a PDF sent from disk" do
+    get scenario_pdf_path
+
+    assert_response :success
+    assert_equal "application/pdf", response.media_type
+    assert_equal File.binread(ScenariosController::REPORT_PDF), response.body
+  end
+
+  test "scenario 21: no_content — a 204" do
+    get scenario_no_content_path
+
+    assert_response :no_content
+    assert_empty response.body
+  end
+
+  test "scenario 22: conditional_get — a 304 when unchanged since the date it is sent, and a 200 without one" do
+    get scenario_conditional_get_path, headers: { "If-Modified-Since" => ScenariosController::UNCHANGED_SINCE.httpdate }
+    assert_response :not_modified
+
+    get scenario_conditional_get_path
+    assert_response :success
+  end
+
+  test "scenario 23: redirect — a 302 to Scenario 15" do
+    get scenario_redirect_path
+
+    assert_redirected_to scenario_json_path
+  end
+
+  test "scenario 24: hijack — writes its own reply to the socket it takes, and closes it" do
+    socket = StringIO.new
+    get scenario_hijack_path, env: { "rack.hijack?" => true, "rack.hijack" => -> { socket } }
+
+    assert_equal ScenariosController::HIJACKED_REPLY, socket.string
+    assert socket.closed?
   end
 end

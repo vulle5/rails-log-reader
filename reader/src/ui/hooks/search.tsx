@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react"
+import { createContext, useContext, useDeferredValue, useMemo, type ReactNode } from "react"
 
 /**
  * The Reader's one search: a case-insensitive substring, matched over the text the Reader
@@ -31,17 +31,23 @@ const NOT_SEARCHING: Search = { find: () => NOTHING }
 export const SearchContext = createContext<Search>(NOT_SEARCHING)
 
 /**
- * The term compiled once per keystroke rather than once per rendered string — a busy Reader
+ * The term compiled once per term rather than once per rendered string — a busy Reader
  * renders thousands of them. A pattern and not a lowercased `indexOf`, because lowercasing
  * can change a string's length (`"İ"` lowercases to two code units) and every offset after
  * such a character would then light the wrong letters. The term is escaped whole: the
  * pattern is how the match is made, never a language the developer is given.
+ *
+ * Compiled from React's deferred value of the term, so the box shows a keystroke at once and
+ * the lighting follows in a render React may interrupt: with a lot to light, the matches trail
+ * the term. The term is deferred here and nowhere else: every column reads this one search, so
+ * they all catch up with a new term in the same commit.
  */
 export function useSearch(term: string): Search {
+  const deferred = useDeferredValue(term)
   return useMemo(() => {
-    if (term === "") return NOT_SEARCHING
+    if (deferred === "") return NOT_SEARCHING
 
-    const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
+    const pattern = new RegExp(deferred.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
     return {
       find(text) {
         const found: Match[] = []
@@ -49,7 +55,7 @@ export function useSearch(term: string): Search {
         return found
       },
     }
-  }, [term])
+  }, [deferred])
 }
 
 /** The occurrences of the current term in `text`. */

@@ -1,4 +1,14 @@
-import type { BindValue, Envelope, EventType, Severity } from "../src/shared/wire"
+import type {
+  BindValue,
+  Envelope,
+  EvaluationFinishPayload,
+  EventType,
+  ParamsHash,
+  ParamValue,
+  RequestRoutePayload,
+  ResponsePayload,
+  Severity,
+} from "../src/shared/wire"
 import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
 
 /**
@@ -10,8 +20,8 @@ import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
  * is true of a test: a fold that holds up over four hand-written events proves very little
  * about one reading a busy dev app. So the whole stream is here, its crafted scenarios
  * still buried in ordinary traffic: four requests in flight at once, an N+1 shape, a 500
- * with a backtrace, a request that hangs, a `rake` Run and a `rails console` Run writing
- * into the same file as the server.
+ * with a backtrace, a request that hangs, a `rake` Run and a `rails console` Run, its
+ * evaluations each owning their own queries, writing into the same file as the server.
  *
  * Three things are ported rather than copied, because the prototype predates the wire:
  *
@@ -27,6 +37,9 @@ import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
 export const SERVER_RUN = "srv-91204"
 export const RAKE_RUN = "rake-91887"
 export const CONSOLE_RUN = "con-92014"
+
+/** The console Run's evaluations, by what each did: the last raised. */
+export const EVALUATIONS = { lookup: "repl-7c1e-1", count: "repl-7c1e-2", update: "repl-7c1e-3" }
 
 type Emission = {
   at: number
@@ -62,14 +75,35 @@ function start(at: number, requestId: string, method: string, path: string, wall
 }
 
 /** Emitted only when a controller is entered, so leaving it out is how a 404 is written. */
-function route(at: number, requestId: string, controller: string, action: string, format = "html") {
+function route(
+  at: number,
+  requestId: string,
+  controller: string,
+  action: string,
+  format = "html",
+  params: RequestRoutePayload["params"] = { pairs: [] },
+) {
   emit({
     at,
     runId: SERVER_RUN,
     requestId,
     type: "request_route",
-    payload: { controller, action, format, params: {} },
+    payload: { controller, action, format, params },
   })
+}
+
+/**
+ * A plain object as the Initializer writes a Hash: tagged pairs at every level. Its order is
+ * `Object.entries`', so an integer-like key would already have moved first.
+ */
+function tagged(hash: Record<string, unknown>): ParamsHash {
+  return { pairs: Object.entries(hash).map(([key, value]) => [key, taggedValue(value)]) }
+}
+
+function taggedValue(value: unknown): ParamValue {
+  if (Array.isArray(value)) return value.map(taggedValue)
+  if (value !== null && typeof value === "object") return tagged(value as Record<string, unknown>)
+  return value as ParamValue
 }
 
 function finish(
@@ -94,6 +128,23 @@ function finish(
       ...(exception === undefined ? {} : { exception }),
     },
   })
+}
+
+/** Emitted when the body closes, so it always sits after its request's finish. */
+function response(at: number, requestId: string, payload: ResponsePayload) {
+  emit({ at, runId: SERVER_RUN, requestId, type: "response", payload })
+}
+
+/** The headers Rails sends with every response, after the ones the response itself set. */
+function railsHeaders(requestId: string, contentType: string, etag: string): [string, string][] {
+  return [
+    ["content-type", contentType],
+    ["etag", `W/"${etag}"`],
+    ["cache-control", "max-age=0, private, must-revalidate"],
+    ["x-request-id", requestId],
+    ["x-runtime", "0.004812"],
+    ["server-timing", "sql.active_record;dur=1.6, process_action.action_controller;dur=3.9"],
+  ]
 }
 
 function sql(
@@ -218,6 +269,14 @@ sql(2400, C, "Profile Load", 'SELECT "profiles".* FROM "profiles" WHERE "profile
 sql(2430, D, "AnalyticsEvent Create", 'INSERT INTO "analytics_events" ("name", "user_id", "payload", "created_at") VALUES (?, ?, ?, ?)', 1.2)
 sql(2470, C, "Subscription Load", 'SELECT "subscriptions".* FROM "subscriptions" WHERE "subscriptions"."user_id" = ? AND "subscriptions"."active" = ? LIMIT ?  [["user_id", 4021], ["active", 1], ["LIMIT", 1]]', 0.7)
 finish(2560, C, 200, 470, 1.1, 1.6)
+response(2565, C, {
+  status: 200,
+  headers: railsHeaders(C, "application/json; charset=utf-8", "4be1e3f0a6c52d8a"),
+  content_type: "application/json; charset=utf-8",
+  size: 149,
+  format: "json",
+  body: '{"id":4021,"name":"Ada Lovelace","email":"ada@example.com","profile":{"bio":"Analyst","avatar_url":null},"subscription":{"plan":"pro","active":true}}',
+})
 sql(2600, D, "AnalyticsEvent Create", 'INSERT INTO "analytics_events" ("name", "user_id", "payload", "created_at") VALUES (?, ?, ?, ?)', 0.9)
 finish(2680, B, 200, 640, 12.4, 2.3)
 finish(2760, D, 201, 610, 0.4, 8.8)
@@ -247,8 +306,42 @@ log(4560, null, "info", "[ActiveJob] [DeliverWebhookJob] [9f2c1a] Performed Deli
 
 // --- a 500 with a backtrace --------------------------------------------------
 const E = "e5510b77"
+
+/**
+ * The awkward params hash, on the request a developer would open Params on first: nested four
+ * deep, an array of hashes, a value `filter_parameters` already replaced, a gift note long
+ * enough to need cutting, and form-shaped strings that look like numbers beside the one real
+ * number a JSON body can carry. `controller`, `action` and `format` come last, where Rails
+ * merges the route's own into the body's.
+ */
+const ORDER_PARAMS = {
+  cart_id: "77213",
+  order: {
+    currency: "EUR",
+    shipping: {
+      address: {
+        line1: "Mannerheimintie 12 B 34",
+        postal_code: "00100",
+        geo: { lat: "60.1699", lng: "24.9384" },
+      },
+      method: "express",
+    },
+    line_items: [
+      { sku: "TEE-BLK-M", quantity: "2", price_cents: "2500" },
+      { sku: "MUG-01", quantity: 1, price_cents: "1200", gift_wrap: true },
+    ],
+    gift_note:
+      "Happy birthday! I saw this and thought of the time we spent a whole weekend debugging that N+1 in the feed endpoint — hope the mug makes the next one shorter.",
+    coupon_code: null,
+  },
+  payment_token: "[FILTERED]",
+  format: "json",
+  controller: "api/v1/orders",
+  action: "create",
+}
+
 start(5000, E, "POST", "/api/v1/orders")
-route(5010, E, "Api::V1::OrdersController", "create", "json")
+route(5010, E, "Api::V1::OrdersController", "create", "json", tagged(ORDER_PARAMS))
 sql(5060, E, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."id" = ? LIMIT ?  [["id", 4021], ["LIMIT", 1]]', 0.4)
 log(5100, E, "info", "OrdersController#create for cart 77213")
 sql(5150, E, "Cart Load", 'SELECT "carts".* FROM "carts" WHERE "carts"."id" = ? LIMIT ?  [["id", 77213], ["LIMIT", 1]]', 0.6)
@@ -294,6 +387,18 @@ log(11800, H, "warn", "ReportBuilder: still aggregating (41,209 orders, 0 rows w
 const MISTYPED = "9c1e04ab"
 start(6400, MISTYPED, "GET", "/api/v1/notifcations")
 finish(6470, MISTYPED, 404, 7.2, 0, 0)
+response(6475, MISTYPED, {
+  status: 404,
+  headers: [
+    ["content-type", "text/html; charset=utf-8"],
+    ["content-length", "18204"],
+    ["x-request-id", MISTYPED],
+    ["x-runtime", "0.007211"],
+  ],
+  content_type: "text/html; charset=utf-8",
+  size: 18_204,
+  no_body: { reason: "type", content_type: "text/html; charset=utf-8" },
+})
 
 // --- some late traffic so the hang is visible above live rows ---------------
 const F = "1b4d77aa"
@@ -310,6 +415,155 @@ route(9010, G, "Api::V1::SessionsController", "destroy", "json")
 sql(9060, G, "Session Destroy", 'DELETE FROM "sessions" WHERE "sessions"."id" = ?  [["id", 90211]]', 0.9)
 log(9110, G, "info", "Signed out user 4021")
 finish(9180, G, 204, 180, 0.0, 0.9)
+response(9185, G, {
+  status: 204,
+  headers: [
+    ["cache-control", "no-cache"],
+    ["x-request-id", G],
+    ["x-runtime", "0.180114"],
+  ],
+  content_type: null,
+  no_body: { reason: "empty" },
+})
+
+// --- a response for every reason there is no body ----------------------------
+const SIGN_IN = "0e7c21d5"
+start(9200, SIGN_IN, "GET", "/sign_in")
+route(9205, SIGN_IN, "SessionsController", "new")
+finish(9215, SIGN_IN, 302, 15, 0.0, 0.0)
+response(9216, SIGN_IN, {
+  status: 302,
+  headers: [
+    ["location", "http://localhost:3000/session/new"],
+    ["content-type", "text/html; charset=utf-8"],
+    ["x-request-id", SIGN_IN],
+    ["x-runtime", "0.015207"],
+  ],
+  content_type: "text/html; charset=utf-8",
+  size: 0,
+  no_body: { reason: "empty" },
+})
+
+const AVATAR = "3f9a0b62"
+start(9220, AVATAR, "GET", "/api/v1/me/avatar")
+route(9225, AVATAR, "Api::V1::AvatarsController", "show", "json")
+finish(9240, AVATAR, 304, 20, 0.0, 0.4)
+response(9241, AVATAR, {
+  status: 304,
+  headers: [
+    ["last-modified", "Thu, 01 Jan 2026 00:00:00 GMT"],
+    ["cache-control", "max-age=0, private, must-revalidate"],
+    ["x-request-id", AVATAR],
+    ["x-runtime", "0.020931"],
+  ],
+  content_type: null,
+  no_body: { reason: "empty" },
+})
+
+const INVOICE = "8d41ce07"
+start(9300, INVOICE, "GET", "/invoices/77213.pdf")
+route(9305, INVOICE, "InvoicesController", "show", "pdf")
+finish(9340, INVOICE, 200, 40, 0.0, 0.6)
+response(9345, INVOICE, {
+  status: 200,
+  headers: [
+    ["content-type", "application/pdf"],
+    ["content-disposition", 'inline; filename="77213.pdf"'],
+    ["x-request-id", INVOICE],
+    ["x-runtime", "0.040377"],
+  ],
+  content_type: "application/pdf",
+  size: 48_213,
+  no_body: { reason: "type", content_type: "application/pdf" },
+})
+
+const QR = "b25d0f18"
+start(9350, QR, "GET", "/qr/77213.png")
+route(9355, QR, "QrCodesController", "show", "png")
+finish(9370, QR, 200, 20, 0.0, 0.0)
+response(9371, QR, {
+  status: 200,
+  headers: [
+    ["content-type", "image/png"],
+    ["x-request-id", QR],
+    ["x-runtime", "0.020502"],
+  ],
+  content_type: "image/png",
+  size: 1204,
+  no_body: { reason: "type", content_type: "image/png" },
+})
+
+const EXPORT = "6c08e9a3"
+start(9600, EXPORT, "GET", "/exports/orders.csv")
+route(9605, EXPORT, "ExportsController", "orders", "csv")
+finish(9690, EXPORT, 200, 90, 0.0, 4.2)
+response(9691, EXPORT, {
+  status: 200,
+  headers: [
+    ["content-type", "text/csv"],
+    ["cache-control", "no-cache"],
+    ["x-request-id", EXPORT],
+    ["x-runtime", "0.090415"],
+  ],
+  content_type: "text/csv",
+  no_body: { reason: "streamed" },
+})
+
+const TIMELINE = "e8b3176d"
+start(9700, TIMELINE, "GET", "/api/v1/timeline")
+route(9705, TIMELINE, "Api::V1::TimelineController", "index", "json")
+finish(9740, TIMELINE, 200, 40, 2.1, 1.1)
+response(9741, TIMELINE, {
+  status: 200,
+  headers: [
+    ["content-encoding", "gzip"],
+    ["content-type", "application/json; charset=utf-8"],
+    ["x-request-id", TIMELINE],
+    ["x-runtime", "0.040882"],
+  ],
+  content_type: "application/json; charset=utf-8",
+  size: 3789,
+  no_body: { reason: "encoded", content_encoding: "gzip" },
+})
+
+const CABLE = "71fd4a0c"
+start(9800, CABLE, "GET", "/cable")
+finish(9810, CABLE, -1, 10, 0.0, 0.0)
+response(9811, CABLE, { status: -1, headers: [], content_type: null, no_body: { reason: "hijacked" } })
+
+const UP = "a4c9e25b"
+start(9850, UP, "HEAD", "/up")
+route(9852, UP, "Rails::HealthController", "show")
+finish(9860, UP, 200, 10, 0.4, 0.0)
+response(9861, UP, {
+  status: 200,
+  headers: [
+    ["content-type", "text/html; charset=utf-8"],
+    ["x-request-id", UP],
+    ["x-runtime", "0.010093"],
+  ],
+  content_type: "text/html; charset=utf-8",
+  size: 0,
+  no_body: { reason: "empty" },
+})
+
+const SITEMAP = "5a0e3c7d"
+export const SITEMAP_XML =
+  '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+  "<url><loc>https://example.com/posts/12</loc><lastmod>2026-07-01</lastmod></url>" +
+  "<url><loc>https://example.com/posts/13</loc><lastmod>2026-07-02</lastmod></url></urlset>"
+start(9400, SITEMAP, "GET", "/sitemap.xml")
+route(9410, SITEMAP, "SitemapsController", "show", "xml")
+sql(9450, SITEMAP, "Post Load", 'SELECT "posts"."id", "posts"."updated_at" FROM "posts" WHERE "posts"."published" = ?  [["published", 1]]', 1.2)
+finish(9490, SITEMAP, 200, 90, 3.1, 1.2)
+response(9495, SITEMAP, {
+  status: 200,
+  headers: railsHeaders(SITEMAP, "application/xml; charset=utf-8", "9d27c0b1e4f8a365"),
+  content_type: "application/xml; charset=utf-8",
+  size: new TextEncoder().encode(SITEMAP_XML).length,
+  format: "xml",
+  body: SITEMAP_XML,
+})
 
 // The one place `at_wall` disagrees with append order: the machine's clock is stepped back
 // two seconds by NTP while this request is being served. Nothing may reorder because of it.
@@ -429,13 +683,34 @@ for (let n = 0; n < 118; n += 1) {
   if (n === 61) log(at + 30, null, "warn", "reports:rebuild — batch 62 retried after a lock timeout", RAKE_RUN)
 }
 
-// --- a third Run: someone poking at `rails c` while all this happens ---------
+// --- a third Run: someone poking at the REPL's `rails c` while all this happens ---------
+// Each evaluation owns its queries and log lines. What the console says outside one, as it
+// boots, is its Run row's.
+function evaluationStart(at: number, evaluationId: string, input: string) {
+  emit({ at, runId: CONSOLE_RUN, requestId: evaluationId, type: "evaluation_start", payload: { input, sandbox: false } })
+}
+
+function evaluationFinish(at: number, evaluationId: string, payload: EvaluationFinishPayload) {
+  emit({ at, runId: CONSOLE_RUN, requestId: evaluationId, type: "evaluation_finish", payload })
+}
+
 header(7300, CONSOLE_RUN, "console", 92_014)
 log(7300, null, "info", "Loading development environment (Rails 8.0.2)", CONSOLE_RUN)
-sql(8100, null, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."email" = ? LIMIT ?  [["email", "…"], ["LIMIT", 1]]', 1.1, false, CONSOLE_RUN)
-sql(9450, null, "Order Count", 'SELECT COUNT(*) FROM "orders" WHERE "orders"."user_id" = ?  [["user_id", 4021]]', 3.4, false, CONSOLE_RUN)
-log(9500, null, "warn", "DEPRECATION WARNING: Rails.application.config_for called with a String", CONSOLE_RUN)
-sql(11_200, null, "Order Update", 'UPDATE "orders" SET "state" = ?, "updated_at" = ? WHERE "orders"."id" = ?', 2.2, false, CONSOLE_RUN)
+evaluationStart(8080, EVALUATIONS.lookup, 'user = User.find_by(email: "…")')
+sql(8100, EVALUATIONS.lookup, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."email" = ? LIMIT ?  [["email", "…"], ["LIMIT", 1]]', 1.1, false, CONSOLE_RUN)
+evaluationFinish(8110, EVALUATIONS.lookup, { outcome: "ok", db_runtime_ms: 1.1 })
+evaluationStart(9440, EVALUATIONS.count, "Order.where(user: user)\n  .count")
+sql(9450, EVALUATIONS.count, "Order Count", 'SELECT COUNT(*) FROM "orders" WHERE "orders"."user_id" = ?  [["user_id", 4021]]', 3.4, false, CONSOLE_RUN)
+log(9500, EVALUATIONS.count, "warn", "DEPRECATION WARNING: Rails.application.config_for called with a String", CONSOLE_RUN)
+evaluationFinish(9510, EVALUATIONS.count, { outcome: "ok", db_runtime_ms: 3.4 })
+evaluationStart(11_190, EVALUATIONS.update, 'user.orders.last.update!(state: "shipped")')
+sql(11_200, EVALUATIONS.update, "Order Update", 'UPDATE "orders" SET "state" = ?, "updated_at" = ? WHERE "orders"."id" = ?', 2.2, false, CONSOLE_RUN)
+evaluationFinish(11_230, EVALUATIONS.update, {
+  outcome: "raised",
+  class: "ActiveRecord::RecordInvalid",
+  message: "Validation failed: State is not included in the list",
+  db_runtime_ms: 2.2,
+})
 
 // ---- the file --------------------------------------------------------------
 
@@ -471,6 +746,26 @@ export const CLOCK_STEPPED_BACK = { requestId: I, path: "/api/v1/search?q=rails+
 
 /** The request that never reached a controller. */
 export const NEVER_ROUTED = { requestId: MISTYPED, path: "/api/v1/notifcations" }
+
+/** The request carrying the awkward params hash, and that hash before the wire tagged it. */
+export const AWKWARD_PARAMS = { requestId: E, path: "/api/v1/orders", params: ORDER_PARAMS }
+
+/** The requests whose Response events carry a JSON body, an XML body, and an HTML page's reason for none. */
+export const RESPONSES = { json: C, xml: SITEMAP, html: MISTYPED }
+
+/** A request for every reason a Response event has no body, by the path it was made to. */
+export const NO_BODY = {
+  html: { requestId: MISTYPED, path: "/api/v1/notifcations" },
+  pdf: { requestId: INVOICE, path: "/invoices/77213.pdf" },
+  png: { requestId: QR, path: "/qr/77213.png" },
+  streamed: { requestId: EXPORT, path: "/exports/orders.csv" },
+  encoded: { requestId: TIMELINE, path: "/api/v1/timeline" },
+  noContent: { requestId: G, path: "/api/v1/sessions/current" },
+  notModified: { requestId: AVATAR, path: "/api/v1/me/avatar" },
+  redirect: { requestId: SIGN_IN, path: "/sign_in" },
+  head: { requestId: UP, path: "/up" },
+  hijacked: { requestId: CABLE, path: "/cable" },
+}
 
 /** The request that starts, emits, and never finishes. */
 export const HANGS = { requestId: H, path: "/admin/reports/monthly.csv" }

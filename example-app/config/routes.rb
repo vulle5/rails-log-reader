@@ -22,6 +22,16 @@ Rails.application.routes.draw do
     get "flood"
     get "partial_request"
     get "trailing_event"
+    get "json"
+    get "xml"
+    get "big_json"
+    get "streamed_csv"
+    get "gzip_json"
+    get "pdf"
+    get "no_content"
+    get "conditional_get"
+    get "redirect"
+    get "hijack"
   end
 
   root "posts#index"

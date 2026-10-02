@@ -45,7 +45,7 @@ module RailsLogReader
   # including when a field a Reader could once count on becomes one it has to check for. The
   # Reader reads it to tell "the new file is loaded" from "the file on disk is new but the
   # process is not".
-  WIRE_VERSION = 3
+  WIRE_VERSION = 5
 
   SIDECAR = Rails.root.join("log/rails_log_reader.jsonl")
 
@@ -68,7 +68,8 @@ module RailsLogReader
 
   # Request-scoped handoff between the pieces below, which observe the same request on the
   # same thread but never share a method call: the middleware that opens it, and the
-  # subscribers that close it.
+  # subscribers that close it. `RailsLogReader.evaluation` sets `request_id` the same way, so
+  # `request_id` names whichever owns the events: a request or an *Evaluation*.
   #
   # Backed by `ActiveSupport::IsolatedExecutionState`, the same per-execution-context storage
   # `rails_log_reader_sql_starts` below already uses — which Rails does not clear at a request
@@ -102,16 +103,26 @@ module RailsLogReader
   # structurally impossible, because nothing downstream of here can run before this does.
   # 404s and every other non-controller response still pass through `call`, so they get a
   # request_start (and, eventually, a request_finish) the same as any routed request.
+  #
+  # The body it returns is the app's own, wrapped in a ResponseBody, which records the
+  # response when the server closes it. A disabled Initializer, or a wrap that raises, hands
+  # the body back as it came.
+  #
+  # The server's `rack.hijack` is wrapped too, so that an app taking the connection marks
+  # `env` as it does.
   class Middleware
+    HIJACKED = "rails_log_reader.hijacked"
+
     def initialize(app) = @app = app
 
     def call(env)
       RailsLogReader.guard { start_request(env) }
+      RailsLogReader.guard { notice_hijack(env) }
 
       status, headers, body = @app.call(env)
       RailsLogReader.guard { Current.status = status }
 
-      [status, headers, body]
+      [status, headers, wrap(env, status, headers, body)]
     end
 
     private
@@ -121,6 +132,175 @@ module RailsLogReader
         Current.started_at_mono = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
         RailsLogReader.emit("request_start", { method: request.request_method, path: request.path },
           request_id: Current.request_id)
+      end
+
+      def notice_hijack(env)
+        hijack = env["rack.hijack"]
+        return if RailsLogReader.disabled? || !hijack.respond_to?(:call)
+
+        env["rack.hijack"] = proc do |*args|
+          env[HIJACKED] = true
+          hijack.call(*args)
+        end
+      end
+
+      # The request id is taken from `env` here, because `Current` is reset by the time the
+      # body closes.
+      def wrap(env, status, headers, body)
+        return body if RailsLogReader.disabled?
+
+        RailsLogReader.guard do
+          ResponseBody.new(body, request_id: ActionDispatch::Request.new(env).request_id, status:, headers:,
+            head: env["REQUEST_METHOD"] == "HEAD", hijacked: env[HIJACKED] == true)
+        end || body
+      end
+  end
+
+  # A response body, passed to the server untouched and recorded as a `response` event when
+  # it closes: after the server has written it, or, for a body the server reads whole through
+  # `to_ary`, as `to_ary` returns. Either way that is after the `request_finish` the inner
+  # body's own close emits.
+  #
+  # Everything goes through to the inner body, and `respond_to?` answers as the inner body
+  # does, so the server writes the same bytes by the same path. `close` is the exception: it
+  # always answers, because it is where the event is written.
+  #
+  # A body is in memory when it answers `to_ary`. Only then are its chunks kept, by reference,
+  # as the server reads them. Nothing is read a second time, and nothing is teed from a
+  # stream. The headers are read at close from the Hash the server writes, so those set by
+  # middleware above this one are there too.
+  #
+  # A response without a kept body says why, the first of these that holds:
+  #
+  # - `hijacked`: the app took the connection, by `rack.hijack` or a `rack.hijack` header, and
+  #   wrote whatever followed itself, so no headers are recorded either.
+  # - `empty`: a HEAD request, a status that never has a body (1xx, 204, 304), a redirect, or
+  #   a body of no bytes.
+  # - `encoded`: a `content-encoding` other than `identity`.
+  # - `streamed`: a body that was never whole in memory, save a file that is not JSON or XML,
+  #   which would not have been kept either way.
+  # - `type`: anything but JSON or XML.
+  class ResponseBody
+    def initialize(body, request_id:, status:, headers:, head:, hijacked:)
+      @body = body
+      @request_id = request_id
+      @status = status
+      @headers = headers
+      @head = head
+      @hijacked = hijacked
+      @chunks = nil
+      @closed = false
+    end
+
+    # `each` and `to_ary` are defined below, so they would otherwise always answer.
+    def respond_to?(name, include_all = false)
+      %i[each to_ary].include?(name.to_sym) ? @body.respond_to?(name, include_all) : super
+    end
+
+    def respond_to_missing?(name, include_all = false) = @body.respond_to?(name, include_all)
+
+    def method_missing(name, ...) = @body.respond_to?(name) ? @body.__send__(name, ...) : super
+
+    def each(&block)
+      return @body.each(&block) unless block && @body.respond_to?(:to_ary)
+
+      @chunks = []
+      @body.each do |chunk|
+        @chunks << chunk
+        yield chunk
+      end
+    end
+
+    # Rack requires a body that answers both `to_ary` and `close` to close itself in `to_ary`.
+    def to_ary
+      @chunks = @body.to_ary
+    ensure
+      close
+    end
+
+    # Once, however many times the server or `to_ary` calls it.
+    def close
+      return if @closed
+
+      @closed = true
+      begin
+        @body.close if @body.respond_to?(:close)
+      ensure
+        RailsLogReader.guard { RailsLogReader.emit("response", payload, request_id: @request_id) }
+      end
+    end
+
+    private
+      def payload
+        if @hijacked || header("rack.hijack")
+          return { status: @status, headers: [], content_type: nil, no_body: { reason: "hijacked" } }
+        end
+
+        content_type = header("content-type")
+        fields = { status: @status, headers: header_pairs, content_type: }
+        size = body_size
+        fields[:size] = size if size
+
+        format = format_of(content_type)
+        no_body = no_body_for(format, content_type, size)
+        no_body ? fields.merge(no_body:) : fields.merge(format:, body: kept_text)
+      end
+
+      def no_body_for(format, content_type, size)
+        encoding = header("content-encoding")
+        in_memory = !@chunks.nil?
+
+        if @head || never_has_body? || redirect? || size == 0
+          { reason: "empty" }
+        elsif encoding && !encoding.to_s.casecmp?("identity")
+          { reason: "encoded", content_encoding: encoding.to_s }
+        elsif !in_memory && (format || !@body.respond_to?(:to_path))
+          { reason: "streamed" }
+        elsif !format
+          { reason: "type", content_type: }
+        end
+      end
+
+      def format_of(content_type)
+        media_type = content_type.to_s.split(";").first.to_s.strip.downcase
+        if media_type == "application/json" || media_type.end_with?("+json")
+          "json"
+        elsif %w[application/xml text/xml].include?(media_type) || media_type.end_with?("+xml")
+          "xml"
+        end
+      end
+
+      def never_has_body? = @status.to_i < 200 || [204, 304].include?(@status.to_i)
+
+      def redirect? = (300..399).cover?(@status.to_i) && header("location")
+
+      # BINARY, so chunks of different encodings join. `emit`'s scrub tags valid UTF-8 back.
+      def kept_text = @chunks.map { |chunk| chunk.to_s.b }.join
+
+      # A body read from memory is measured, and a file's size is read off the disk. Anything
+      # else has only its `content-length`.
+      def body_size
+        return @chunks.sum { |chunk| chunk.to_s.bytesize } if @chunks
+
+        length = header("content-length")
+        return Integer(length.to_s, exception: false) if length
+
+        File.size?(@body.to_path.to_s) if @body.respond_to?(:to_path)
+      end
+
+      # Rack 2 header names are not always lowercase.
+      def header(name)
+        @headers.each { |key, value| return value if key.to_s.casecmp?(name) }
+        nil
+      end
+
+      # One pair per header line, as a server writes them: each element of a Rack 3 Array
+      # value, and each line of a Rack 2 value joined by newlines.
+      def header_pairs
+        @headers.flat_map do |name, value|
+          values = value.is_a?(Array) ? value : (value.to_s.split("\n").presence || [""])
+          values.map { |line| [name.to_s, line.to_s] }
+        end
       end
   end
 
@@ -546,6 +726,8 @@ module RailsLogReader
       @disabled = true
     end
 
+    def disabled? = @disabled
+
     # The blanket rescue the Middleware and every subscriber below wrap themselves in: a bug
     # in our own instrumentation code — not the write itself, `emit` already guards that —
     # must never reach `iterate_guarding_exceptions` and take down the developer's request.
@@ -555,6 +737,40 @@ module RailsLogReader
       yield
     rescue StandardError
       nil
+    end
+
+    # One *Evaluation* the Reader's REPL runs, around the block that runs it: `evaluation_start`
+    # with its input, then `evaluation_finish` with how it ended and the DB time Rails counted
+    # on this thread meanwhile. What the block's thread emits in between carries `id` as its
+    # `request_id`, as a request's events carry the request's. A thread the block starts has no
+    # `request_id` of its own, so what it emits is unattributed. The block's result and what it
+    # printed are never written.
+    #
+    # The block's exception, `Interrupt` included, is recorded as `raised` and raised again.
+    # A disabled Initializer only yields.
+    def evaluation(id, input, sandbox:)
+      return yield if @disabled
+
+      guard do
+        Current.request_id = id
+        emit("evaluation_start", { input:, sandbox: }, request_id: id)
+      end
+      db_before = sql_runtime
+      raised = nil
+
+      begin
+        yield
+      rescue Exception => e
+        raised = e
+        raise
+      ensure
+        # Nested, so an `Interrupt` arriving while the finish is written still resets.
+        begin
+          guard { emit("evaluation_finish", evaluation_outcome(raised, db_before), request_id: id) }
+        ensure
+          Current.reset
+        end
+      end
     end
 
     # Runs once, at the bottom of this file.
@@ -612,14 +828,15 @@ module RailsLogReader
         ActiveSupport::Notifications.subscribe("request.action_dispatch", RequestFinishSubscriber.new)
 
         # `params` arrives already run through the app's own `filter_parameters` — Rails does
-        # that before this payload exists, not us. Fires only when a controller is entered, so
-        # its *absence* is how the Reader tells a routing failure apart from an ordinary 404
-        # the app rendered on purpose.
+        # that before this payload exists, not us — and goes out as `tagged_pairs`, in the
+        # app's key order. Fires only when a controller is entered, so its *absence* is how
+        # the Reader tells a routing failure apart from an ordinary 404 the app rendered on
+        # purpose.
         ActiveSupport::Notifications.subscribe("start_processing.action_controller") do |*, payload|
           guard do
             emit("request_route", {
               controller: payload[:controller], action: payload[:action],
-              format: payload[:format]&.to_s, params: payload[:params]
+              format: payload[:format]&.to_s, params: tagged_pairs(payload[:params])
             }, request_id: Current.request_id)
           end
         end
@@ -693,6 +910,30 @@ module RailsLogReader
         @disabled = true
         Rails.logger.warn("[rails_log_reader] disabled: #{e.class}: #{e.message}")
       end
+
+      # `evaluation_finish`'s payload: how the evaluation ended, and the SQL time counted since
+      # `db_before`, left off when either reading failed.
+      def evaluation_outcome(raised, db_before)
+        outcome =
+          if raised
+            { outcome: "raised", class: raised.class.name || raised.class.inspect, message: raised.message.to_s }
+          else
+            { outcome: "ok" }
+          end
+        db_after = sql_runtime
+        outcome[:db_runtime_ms] = db_after - db_before if db_before && db_after
+        outcome
+      end
+
+      # The milliseconds of SQL Active Record has counted on this thread. Rails 8.1 keeps them
+      # under `stats`, and 7.1 to 8.0 on the registry itself.
+      def sql_runtime
+        guard do
+          registry = ActiveRecord::RuntimeRegistry
+          registry.respond_to?(:stats) ? registry.stats.sql_runtime : registry.sql_runtime
+        end
+      end
+
       # A Run's identity is memoised with the pid it was derived under and re-derived when
       # that changes. The Initializer loads before a clustered Puma forks, so every worker
       # would otherwise inherit one run_id while keeping its own seq counter — two genuinely
@@ -744,6 +985,22 @@ module RailsLogReader
       def booted_by_a_rack_server?
         caller_locations.any? { |location| location.path.end_with?("config.ru") }
       end
+
+      # Every Hash, at every level, as `{ pairs: [[key, value], …] }` in its own order. The
+      # tag is what tells a Hash from an Array of two-element Arrays, such as `a[][]=x`'s.
+      # Arrays stay Arrays and everything else is left as it is.
+      def tagged_pairs(value)
+        case value
+        when Hash then { pairs: value.map { |key, nested| [key.to_s, tagged_pairs(nested)] } }
+        when Array then value.map { |element| tagged_pairs(element) }
+        else value
+        end
+      end
+
+      # The one shape `tagged_pairs` writes: a Hash whose only key is the Symbol `pairs`,
+      # holding an Array. A HashWithIndifferentAccess keeps its keys as Strings, so an app's
+      # own `pairs` key never matches.
+      def tagged_hash?(value) = value.keys == [:pairs] && value[:pairs].is_a?(Array)
 
       # A field whose whole weight is under the cap cannot contain a string over it, so the
       # ordinary event is one walk and no allocation. Only an oversized field is walked twice
@@ -873,7 +1130,8 @@ module RailsLogReader
       # elements from its tail, its least-informative end, which for a backtrace is the
       # framework frames farthest from where it actually broke. A Hash
       # never loses a key: a `params` hash missing one would be a lie about what the request
-      # carried, so its values are shrunk instead, evenly, and no key goes unaccounted for.
+      # carried, so its values are shrunk instead, evenly, and no key goes unaccounted for. A
+      # tagged Hash is a Hash here too, never the Array its pairs sit in.
       #
       # `respect_kept_whole` is true everywhere except the line cap, which is allowed to
       # touch a backtrace that the field cap above must leave alone.
@@ -884,7 +1142,12 @@ module RailsLogReader
         case value
         when String then cut_string(value, budget)
         when Array then shrink_array(field, value, budget, respect_kept_whole:)
-        when Hash then shrink_hash(value, budget, respect_kept_whole:)
+        when Hash
+          if tagged_hash?(value)
+            shrink_pairs(value, budget, respect_kept_whole:)
+          else
+            shrink_hash(value, budget, respect_kept_whole:)
+          end
         else value
         end
       end
@@ -920,6 +1183,16 @@ module RailsLogReader
 
         per_key = budget / hash.size
         hash.to_h { |key, value| [key, shrink_to_fit(key, value, per_key, respect_kept_whole:)] }
+      end
+
+      # `shrink_hash` for a tagged Hash: each pair keeps its key and its place, and its value
+      # gets an even share of the budget, less the key's own bytes.
+      def shrink_pairs(tagged, budget, respect_kept_whole:)
+        pairs = tagged[:pairs]
+        return tagged if pairs.empty?
+
+        per_pair = budget / pairs.size
+        { pairs: pairs.map { |key, value| [key, shrink_to_fit(key, value, per_pair - key.bytesize, respect_kept_whole:)] } }
       end
 
       # `scrub` because the cut can land in the middle of a multibyte character, and a line

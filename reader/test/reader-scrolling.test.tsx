@@ -7,7 +7,22 @@ import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
 import type { Envelope } from "../src/shared/wire"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { Reader } from "../src/ui/Reader"
-import { aFold, chip, collapseConsole, column, expandConsole, itemsOf, lit, rowShowing, search, select, tab, timeline } from "./reader.harness"
+import {
+  aFold,
+  chip,
+  collapseConsole,
+  column,
+  detailPanel,
+  expandConsole,
+  itemsOf,
+  lit,
+  rowShowing,
+  search,
+  select,
+  showDetailTab,
+  tab,
+  timeline,
+} from "./reader.harness"
 
 /**
  * The three *auto-scrolls*, through the columns that own them. `auto-scroll.test.ts` has the
@@ -17,9 +32,9 @@ import { aFold, chip, collapseConsole, column, expandConsole, itemsOf, lit, rowS
  *
  * happy-dom does no layout, so the layout is supplied: every row is `ROW` pixels tall, every
  * column is `PORT` pixels of scrollport, and `scrollTop` clamps to the range a browser would
- * clamp it to. That is the whole of what the DOM contributes to this feature — a scrollport
- * reports where it is, and the rule reads it — so faking it is faking the input, not the
- * answer.
+ * clamp it to, as it is set and as the port's height changes under it. That is the whole of
+ * what the DOM contributes to this feature — a scrollport reports where it is, and the rule
+ * reads it — so faking it is faking the input, not the answer.
  */
 
 /** Tall enough that a handful of rows overflows it, so a test can scroll at all. */
@@ -34,7 +49,34 @@ const geometry = {
 
 const scrolledTo = new WeakMap<Element, number>()
 
+/**
+ * Every `ResizeObserver` the Reader stands up, with what it observes. A DOM with no layout has
+ * no height to change, so a test changes one by hand and tells the observers watching that
+ * element, the way a browser would after laying it out again.
+ */
+type Observing = { callback: () => void; elements: Set<Element> }
+
+const observers: Observing[] = []
+const realObserver = globalThis.ResizeObserver
+
 beforeAll(() => {
+  globalThis.ResizeObserver = class {
+    private readonly observing: Observing
+    constructor(callback: () => void) {
+      this.observing = { callback, elements: new Set() }
+      observers.push(this.observing)
+    }
+    observe(element: Element) {
+      this.observing.elements.add(element)
+    }
+    unobserve(element: Element) {
+      this.observing.elements.delete(element)
+    }
+    disconnect() {
+      this.observing.elements.clear()
+    }
+  } as unknown as typeof ResizeObserver
+
   // A row is a Console line, a table row or a timeline entry — every one of them an `li` or
   // a `tr`, which is what makes one measure enough for all three columns.
   Object.defineProperty(Element.prototype, "scrollHeight", {
@@ -47,7 +89,7 @@ beforeAll(() => {
   Object.defineProperty(Element.prototype, "scrollTop", {
     configurable: true,
     get(this: Element) {
-      return scrolledTo.get(this) ?? 0
+      return Math.min(scrolledTo.get(this) ?? 0, bottomOf(this))
     },
     set(this: Element, top: number) {
       scrolledTo.set(this, Math.min(Math.max(top, 0), bottomOf(this)))
@@ -56,6 +98,7 @@ beforeAll(() => {
 })
 
 afterAll(() => {
+  globalThis.ResizeObserver = realObserver
   Object.defineProperty(Element.prototype, "scrollHeight", geometry.scrollHeight!)
   Object.defineProperty(HTMLElement.prototype, "clientHeight", geometry.clientHeight!)
   Object.defineProperty(Element.prototype, "scrollTop", geometry.scrollTop!)
@@ -63,6 +106,7 @@ afterAll(() => {
 
 afterEach(() => {
   localStorage.clear()
+  observers.length = 0
 })
 
 /** How far down a scrollport goes: what "the bottom" means, and what a browser clamps to. */
@@ -128,9 +172,11 @@ function openTheReader(...envelopes: Envelope[]) {
 type ColumnName = "Console" | "Activity table" | "Detail column"
 
 /**
- * A column's scrollport. It has no role of its own — it is the column's body — so it is found
- * as what directly holds what the column lists: the Console's lines, the Activity table's
- * grid, the Detail column's selection or its placeholder.
+ * A column's scrollport. It has no role of its own — it is the column's body, or in the Detail
+ * column the Timeline tab's own panel — so it is found as what directly holds what the column
+ * lists: the Console's lines, the Activity table's grid, the Detail column's timeline or its
+ * placeholder. The timeline is found whether or not its tab is the one showing, since its
+ * scrollport carries on following behind another tab.
  */
 function scrollport(name: ColumnName) {
   const region = within(column(name))
@@ -139,7 +185,7 @@ function scrollport(name: ColumnName) {
       ? region.getByRole("list")
       : name === "Activity table"
         ? region.getByRole("grid")
-        : (region.queryByRole("article") ?? region.getByText(/Nothing selected/))
+        : (region.queryByRole("list", { name: "Timeline", hidden: true }) ?? region.getByText(/Nothing selected/))
   return content.parentElement!
 }
 
@@ -161,6 +207,16 @@ function scrollUp(name: ColumnName, up = ROW) {
   const port = scrollport(name)
   port.scrollTop = bottomOf(port) - up
   fireEvent.scroll(port)
+}
+
+/**
+ * The column's scrollport is `height` pixels tall now, as the REPL drawer opening, its edge
+ * dragged or the window resizing leaves it, and the observers watching it are told.
+ */
+function resized(name: ColumnName, height: number) {
+  const port = scrollport(name)
+  Object.defineProperty(port, "clientHeight", { configurable: true, value: height })
+  for (const { callback, elements } of observers) if (elements.has(port)) callback()
 }
 
 function scrollBackToTheBottom(name: ColumnName) {
@@ -224,6 +280,65 @@ describe("a following column", () => {
     expect(console.scrollTop).toBeGreaterThan(wasAt)
     expect(pinnedToBottom("Console")).toBe(true)
     expect(pinnedToBottom("Activity table")).toBe(true)
+  })
+})
+
+describe("a column whose height changes", () => {
+  for (const name of COLUMNS) {
+    test(`stays on the bottom of the ${name} as it gets shorter`, async () => {
+      const { user } = openTheReader(...HISTORY)
+      await select(user, "/reports/monthly.csv")
+
+      resized(name, PORT - 2 * ROW)
+
+      expect(pinnedToBottom(name)).toBe(true)
+    })
+
+    test(`stays on the bottom of the ${name} as it gets taller`, async () => {
+      const { user } = openTheReader(...HISTORY)
+      await select(user, "/reports/monthly.csv")
+
+      resized(name, PORT + 2 * ROW)
+
+      expect(pinnedToBottom(name)).toBe(true)
+    })
+  }
+
+  test("is not paused by a scroll that lands before its observers are told", async () => {
+    const { arrive } = openTheReader(...HISTORY)
+    const port = scrollport("Console")
+
+    // A drag on the drawer's edge can shorten the port between its last pin and the scroll
+    // event that pin queued. user-event has no scroll gesture.
+    Object.defineProperty(port, "clientHeight", { configurable: true, value: PORT - 2 * ROW })
+    fireEvent.scroll(port)
+    arrive(run.log(null, "job one"))
+
+    expect(pinnedToBottom("Console")).toBe(true)
+    expect(pill("Console")).not.toBeInTheDocument()
+  })
+
+  test("leaves a paused column where it was scrolled to, and its count as it was", async () => {
+    const { arrive } = openTheReader(...HISTORY)
+    scrollUp("Console", 2 * ROW)
+    arrive(run.log(null, "job one"))
+    const wasAt = scrollport("Console").scrollTop
+
+    resized("Console", PORT - 2 * ROW)
+    resized("Console", PORT + 2 * ROW)
+
+    expect(scrollport("Console").scrollTop).toBe(wasAt)
+    expect(pill("Console")).toHaveTextContent("1 new")
+  })
+
+  test("follows a Console that comes back from a fold, on the port it comes back with", async () => {
+    const { user } = openTheReader(...HISTORY)
+    await collapseConsole(user)
+    await expandConsole(user)
+
+    resized("Console", PORT - 2 * ROW)
+
+    expect(pinnedToBottom("Console")).toBe(true)
   })
 })
 
@@ -556,6 +671,79 @@ describe("the Detail column", () => {
 
     expect(pinnedToBottom("Console")).toBe(false)
     expect(pinnedToBottom("Activity table")).toBe(true)
+  })
+})
+
+/**
+ * Each *Detail tab* is a scrollport of its own, so each keeps its own position: Params opens
+ * at its top, and the Timeline carries on where it was, following or paused, behind it.
+ */
+describe("the Detail tabs", () => {
+  /** A request whose params overflow the Params panel, twelve keys to its three rows. */
+  function withParams(id: string, path: string): Envelope[] {
+    const params = Object.fromEntries(Array.from({ length: 12 }, (_, at) => [`field_${at}`, `value ${at}`]))
+    const queries = Array.from({ length: 4 }, () => run.sql(id))
+    return [run.start(id, "POST", path), run.route(id, "FormsController", "create", params), ...queries, run.finish(id)]
+  }
+
+  /** Scrolls the Params panel, the way `scrollUp` scrolls a column: set, then announced. */
+  function scrollParamsTo(top: number) {
+    const port = detailPanel("Params")
+    port.scrollTop = top
+    fireEvent.scroll(port)
+  }
+
+  test("opens Params at its top, and brings Timeline back where it was left", async () => {
+    const { user } = openTheReader(...HISTORY, ...withParams("p1", "/forms/1"))
+    await select(user, "/forms/1")
+    scrollUp("Detail column")
+    const timelineAt = scrollport("Detail column").scrollTop
+
+    await showDetailTab(user, "Params")
+    expect(detailPanel("Params").scrollTop).toBe(0)
+
+    await showDetailTab(user, "Timeline")
+    expect(scrollport("Detail column").scrollTop).toBe(timelineAt)
+    expect(pinnedToBottom("Detail column")).toBe(false)
+  })
+
+  test("keeps Params where it was left across a trip to Timeline", async () => {
+    const { user } = openTheReader(...HISTORY, ...withParams("p1", "/forms/1"))
+    await select(user, "/forms/1")
+    await showDetailTab(user, "Params")
+    scrollParamsTo(2 * ROW)
+
+    await showDetailTab(user, "Timeline")
+    await showDetailTab(user, "Params")
+
+    expect(detailPanel("Params").scrollTop).toBe(2 * ROW)
+  })
+
+  test("opens the next Selection's Params at its top, and pins its Timeline to the bottom", async () => {
+    const { user } = openTheReader(...HISTORY, ...withParams("p1", "/forms/1"), ...withParams("p2", "/forms/2"))
+    await select(user, "/forms/1")
+    scrollUp("Detail column")
+    await showDetailTab(user, "Params")
+    scrollParamsTo(2 * ROW)
+
+    await select(user, "/forms/2")
+
+    expect(detailPanel("Params").scrollTop).toBe(0)
+    await showDetailTab(user, "Timeline")
+    expect(pinnedToBottom("Detail column")).toBe(true)
+  })
+
+  test("scrolling Params never pauses the Timeline's auto-scroll", async () => {
+    const { user, arrive } = openTheReader(...HISTORY)
+    await select(user, "/reports/monthly.csv")
+    await showDetailTab(user, "Params")
+    scrollParamsTo(2 * ROW)
+
+    arrive(run.log(HANGS, "still aggregating"))
+    await showDetailTab(user, "Timeline")
+
+    expect(pinnedToBottom("Detail column")).toBe(true)
+    expect(pill("Detail column")).not.toBeInTheDocument()
   })
 })
 

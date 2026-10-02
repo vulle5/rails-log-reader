@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
-import type { ActivityRow } from "../shared/activity"
+import type { ActivityRow, EvictedEvaluations } from "../shared/activity"
 import type { ConsoleLine } from "../shared/console"
 import type { EmptyState, Mismatch } from "../shared/initializer-status"
 import { WIRE_VERSION } from "../shared/wire"
@@ -9,7 +9,7 @@ import { ActivityTable, rowSelector } from "./features/activity-table/components
 import { Column, scrollportSelector } from "./components/Column"
 import { ColumnDivider } from "./components/ColumnDivider"
 import { useAutoScroll } from "./hooks/auto-scroll"
-import { useColumnWidths } from "./hooks/column-widths"
+import { COLLAPSED, useColumnWidths } from "./hooks/column-widths"
 import {
   ConsoleFilters,
   consoleFilterKey,
@@ -19,8 +19,14 @@ import {
 import { CollapseConsoleButton, CollapsedConsole, useUnseenCount } from "./features/console/components/ConsoleFold"
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
+import type { DetailTabId } from "./features/detail-column/components/DetailTabs"
 import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
+import { ReplDrawer } from "./features/repl/components/ReplDrawer"
+import { FOLDED, useReplDrawer } from "./features/repl/hooks/repl-drawer"
+import { DETACHED_REPL, type ReplHandle } from "./features/repl/hooks/repl-session"
+import { entryRows } from "../shared/repl"
+import type { Reveal } from "./features/repl/hooks/transcript-scroll"
 import { HoverGrouping } from "./HoverGrouping"
 import { InitializerBanner, UnsupportedWireScreen } from "./features/setup-status/components/InitializerMismatch"
 import type { RepairState } from "./features/setup-status/lib/initializer-repair"
@@ -31,14 +37,16 @@ import { TableColumnSelect, useHiddenTableColumns } from "./features/activity-ta
 import { Setting, Settings, type SettingsHandle } from "./features/settings/components/Settings"
 import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
+import { COMPLETION_TRIGGER, CompletionTriggerSwitch, useCompletionTrigger } from "./hooks/completion-trigger"
+import { HISTORY_SUGGESTION, HistorySuggestionSwitch, useHistorySuggestion } from "./hooks/history-suggestion"
 import { EDITOR_SCHEME, EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
 /**
- * The Reader's three persistent columns. All three are present from the first paint and
- * are sized by the grid rather than by their contents, so filling one never reflows the
- * others — including the Detail column, which holds a placeholder until something is
- * selected rather than appearing when it is.
+ * The Reader's three persistent columns, and the *REPL* drawer under the first two. All of
+ * them are present from the first paint and are sized by the grid rather than by their
+ * contents, so filling one never reflows the others — including the Detail column, which holds
+ * a placeholder until something is selected rather than appearing when it is.
  *
  * The Activity table is present with no rows in it rather than absent until there are some,
  * for the same reason: the first request of the session must not be the thing that
@@ -71,6 +79,8 @@ type ReaderProps = {
    * Console's auto-scrolls, and to neither of the other two — see `AutoScrollOptions.evicted`.
    */
   evictedRows?: number
+  /** The *Evaluation rows* the *Memory bound* has taken, as `ActivityTable.evictedEvaluations`. */
+  evictedEvaluations?: EvictedEvaluations
   /** File-on-disk vs. process-still-running, from `detectMismatch`. */
   mismatch?: Mismatch
   /** `v` off the most recently observed envelope, whichever process wrote it. */
@@ -78,6 +88,12 @@ type ReaderProps = {
   repairState?: RepairState
   onRepair?: () => void
   onDismissRepair?: () => void
+  /**
+   * Where the Reader's acts can be made from, when this page is not there: `localhost:<port>`
+   * on a page opened through a listed host, which the Reader serves views and nothing else.
+   * `null` when this page may act.
+   */
+  actsOnlyFrom?: string | null
   /** Whether there is anything before the history the fold holds, and whether it is coming. */
   earlier?: EarlierState
   onLoadEarlier?: () => void
@@ -97,23 +113,30 @@ type ReaderProps = {
    * has been observed, which `isHostFrame` reads as "never guessed".
    */
   railsRoot?: string | null
+  /** The *REPL* session, from `useReplSession`: what it holds, and what can be asked of it. */
+  repl?: ReplHandle
 }
+
+const NONE_EVICTED: EvictedEvaluations = new Map()
 
 export function Reader({
   rows = [],
   lines = [],
   evictedRows = 0,
+  evictedEvaluations = NONE_EVICTED,
   mismatch = { kind: "none" },
   liveWireVersion = null,
   repairState = { phase: "idle" },
   onRepair = () => {},
   onDismissRepair = () => {},
+  actsOnlyFrom = null,
   earlier = { available: false, loading: false },
   onLoadEarlier = () => {},
   historyLoaded = true,
   emptyState = null,
   appName = null,
   railsRoot = null,
+  repl = DETACHED_REPL,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -128,6 +151,8 @@ export function Reader({
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
   const { filter: detailFilter, toggleSchema } = useDetailFilter()
+  // Above Selection, so clicking through requests on Params compares their params.
+  const [detailTab, setDetailTab] = useState<DetailTabId>("timeline")
   const tableColumns = useHiddenTableColumns()
 
   // The search is here for the reason the filters are, and is the one thing here that is not
@@ -139,6 +164,8 @@ export function Reader({
   // below returns before the bar exists, and the theme still has to follow the OS behind it.
   const theme = useTheme()
   const editorScheme = useEditorScheme()
+  const completionTrigger = useCompletionTrigger()
+  const historySuggestion = useHistorySuggestion()
   const settings = useRef<SettingsHandle>(null)
   const editor = useMemo(
     () => ({ scheme: editorScheme.scheme, requestScheme: () => settings.current?.open(EDITOR_SCHEME) }),
@@ -210,6 +237,11 @@ export function Reader({
   const reader = useRef<HTMLDivElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
   const widths = useColumnWidths(viewport)
+  const drawer = useReplDrawer(viewport)
+  // The Transcript entry Show in REPL asked for, until the drawer it unfolds has scrolled to it.
+  const [reveal, setReveal] = useState<Reveal | null>(null)
+  const revealed = useCallback(() => setReveal(null), [])
+  const transcriptRows = useMemo(() => entryRows(repl.snapshot, rows, evictedEvaluations), [repl.snapshot, rows, evictedEvaluations])
   const unseen = useUnseenCount(lines, showingLines, widths.console.collapsed && historyLoaded)
 
   // After the auto-scrolls above, and deliberately: the same click can clear a tab filter,
@@ -240,6 +272,22 @@ export function Reader({
     setJumpTo({ row: line.owner })
   }
 
+  /**
+   * A *Transcript* entry's link to its *Evaluation row*: selects the row on `tab`, and takes you
+   * to it, showing All first when the row-kind tab showing hides it, as a Console click does.
+   */
+  function showRow(row: ActivityRow, tab: DetailTabId) {
+    selectRow(row.id)
+    setDetailTab(tab)
+    if (!showsRow(showingKind, row)) setShowingKind("all")
+    setJumpTo({ row: row.id })
+  }
+
+  function showInRepl(entry: number) {
+    drawer.unfold()
+    setReveal({ entry })
+  }
+
   /** Clicking a row says nothing about the Console, so it takes the pin down rather than moving it. */
   function selectRow(id: string) {
     setSelected(id)
@@ -257,6 +305,7 @@ export function Reader({
         understoodVersion={WIRE_VERSION}
         repairState={repairState}
         onRepair={onRepair}
+        actsOnlyFrom={actsOnlyFrom}
       />
     )
   }
@@ -271,6 +320,7 @@ export function Reader({
         repairState={repairState}
         onRepair={onRepair}
         onDismiss={onDismissRepair}
+        actsOnlyFrom={actsOnlyFrom}
       />
       {/* Above the three columns rather than in any one of them, because neither belongs to
           one: a term lights every column at once, and a theme paints them. Present from the
@@ -300,26 +350,47 @@ export function Reader({
             >
               <EditorSchemeField scheme={editorScheme.scheme} onChoose={editorScheme.choose} />
             </Setting>
+            <Setting
+              label={COMPLETION_TRIGGER}
+              description="What opens the REPL's list of completions: Tab, or every word as it is typed."
+            >
+              <CompletionTriggerSwitch trigger={completionTrigger.trigger} onChoose={completionTrigger.choose} />
+            </Setting>
+            <Setting
+              label={HISTORY_SUGGESTION}
+              description="Grey text after the REPL's caret offering the newest earlier input that starts with what is typed. → or End takes it. The completion list's chosen candidate is previewed the same way whatever this is set to."
+            >
+              <HistorySuggestionSwitch on={historySuggestion.on} onChoose={historySuggestion.choose} />
+            </Setting>
           </Settings>
         </div>
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The width the columns and their gaps share, and the backdrop the columns float
-              on. A window too narrow for the grid's `minWidth` scrolls the grid sideways in here
-              rather than drawing a column under its minimum. */}
-          <div className="min-h-0 flex-auto overflow-x-auto overflow-y-hidden bg-sunken" ref={viewport}>
+          {/* The size the columns, the drawer and their gaps share, and the backdrop they float
+              on. A window too small for the grid's `minWidth` or `minHeight` scrolls the grid in
+              here rather than drawing a column or the drawer under its minimum. */}
+          <div className="min-h-0 flex-auto overflow-auto bg-sunken" ref={viewport}>
             {/* The outer two column tracks are the widths the Column dividers set, or the
                 Collapsed Console's strip in place of the Console's, so a column that fills
                 scrolls inside its own track and never widens, narrows or displaces its neighbours;
                 the Activity table takes the rest. Between each two is a divider's track, and
-                `p-1` is the gap around all three — the `GAP`s the widths are fitted around. The
-                row's minimum is pinned to 0 (`grid-rows-1`) because an `auto` row grows to the
-                tallest column and never shrinks to fit, which would hand the scroll to the window
-                instead of to each column. Relative, for Hover grouping's overlay. */}
+                `p-1` is the gap around all three — the `GAP`s the widths are fitted around.
+
+                The rows are the columns', the REPL drawer's top edge, and the drawer, which spans
+                the Console's and the Activity table's tracks while the Detail column and its
+                divider span all three rows. The columns' row has its minimum pinned to 0 because
+                an `auto` row grows to the tallest column and never shrinks to fit, which would
+                hand the scroll to the window instead of to each column. Relative, for Hover
+                grouping's overlay. */}
             <div
-              className="relative grid h-full grid-rows-1 overflow-hidden p-1"
-              style={{ gridTemplateColumns: widths.template, minWidth: `${widths.minWidth}px` }}
+              className="relative grid h-full overflow-hidden p-1"
+              style={{
+                gridTemplateColumns: widths.template,
+                gridTemplateRows: drawer.template,
+                minWidth: `${widths.minWidth}px`,
+                minHeight: `${drawer.minHeight}px`,
+              }}
               ref={reader}
             >
               {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
@@ -347,7 +418,18 @@ export function Reader({
                 </Column>
               )}
               {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
-              <ColumnDivider name="Console" edge="right" column={widths.console} folds={widths.console} />
+              <ColumnDivider
+                name="Console"
+                edge="right"
+                size={widths.console.width}
+                column={widths.console}
+                folds={{
+                  folded: widths.console.collapsed,
+                  fold: widths.console.collapse,
+                  unfold: widths.console.expand,
+                  foldedSize: COLLAPSED,
+                }}
+              />
               <Column
                 place="activity"
                 name="Activity table"
@@ -373,15 +455,57 @@ export function Reader({
                     rows — not that a tab is showing none of the ones it holds. */}
                 {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
               </Column>
-              <ColumnDivider name="Detail column" edge="left" column={widths.detail} />
+              <ColumnDivider
+                name="Detail column"
+                edge="left"
+                size={widths.detail.width}
+                column={widths.detail}
+                className="row-span-3"
+              />
               <Column
                 place="detail"
                 name="Detail column"
                 scroll={detailScroll}
+                bodyScrolls={false}
+                className="row-span-3"
                 controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
               >
-                <DetailColumn row={showing} filter={detailFilter} railsRoot={railsRoot} />
+                <DetailColumn
+                  row={showing}
+                  filter={detailFilter}
+                  railsRoot={railsRoot}
+                  tab={detailTab}
+                  onTab={setDetailTab}
+                  scroll={detailScroll}
+                  repl={repl}
+                  actsOnlyFrom={actsOnlyFrom}
+                  onShowInRepl={showInRepl}
+                />
               </Column>
+              {/* Outside the drawer, so a drag that folds it carries on over its header. */}
+              <ColumnDivider
+                name="REPL"
+                edge="top"
+                size={drawer.height}
+                column={drawer}
+                folds={{ ...drawer, foldedSize: FOLDED }}
+                className="col-span-3 row-start-2"
+              />
+              <ReplDrawer
+                folded={drawer.folded}
+                onFold={drawer.fold}
+                onUnfold={drawer.unfold}
+                repl={repl}
+                railsRoot={railsRoot}
+                actsOnlyFrom={actsOnlyFrom}
+                completionTrigger={completionTrigger.trigger}
+                historySuggestion={historySuggestion.on}
+                reveal={reveal}
+                onRevealed={revealed}
+                entryRows={transcriptRows}
+                onShowRow={showRow}
+                className="col-span-3 row-start-3"
+              />
               {/* Over all three, because the rule belongs to none of them: it leaves the Console's
                   gutter and lands on a row in the table beside it. `layoutKey` is everything that
                   could have moved an end without changing which two ends they are. */}
@@ -389,7 +513,7 @@ export function Reader({
                 reader={reader}
                 line={drawnFrom?.id ?? null}
                 row={drawnFrom?.owner ?? null}
-                layoutKey={`${widths.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
+                layoutKey={`${widths.template} ${drawer.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
               />
             </div>
           </div>

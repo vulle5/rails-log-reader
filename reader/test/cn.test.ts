@@ -36,6 +36,7 @@ describe("cn", () => {
     ["rounded-chip", "rounded"],
     ["rounded", "rounded-chip"],
     ["shadow-interrupted", "shadow-pinned-row"],
+    ["shadow-pinned", "shadow-failed"],
     ["bg-raised", "bg-transparent"],
     ["py-0.75", "py-2"],
   ])("lets %s give way to a later %s", (first, second) => {

@@ -17,11 +17,13 @@ export function InitializerBanner({
   repairState,
   onRepair,
   onDismiss,
+  actsOnlyFrom,
 }: {
   mismatch: Mismatch
   repairState: RepairState
   onRepair: () => void
   onDismiss: () => void
+  actsOnlyFrom: string | null
 }) {
   // A confirmed repair is shown until dismissed even once the mismatch it was fixing has
   // resolved — which, the moment a fresh `run_id` arrives, it always has. Vanishing silently
@@ -46,7 +48,7 @@ export function InitializerBanner({
   return (
     <Banner className="bg-warn/14 text-warn" role="alert">
       <p>{MISMATCH_MESSAGE[mismatch.kind]}</p>
-      <RepairControl state={repairState} onRepair={onRepair} place="banner" />
+      <RepairControl state={repairState} onRepair={onRepair} actsOnlyFrom={actsOnlyFrom} place="banner" />
     </Banner>
   )
 }
@@ -85,11 +87,13 @@ export function UnsupportedWireScreen({
   understoodVersion,
   repairState,
   onRepair,
+  actsOnlyFrom,
 }: {
   liveWireVersion: number
   understoodVersion: number
   repairState: RepairState
   onRepair: () => void
+  actsOnlyFrom: string | null
 }) {
   return (
     // A readable measure. The top padding is a fifth of the width, as a percentage padding always is.
@@ -103,7 +107,7 @@ export function UnsupportedWireScreen({
         Pull a newer Reader, or repair the Host app's copy back to this Reader's own — either fixes
         the mismatch.
       </p>
-      <RepairControl state={repairState} onRepair={onRepair} place="screen" />
+      <RepairControl state={repairState} onRepair={onRepair} actsOnlyFrom={actsOnlyFrom} place="screen" />
     </div>
   )
 }
@@ -111,16 +115,25 @@ export function UnsupportedWireScreen({
 /**
  * What it says is coloured by where it sits: in the banner, a failed repair alone turns to the
  * error colour; on the refusal screen, everything stays as muted as the text around it.
+ *
+ * A page that may not act offers no button, since the Reader would refuse its click, and
+ * names where the repair can be made instead.
  */
 function RepairControl({
   state,
   onRepair,
+  actsOnlyFrom,
   place,
 }: {
   state: RepairState
   onRepair: () => void
+  actsOnlyFrom: string | null
   place: "banner" | "screen"
 }) {
+  if (actsOnlyFrom !== null) {
+    return <p className={cn(place === "screen" && "text-muted")}>Repairing needs {actsOnlyFrom}</p>
+  }
+
   switch (state.phase) {
     case "idle":
     // A fresh mismatch arriving after a confirmed restart is `restarted` with somewhere new

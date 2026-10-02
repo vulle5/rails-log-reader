@@ -49,4 +49,22 @@ describe("the Reader's stylesheet", () => {
       expect(light).toContain(property)
     }
   })
+
+  test("tints a selection with a colour of its own in both themes, not the chosen row's", async () => {
+    const css = await compiledFor(["selection:bg-selection"])
+    const light = declarationsOf(css, ":root, :host")
+    const dark = declarationsOf(css, '[data-theme="dark"]')
+
+    expect(css).toMatch(/\.selection\\:bg-selection\s*\{/)
+    expect(css).toContain("var(--color-selection)")
+    expect(light).toContain("--color-selection")
+    expect(dark).toContain("--color-selection")
+  })
+
+  test("shows the hint row's extra wording only in a container wide enough for the whole row", async () => {
+    const css = await compiledFor(["hidden", "@min-[44rem]:inline", "@container"])
+
+    expect(css).toMatch(/@container\s*\(width >= 44rem\)/)
+    expect(css).toMatch(/\.\\@min-\\\[44rem\\\]\\:inline/)
+  })
 })

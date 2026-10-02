@@ -37,7 +37,7 @@ class TrailingTest < ActiveSupport::TestCase
     assert run.booted?, run.output
     finish = run.events_of("request_finish").sole
 
-    after = run.events.select { |event| event["seq"] > finish["seq"] && event["type"] != "run_end" }
-    assert_empty after, "nothing but the Run's own end should have been emitted after this request's finish"
+    after = run.events.select { |event| event["seq"] > finish["seq"] && %w[run_end response].exclude?(event["type"]) }
+    assert_empty after, "nothing but the request's response and the Run's own end should follow its finish"
   end
 end

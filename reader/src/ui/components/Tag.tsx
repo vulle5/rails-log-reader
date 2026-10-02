@@ -1,8 +1,8 @@
 import type { ReactNode } from "react"
 
 /**
- * A mark set into a log line beside its message: one of the app's own `log_tags`, or the
- * Console's `rails` on a line Rails wrote.
+ * A mark set beside what it qualifies: one of the app's own `log_tags` or the Console's `rails`
+ * beside a log line's message, or the REPL's `sandbox` beside its status.
  */
 export function Tag({ title, children }: { title?: string; children: ReactNode }) {
   return (

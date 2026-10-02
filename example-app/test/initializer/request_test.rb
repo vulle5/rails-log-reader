@@ -37,10 +37,24 @@ class RequestTest < ActiveSupport::TestCase
     run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts", params: { password: "hunter2" }))
 
     assert run.booted?, run.output
-    params = run.events_of("request_route").sole["payload"]["params"]
+    params = run.events_of("request_route").sole["payload"]["params"]["pairs"].to_h
 
     assert_equal "[FILTERED]", params["password"],
       "filter_parameters is the app's own list (config/initializers/filter_parameter_logging.rb), not ours"
+  end
+
+  test "request_route's params go out as tagged pairs at every Hash level, in the order the app had them" do
+    run = DevelopmentRun.boot(script: DevelopmentRun.real_request("/posts?quantities[42]=1&quantities[7]=2&name=Ada&5=five&a[][]=x"))
+
+    assert run.booted?, run.output
+    route = run.events_of("request_route").sole
+
+    assert_equal({ "pairs" => [
+      ["quantities", { "pairs" => [["42", "1"], ["7", "2"]] }],
+      ["name", "Ada"], ["5", "five"],
+      ["a", [["x"]]],
+      ["controller", "posts"], ["action", "index"]
+    ] }, route["payload"]["params"])
   end
 
   # request_route only fires once a controller is entered, so its absence is the whole signal
@@ -98,7 +112,7 @@ class RequestTest < ActiveSupport::TestCase
     assert run.booted?, run.output
     route = run.events_of("request_route").sole
 
-    assert_equal "hello  world", route["payload"]["params"]["q"],
+    assert_equal "hello  world", route["payload"]["params"]["pairs"].to_h["q"],
       "readable text keeps what can be read, same as cut_string's own scrub"
     assert run.events_of("request_finish").sole, "one bad byte disabled the Run for the finish after it"
   end

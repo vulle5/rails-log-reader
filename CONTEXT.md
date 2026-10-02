@@ -45,6 +45,20 @@ it, which always wins. See
   controller ever says about itself. Which one it is, is read from `caller_locations` —
   a frame inside a gem is not the developer — and never from the message's shape.
 
+V2 adds a fourth:
+- **Response event** — what a request sent back: every response header, and the body when it
+  is JSON or XML, whole in memory, not encoded and not empty. Anything else (HTML, a PDF, a
+  streamed or gzipped body, a 204) carries the reason it has no body instead, so the
+  *Response* tab never shows an unexplained blank. A body is cut at the same 64 KB every
+  wire field is, with its original size kept, so a cut body says so where it is read. It
+  comes after its request's finish by construction, because the response is only complete
+  once the client has it, and it is filed under its request as that request's response,
+  never as a *Trailing event*. A hijacked response, such as a WebSocket upgrade, gets one
+  too, saying only that the connection was handed over: the app wrote whatever followed
+  itself, so there are no headers to read. So a finished request with no Response event
+  was recorded before there were any, and the *Response* tab can say exactly that.
+  See `docs/adr/0015-response-bodies-ride-inline-in-the-sidecar.md`.
+
 **Callsite** — the file and line an SQL or App log event's own code ran at, captured as a
 `caller_locations` frame and carried on the wire in the same raw `"path:line:in `method'"`
 shape a backtrace frame already uses (`Thread::Backtrace::Location#to_s`) — one shape, one
@@ -73,12 +87,12 @@ against the same endpoint. A Scenario is a *shape of traffic*, never a feature o
 Reader — the Reader detects nothing and is never told which Scenario is running.
 _Avoid_: test, demo, case.
 
-**Attribution** — binding an SQL or App log event to the Request event it occurred
-within, via `request_id`. The core problem: with parallel requests, an unattributed log
-is unreadable.
+**Attribution** — binding an SQL or App log event to the Request event or *Evaluation* it
+occurred within, via `request_id`, which names whichever of the two owns it. The core problem:
+with parallel requests, an unattributed log is unreadable.
 
-**Unattributed** — an event with no owning request (boot lines, background jobs, rake
-tasks). Not dropped, and no longer homeless: its *Run* owns it, so it appears in that
+**Unattributed** — an event with no owning request or *Evaluation* (boot lines, background
+jobs, rake tasks, a thread an evaluation started). Not dropped, and no longer homeless: its *Run* owns it, so it appears in that
 Run's *Run row*, and — if it is an App log event — in the *Console* as well.
 
 **Run** — one boot-to-shutdown lifetime of the Rails process. Every Event belongs to
@@ -111,6 +125,11 @@ was reaped, restarted or killed while the request was still in flight. Concluded
 evidence — a `run_end`, or a `run_header` bearing a new `run_id` — never from a timer, since
 in-flight requests are given no timeout, ever. The mirror of a *Partial request*: that one
 missed a start, this one will never get a finish.
+
+An *Evaluation* is Interrupted the same way. It has one more source of evidence, because the
+Reader is the console process's parent: that process exiting ends its Run even when it was
+killed too hard to write a `run_end`. Stopping an evaluation with Ctrl-C does not interrupt it
+in this sense. The evaluation raises `Interrupt` and finishes.
 
 Only a header of kind `server` concludes it, and only for the *other* Runs: `rails s` and
 puma-dev each run one process in development, so a second server booting is a restart —
@@ -188,7 +207,8 @@ indistinguishable from a broken one.
 **Collapsed Console** — the *Console rail* folded down to a narrow vertical strip carrying its
 name and its *Unseen count*, so it takes no room while it isn't needed. Folded by its own
 collapse control, or by dragging its *Column divider* past its minimum; remembered across
-reloads. A window too narrow to keep it open without narrowing the *Detail column* folds it
+reloads. The strip reopens it at the width it had; its divider reopens it at its minimum, so a
+drag opens the edge under the pointer rather than throwing it across the Reader. A window too narrow to keep it open without narrowing the *Detail column* folds it
 too, but only for as long as the window stays that narrow: that fold is the window's, not the developer's, so it is
 never remembered and the Console reopens the moment there is room. Unfolded inside that fold,
 it opens at its minimum and the Reader scrolls sideways, until the window next has room.
@@ -210,7 +230,97 @@ its chips would show, so it never counts a line opening the Console wouldn't sho
 Unfolding clears it. A reload opening on a folded Console starts it at zero once the
 load-on-open history has arrived: history is not news.
 
-**In-flight** — a Request event that has started but not finished. Must be visible and
+**REPL** — the Reader's prompt for running Ruby in the Host app, in a drawer under the *Console*
+and the *Activity table*. It drives a `bin/rails console` the Reader spawns from the Rails root,
+never the running server, so what it evaluates lands in that process's own `console` *Run*. One
+per Reader, shared by every tab, started the first time the drawer is open, and restarted only
+by hand. The REPL is not the *Console*: the Console is the App log stream, and "console" alone
+always means that. See `docs/adr/0014-the-repl-is-a-reader-owned-eval-loop.md`.
+_Avoid_: console (for the REPL), terminal, shell.
+
+**Evaluation** — one input the *REPL* submitted and everything it produced: its result or
+error, and whatever it printed while running. One at a time; the REPL refuses a second while
+one is running.
+
+Its queries and log lines are its own, the way a request's are: it owns an *Evaluation row*,
+and the same *Trailing event* rule applies. A thread it starts is not it, so what that thread
+emits is *unattributed*. Its input is recorded in the *Sidecar* along with its start and its
+end, so its row can still say what ran after the *Transcript* is gone. Its result and printed
+output are not recorded there. It ends `ok` or `raised`, and Ctrl-C is a `raised Interrupt` like any other
+exception. Only the console process dying makes it *Interrupted*.
+
+**Transcript** — the *REPL*'s evaluations so far, in order. It lives as long as the console
+process: a Restart clears it, and a tab that opens later is shown it whole. It keeps only the
+latest so many, dropping the oldest first, so an *Evaluation row* can outlive its entry.
+
+An evaluation is drawn as a raised block whose left edge is the accent while it runs and once it
+returns a result, and the error colour once it raised or lost its console process. A status
+strip along the block's bottom carries all of its chrome, so the input and the result carry
+none. The strip says what the evaluation came to: its result's class, `raised`, that it lost its
+console, or `running…`. Then come its *Evaluation row*'s non-zero counts and its time, as a link
+that opens the row on its Timeline tab. The time climbs in seconds while the row is *In-flight*
+and freezes once it is *Interrupted*. Once the *Memory bound* has taken the row, the strip says
+so in place of the link. A result's Pretty | Raw and Copy come last, and Copy copies what shows.
+
+An entry's printed output and its result, as first drawn, are each cut to a fixed number of
+lines, with what's left counted under the cut. When the entry has an *Evaluation row*, the cut
+offers to open that row on its *Result* tab; when it has none, it shows the rest in place. The
+cut is the Reader's own fold, so *Search* opens it for a match inside it, and it never cuts what
+the developer opened by hand.
+
+An entry that raised is drawn as an exception is in the *Detail column*: its class and message,
+then its backtrace with gem frames collapsed. The backtrace ends at the developer's last
+`(repl):N` frame, so the eval loop's own frames under it never bury theirs, and it is empty for
+an error that came before any of their code ran, a SyntaxError. Each error behind it, through
+`cause`, is folded as "Caused by" its class and message, and opens to its own backtrace; one with
+no backtrace is that line alone. That fold is the Reader's own too, so *Search* opens it for a
+match in its backtrace. A backtrace is cut to 64 KB of frames from its far end, and only
+the nearest ten causes are kept, and the entry says so under what was cut.
+
+**Input history** — the inputs the *REPL* has submitted, kept apart from the *Transcript*
+because it outlives the console process: it survives a Restart and the Reader restarting. It is
+kept in the browser's `localStorage`, keyed by the Host app's Rails root so two apps taking
+turns on one port never share it. It is capped at the latest 200 distinct inputs, with a repeat
+kept once at its latest. That cap is a guess, and too many entries would bury the useful ones as
+surely as too few would starve the *History suggestion*. ↑ on the input's first line opens it as
+a list over the Transcript, newest nearest the prompt, filtered by what is typed while it is
+open, with a divider above each console process's entries and the running one's marked "this console" where earlier entries come before it. Picking an entry puts it in the input and never runs it. It is read once when the page
+loads, and again only when another tab writes it. It is written on submit, and once more when
+that evaluation finishes, to mark that it raised, and never on a keystroke.
+_Avoid_: history (alone), which already means the load-on-open Events; command history.
+
+**Completion** — what Tab offers in the *REPL*'s input: the names the word before the caret could
+be, with what kind of name each is, and what it was asked of when it follows a `.` or a `::`. One
+candidate is inserted, and several open a popover at the word that narrows as it is typed and
+closes when the word ends. The popover never offers only what is already typed: when every
+candidate left is the word itself it stays shut, or closes, and Tab on such a word does nothing.
+A candidate equal to the word stays in the list while others are beside it. It comes from IRB's own completor, run by the eval loop in the console
+process: `TypeCompletor` when `repl_type_completor` is in the Host app's bundle, and
+`RegexpCompletor` otherwise, which reads a receiver off its text and never calls a method to do
+it. The loop says which it has when it is ready, and without either there is no completion. It
+is never run beside an *Evaluation*, so while one runs Tab says it waits. A *Setting* chooses
+whether Tab opens the popover or each word typed does. See
+`docs/adr/0014-the-repl-is-a-reader-owned-eval-loop.md`.
+_Avoid_: autocomplete, intellisense.
+
+**History suggestion** — the grey text after the caret offering the newest *Input history*
+entry that starts with what has been typed, drawn only while the caret is at the end of the
+text; → or End takes it. It is computed from a deferred copy of the input, and drawn only while
+it still matches, so typing never waits on it. While the completion popover is open, the grey
+text previews the selected candidate instead, and nothing while none is selected, and → or End
+takes that: it belongs to whichever is showing, and never means both at once. It can be turned
+off in *Settings*, remembered as what is off, which leaves the popover's preview as it is.
+_Avoid_: autosuggestion, ghost text.
+
+**Unseen result** — the mark on a folded *REPL* drawer: an *Evaluation* finished since this tab
+folded it. A mark, not a count, because a folded drawer takes no input and so rarely owes more
+than one; another tab sharing the session is the only way to owe several. It reads as an error
+when the latest of them raised or ended without a result because the console process died.
+Opening the drawer clears it. A reload opening on a folded drawer never marks the *Transcript*
+it replays: history is not news.
+_Avoid_: unread, new count.
+
+**In-flight** — a Request event, or an *Evaluation*, that has started but not finished. Must be visible and
 must accumulate its SQL and App log events live. A request that hangs is the single
 most valuable thing to see — and is *not a separate state*: because in-flight requests
 are given no timeout, ever, the Reader has no threshold to declare a hang. A climbing
@@ -286,12 +396,18 @@ scroll, no silent fetch. A live request reset mid-Run by boot-time truncation ge
 signal; it surfaces as an ordinary *Partial request*, which already reads honestly on its
 own.
 
+Counting events rather than bytes stays true once *Response events* carry bodies. It becomes
+visible there, because a body can weigh as much as two hundred log lines. The bound is still
+a bound: no field is over 64 KB, so the worst case is the figure times that cap, about 80 MB
+for an API-only session where every response is full. A byte-counting bound would be the
+second number this bound exists to refuse, so a heavier fold is accepted by name.
+
 The *Console* is bounded by this too, and by nothing of its own — see that entry. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md` and
 `docs/adr/0005-the-memory-bounds-exemptions-and-the-consoles-retention.md`.
 
 **Trailing event** — an SQL or App log event whose `seq` places it *after* its request's
-`request_finish`. Attribution is not in doubt — the `request_id` is right there — only the
+`request_finish`, or after its *Evaluation*'s end. Attribution is not in doubt — the `request_id` is right there — only the
 position is. The Reader appends it to a visibly separate **trailing section** at the end of
 the request row, never silently inside the timeline, because a log line arriving after its
 request finished is genuinely surprising and hiding it would read as a Reader bug. There is
@@ -299,7 +415,8 @@ no time limit and no buffering: the row accepts trailing events for as long as t
 still holds it, and once the row is evicted under the *Memory bound* the event is simply
 *unattributed*. Positional, never temporal — "late" would imply a clock, and `at_wall` is
 never sorted on. Structurally rare: the request boundary is the Initializer's own middleware,
-so almost nothing can outlive it. See
+so almost nothing can outlive it. A *Response event* is not one, though it always follows the
+finish: arriving there is what it is, not a surprise. See
 `docs/adr/0002-the-event-envelope-and-ordering-key.md`.
 _Avoid_: late arrival, straggler, orphan.
 
@@ -315,12 +432,12 @@ rather than buffered away.
 _Avoid_: arrival order, wire order (the wire has no order of its own).
 
 **Activity table** — the middle of the Reader's three columns, one row per thing that
-owns events: a *Request row* or a *Run row*. A row sits at the append position of the
+owns events: a *Request row*, an *Evaluation row* or a *Run row*. A row sits at the append position of the
 earliest Event the Reader observed for it, so a new row is always an append at the bottom
 and never an insert — including a *Partial request*, which has no start to be positioned
 by. Rows mutate in place and never move. Tabs filter by **row kind only** — Requests,
-Runs, All, each carrying a count — never by method, status or controller, which v1 rules
-out; a tab that grows one of those is that exclusion returning and must be decided, not
+Runs, All, each carrying a count, with Evaluation rows under All alone because the *Transcript*
+already lists them — never by method, status or controller, which v1 rules out; a tab that grows one of those is that exclusion returning and must be decided, not
 drifted into.
 _Avoid_: request table (it holds more than requests), trace (promises spans and sampling
 that are not shipped), feed.
@@ -350,6 +467,19 @@ in the table are rendered and lit in the *Detail column* too.
 _Avoid_: column (alone), field (a wire field is something else).
 
 **Request row** — an *Activity table* row for one Request event.
+
+**Evaluation row** — an *Activity table* row for one *Evaluation*, so a query the *REPL* ran is
+one click from the input that ran it. It reads as a `REPL` tag where a request's method goes
+(plus `sandbox` when the console is sandboxed, because its writes were rolled back) and the
+input's first line where its path goes. Its Status is its state, where a faint `ok` means it
+finished without raising. Its DB time is what Rails itself counted, and Total climbs while it
+runs. Two runs of the same input are told apart by when they started, never by a number. What
+the console process emits outside any evaluation stays in its *Run row*.
+Each *Transcript* entry's status strip links to its row with its counts and time
+(`3 queries · 1 log · 38ms →`), which opens Timeline. The row's *Detail column* header shows the whole input, highlighted as Ruby the way
+the Transcript's inputs are, and the class and message when it raised. The header links back to
+the entry for as long as the Transcript still holds it. An entry whose row the *Memory bound*
+took says so rather than linking to nothing.
 
 **Run row** — an *Activity table* row holding everything a *Run* emitted with no owning
 request. One per Run, always, anchored at that Run's marker — a `rake` burst and a worker
@@ -434,8 +564,9 @@ called which. The raised frame — `backtrace[0]`, Ruby's own guarantee of where
 exception happened — stays visible whatever its Host-app status; collapsing away the raise
 site by the same rule that hides `ActiveSupport`'s dispatch chain would defeat the column
 on its most common case, a `NoMethodError` or `RecordNotFound` several frames inside a gem.
-A marker's reveal is one-way and unpersisted: clicking opens its frames for the rest of
-that render, and the next render of any exception starts fully collapsed again — no
+A `(repl):N` frame, which is what the developer's *REPL* input is called in a backtrace, is a
+Host-app frame whatever `railsRoot` is, so it is never collapsed. A marker's reveal is one-way
+and unpersisted: clicking opens its frames for the rest of that render, and the next render of any exception starts fully collapsed again — no
 toggle, nothing survives a reload. A trace with no Host-app frame at all (including while
 `railsRoot` is still unknown) is just one marker spanning everything but the raised frame;
 the exception's class and message above it are never hidden by this. *Search* reaches into
@@ -445,6 +576,88 @@ place in this column that promise quietly didn't hold. Independent throughout of
 wire-truncated backtrace records: collapsing describes what the Reader chooses to show of
 what it holds, cutting describes what the wire sent, and neither reads the other. See
 `docs/adr/0011-a-backtrace-collapses-gem-frames-into-inline-markers-by-default.md` (#90).
+
+**Value viewer** — the Reader's one collapsible, highlighted view of a structured value: a
+request's params, a JSON or XML response body, and an *Evaluation*'s result. A
+tree, with the top level open and every nested hash or array folded to a summary of what it
+holds (`{…} 7 keys`, `[…] 3 items`). An open one sits between its brackets, the opening one
+on its key's line and the closing one under its children. An empty one is just its brackets,
+`{}` or `[]`, with nothing to open. It may lay a structure out, because a tree is not an edit,
+and it may colour each value by the type it actually has: a form's `"48"` is a string and is
+coloured as one, and only a JSON body carries real numbers, booleans and `null`. A `[FILTERED]`
+value, already filtered by the app's own `filter_parameters`, reads as a marker rather than as
+a string. It never reorders, drops or coerces what it shows. `controller`, `action` and
+`format` stay in params even though the header already says them, because hiding them would
+be a derivation. Text is the exception: it may be pretty-printed only with the raw text one
+toggle away. A long string is cut to one line with a count of what's left, one click from
+whole. Copy hands over the whole value as JSON, or on hover one node's value or its key path
+(`params[:comment][:tags][0]`).
+
+*Search* matches each key and each value on its own, as drawn, so a string keeps its quotes
+and escapes, and `FILTERED` is the word on its chip. A match never spans a key and its value,
+and the viewer's own labels (array indices, summaries, the count of what's left) are not the
+value and are never matched. Every fold the viewer makes, a nested node or a long string's cut,
+is the Reader's own, so like a backtrace's gem-frame marker it opens for a match inside it: the
+path down to the match opens and its matchless siblings stay folded. That opening holds only
+while the term matches there. Change the term and it folds back, and what the developer opened
+stays open. Folding a node Search is holding open is the developer's fold, and it wins until
+the term changes, with the folded summary lit and counting the matches inside.
+
+A response body is text the app sent, so it is laid out as a tree by default with the text
+exactly as sent one toggle away. XML is the same tree as JSON rather than a view of its own: an
+element is a node named by its tag, with its attributes beside it, an element holding only text
+is a leaf with that text as its string value, and an element with children folds to a summary of
+them. The tree stands for the document, so the root element is its one node, and starts open.
+Copy hands over what is showing, laid-out text while laid out and the exact text while raw.
+A node's path is what reaches it in a Rails test, `response.parsed_body["posts"][0]`, or its
+XPath in XML.
+
+An *Evaluation*'s result is a Ruby value, not a wire value, so its tree is a **snapshot** taken
+when the evaluation finished, never a live object read again on expanding, and every key and
+leaf is drawn as its own `inspect` and coloured by its Ruby type: `:a` and `"a"` are two keys,
+and `1`, `1.0` and a BigDecimal are three kinds of number. A hash, array, set, struct, a record's
+attributes, a relation's first ten records and a plain object's instance variables are laid out,
+each node labelled with what it is (`Comment {…} 6 attributes`). An object that writes its own
+`inspect` is a leaf showing that text, because its author chose how it reads, and a cycle is a
+leaf marked as one. A record's filtered attribute is the same marker as a filtered param. The
+result's `inspect` text is always one toggle away, and it is the only view of a value with no
+structure. A result too big to carry whole says where it was cut. Copy hands over `inspect`
+text rather than JSON, which cannot say what a symbol or a BigDecimal is, and a node's path is
+the `[…]` suffix that reaches it from the result.
+
+**Detail tab** — one of the tabs in the bar under the *Detail column*'s header: **Timeline**,
+**Params**, **Headers** and **Response** for a request, and **Timeline** and **Result** for an
+*Evaluation row*. The bar sticks with the header, so a request's params are one
+click away however far down the timeline the column is. That matters because a Selection opens
+at the bottom. Each tab keeps its own scroll position: Params opens at its top, and Timeline
+comes back where it was left. The chosen tab survives a change of *Selection*, so clicking
+through requests on Params compares their params. A row with no such tab, like a *Run row* or a
+request that never reached a controller, shows Timeline. *Search* never hides: a match inside a
+tab that is not showing is counted on that tab.
+_Avoid_: pane, panel, section.
+
+Headers and Response both read the request's *Response event*, and Headers comes first, in the
+order an HTTP response reads. **Headers** holds the response's headers only, sorted by name the
+way browser dev tools list them, and says "Response headers" at its top, because a tab named
+Headers is otherwise easily taken for the request's. Sorting loses nothing: HTTP gives no meaning
+to the order of differently named headers, and headers sharing a name, like two `set-cookie`s,
+keep the order the app set them in. The wire keeps the app's order all the same. **Response** is the body: a strip with the status, the content type and
+the size the app sent, then the body in the *Value viewer*. The tab's label says whether there is
+a body to look at before it is opened: `json` or `xml` when there is one, and otherwise a faint
+word for why not (`html`, `304`, `gzip`). When there is no body, the tab says why in plain words
+("This response is an HTML page (18 KB)", "This is a redirect to …"), so it is never an
+unexplained blank. A cut body says how big the whole was and how much is shown, and is shown only
+as raw text, because a cut body cannot be laid out. A request still in flight has a disabled
+Headers tab and a Response tab waiting for it, while a request that never reached a controller
+still has both, because its response exists.
+
+**Result** is an *Evaluation*'s *Transcript* entry with more room: what it printed, then its
+result in the *Value viewer* or its error as a backtrace, drawn exactly as the drawer draws them.
+It is a second view of that entry, never a copy of it, and its folds and text toggle are its own.
+Its label says what came back before it is opened, the result's class or `raised`. While the
+evaluation runs, the tab is waiting for it. Once the Transcript no longer holds the entry, after
+a Restart, when the Transcript has dropped it as one of its oldest, or for an earlier console's row, the tab says which
+in plain words rather than going blank or disappearing.
 
 **Selection** — which *Activity table* row the *detail column* is showing. Set by clicking
 a row in the *Activity table*, or any line in the *Console* — including an unattributed
@@ -479,7 +692,8 @@ _Avoid_: using it for the *Column divider*.
 
 **Column divider** — the narrow gap between two of the Reader's columns, which is its own drag
 handle and wears a three-dot grip so it reads as one: one between the *Console* and the
-*Activity table*, one between the table and the *Detail column*.
+*Activity table*, one between the table and the *Detail column*. The *REPL* drawer's top edge
+is one turned on its side, setting the drawer's height the same way.
 Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
 is the view the other two serve. A width set is a *request*, remembered across reloads, and
 what is drawn is what the window can fit: a window too narrow gives width back from the
@@ -491,11 +705,14 @@ layout. Double-clicking a divider returns its column to its default width. There
 to take you to a row.
 _Avoid_: gutter, splitter, resizer.
 
-**Auto-scroll** — a column following new activity: stuck to the bottom, so whatever arrives
-is on screen the moment it does. There are three, one per column, and they share the rule and
-nothing else — scrolling the *Console* back to find a boot line says nothing about whether the
-*Activity table* should keep following new traffic, and pinning a hanging request in the
-*Detail column* says nothing about either.
+**Auto-scroll** — a column, or the *Transcript*, following new activity: stuck to the bottom, so whatever arrives
+is on screen the moment it does. There are four, one per column and one for the *REPL*'s
+*Transcript*, and they share the rule and nothing else — scrolling the *Console* back to find a
+boot line says nothing about whether the *Activity table* should keep following new traffic,
+pinning a hanging request in the *Detail column* says nothing about either, and rereading an
+old result in the Transcript says nothing about any of them. Stuck means stuck whatever moved
+the bottom: a following one keeps it while its own height changes, as the REPL drawer opening,
+its edge dragged, the prompt growing or the window resizing change it.
 
 **Scrolling up is the only gesture that pauses one**, and reaching the bottom again is the
 only thing that resumes it — silently, because that is the gesture the developer already
@@ -535,11 +752,25 @@ quietly stopped moving — which costs nothing beyond what the seam above alread
 is the same "prompt to go and look, not a ledger" trade, admitted where it applies rather
 than worn silently.
 
-All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
+The Transcript's entries grow after they arrive, so it counts what *came to* something rather
+than what was appended: an *Evaluation* finishing counts once, as a result, as `raised`, or as
+having lost its console process, and so does an entry of what the console process printed
+outside any evaluation. A running evaluation's printed output does not count as it streams,
+because the evaluation ending is what is worth stopping to read, and one evaluation started in
+another tab is never counted at its start and again at its end.
+
+All four open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
 different thing to be at the bottom of, rather than the same stream thinned. Its own SCHEMA
 chip is the same stream thinned, exactly the case a Console chip already is, so toggling it
-never refollows on its own — only a new Selection does.
+never refollows on its own — only a new Selection does. The Transcript starts following again
+whenever the *REPL* submits from this tab, because a submit asks to see its answer. Another
+tab's submit is something that arrived, and is counted when it ends. Picking an *Input history*
+entry or taking a *Completion* runs nothing, so neither refollows it. A Restart refollows it in
+every tab and drops its count, because a new console process's Transcript is a different thing
+to be at the bottom of, and a count left standing would point at entries that are gone.
+Folding the REPL drawer is never dropping: it reopens with its Auto-scroll as it was, counting
+what ended while it was folded, so the *Unseen result* on its header hands over to the pill.
 _Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
 is the control).
 
@@ -549,13 +780,16 @@ trigger.
 _Avoid_: header, toolbar, top bar.
 
 **Search** — one global, case-insensitive substring, typed once and lit wherever the Reader
-renders log text: *Console* lines, SQL, paths, `Controller#action`, and the rest of what the
-*Detail column* reads out of an Event. It **highlights and never hides**: v1 filters the
+renders log text: *Console* lines, SQL, paths, `Controller#action`, the rest of what the
+*Detail column* reads out of an Event, and the *REPL*'s *Transcript*, which a folded drawer
+counts on its header without unfolding. It **highlights and never hides**: v1 filters the
 *Activity table* by row kind and nothing else, and a text box that thinned rows or lines would
 be that exclusion returning through the one control nobody would think to check it against.
 So it is not a filter, it reaches no *Auto-scroll*, and it has neither a regex — a query
 language — nor next/prev — navigation. A match is found on the text as rendered, so SQL is
-matched whole and lit across the highlighter's own tokens, and never edited to do it.
+matched whole and lit across the highlighter's own tokens, and never edited to do it. Typing
+never waits on the lighting: when there is a lot to light, the matches trail the term, and
+every column catches up together, because one term is never shown two ways at once.
 _Avoid_: filter, find (implies stepping through matches).
 
 **Empty state** — what an *Activity table* with no rows says about why, told apart by reads of
@@ -604,7 +838,9 @@ _Avoid_: link, editor link, file link.
    teammate who never uses the Reader notices nothing — which means, precisely: no
    middleware inserted, no subscribers registered, no `BroadcastLogger` sink attached, no
    file opened. Those four are promises the Example app tests; request overhead is not.
-3. **Strictly local.** No remote, staging, or production log reading.
+3. **Strictly local.** No remote, staging, or production log reading. Served only to the
+   machine it runs on, except read-only views on hosts a developer explicitly allows. See
+   `docs/adr/0013-the-reader-answers-only-its-own-page.md`.
 4. **Rails 7.1+**, refused below. `BroadcastLogger#broadcast_to` is both the only
    capture mechanism that keeps constraint 1 and the one thing Rails 7.0 lacks. Rails 8
    is what gets tested; 7.1 and 7.2 are accepted, with their absent `sql.active_record`

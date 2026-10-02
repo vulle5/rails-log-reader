@@ -5,6 +5,7 @@ import type { UserEvent } from "@testing-library/user-event"
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
+import type { RequestRow, RunRow } from "../src/shared/activity"
 import type { Envelope } from "../src/shared/wire"
 import {
   cellUnder,
@@ -684,10 +685,10 @@ describe("highlighting a Host-app backtrace frame", () => {
     } = theReaderReceiving(proves, filler, reopens, raises)
 
     // The eviction and the reopen both happened: nothing here still says `rails_root`.
-    const reopened = rows.find((row) => row.kind === "run" && row.runId === "srv-1")
+    const reopened = rows.find((row): row is RunRow => row.kind === "run" && row.runId === "srv-1")
     expect(reopened).toBeDefined()
     expect(reopened?.railsRoot).toBeNull()
-    const boom = rows.find((row) => row.kind === "request" && row.path === "/orders")
+    const boom = rows.find((row): row is RequestRow => row.kind === "request" && row.path === "/orders")
     expect(boom).toBeDefined()
     expect(boom?.railsRoot).toBeNull()
 
@@ -982,5 +983,24 @@ describe("selecting a Run row", () => {
     await select(user, "server")
 
     expect(timelineSays()).toEqual(says("=> Booting Puma"))
+  })
+})
+
+describe("selecting an Evaluation row", () => {
+  test("opens what the evaluation ran, and what came after it finished in a section of its own", async () => {
+    const run = aRun("con-1")
+    const { user } = theReader(
+      run.header("console"),
+      run.evaluationStart("repl-a-1", "Post.count"),
+      run.sql("repl-a-1", 'SELECT COUNT(*) FROM "posts"'),
+      run.evaluationFinish("repl-a-1"),
+      run.log("repl-a-1", "after the fact"),
+    )
+
+    await select(user, "Post.count")
+
+    expect(timelineSays()).toEqual(['SELECT COUNT(*) FROM "posts"'])
+    const trailing = within(detail()).getByRole("region", { name: "After the evaluation finished" })
+    expect(trailing).toHaveTextContent("after the fact")
   })
 })

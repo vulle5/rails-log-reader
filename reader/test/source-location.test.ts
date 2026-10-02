@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { fillScheme, parseFrame, sourceLocation } from "../src/ui/features/detail-column/lib/source-location"
+import { fillScheme, parseFrame, sourceLocation } from "../src/ui/lib/source-location"
 
 describe("parsing a raw frame", () => {
   test("splits path, line and where the path:line portion ends", () => {
