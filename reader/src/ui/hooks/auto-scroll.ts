@@ -4,7 +4,8 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefCallback } from
  * The Reader's **auto-scroll**: three of them, one per column, and one rule between them.
  *
  * A column *follows* — it sticks to the bottom, so whatever arrives is on screen the moment
- * it does — until it is *paused*, and **scrolling up is the only gesture that pauses it**.
+ * it does, and keeps it while its own height changes under it — until it is *paused*, and
+ * **scrolling up is the only gesture that pauses it**.
  * Scrolling back to the bottom resumes, silently. A paused column counts what has arrived
  * below and offers the count as a pill, which is the only other way back.
  *
@@ -173,17 +174,34 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
   following.current = state.following
   // Where a paused column's scrollport was when it unmounted.
   const left = useRef(0)
+  // Where the port was last put or scrolled to, so a scroll can tell moving up from the port's
+  // height changing under it.
+  const top = useRef(0)
+
+  const pin = useCallback((element: HTMLElement | null) => {
+    if (element === null) return
+    stickToBottom(element)
+    top.current = element.scrollTop
+  }, [])
 
   const attach = useCallback((element: HTMLDivElement) => {
     port.current = element
-    if (following.current) stickToBottom(element)
+    if (following.current) pin(element)
     else element.scrollTop = left.current
 
+    // The port's own height changes without a scroll or an arrival — the REPL drawer opening,
+    // its edge dragged, the window resized — and a following column keeps its bottom through it.
+    const observer = new ResizeObserver(() => {
+      if (following.current) pin(element)
+    })
+    observer.observe(element)
+
     return () => {
+      observer.disconnect()
       left.current = element.scrollTop
       port.current = null
     }
-  }, [])
+  }, [pin])
 
   // A layout effect, so the port is put back on the bottom in the same frame the thing that
   // pushed it off was added: after the DOM has the new rows and before anything is painted,
@@ -204,23 +222,32 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
     // following, and the one whose `refollowsWhen` just changed is about to be. Either way
     // the bottom is where it belongs, and the render that state change causes changes nothing
     // about that.
-    if (state.following || refollows) stickToBottom(port.current)
-  }, [items, listing, refollowsWhen, evicted, state.following])
+    if (state.following || refollows) pin(port.current)
+  }, [items, listing, refollowsWhen, evicted, state.following, pin])
 
   const onScroll = useCallback(() => {
     const measuring = port.current
     if (measuring === null) return
 
     const bottom = atBottom(measuring)
+    // Only moving up leaves the bottom. A following port found off it without having moved up
+    // had its height changed under it before its observer could put it back, as a drag on the
+    // REPL drawer's edge can between a pin and the scroll that pin queued.
+    if (!bottom && following.current && measuring.scrollTop >= top.current) {
+      pin(measuring)
+      return
+    }
+
+    top.current = measuring.scrollTop
     setState((current) => scrolled(current, bottom))
-  }, [])
+  }, [pin])
 
   const resume = useCallback(() => {
     setState(FOLLOWING)
     // Now, rather than waiting for the effect: the click changed no content, so nothing else
     // would move the port, and the pill's whole promise is that it takes you to the bottom.
-    stickToBottom(port.current)
-  }, [])
+    pin(port.current)
+  }, [pin])
 
   return { ...state, port: attach, onScroll, resume }
 }
@@ -230,7 +257,6 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
  * maximum, so the browser has nothing to clamp and the number the port reports back is the
  * number it was given.
  */
-function stickToBottom(port: HTMLElement | null) {
-  if (port === null) return
+function stickToBottom(port: HTMLElement) {
   port.scrollTop = port.scrollHeight - port.clientHeight
 }

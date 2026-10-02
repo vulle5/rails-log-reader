@@ -32,9 +32,9 @@ import {
  *
  * happy-dom does no layout, so the layout is supplied: every row is `ROW` pixels tall, every
  * column is `PORT` pixels of scrollport, and `scrollTop` clamps to the range a browser would
- * clamp it to. That is the whole of what the DOM contributes to this feature — a scrollport
- * reports where it is, and the rule reads it — so faking it is faking the input, not the
- * answer.
+ * clamp it to, as it is set and as the port's height changes under it. That is the whole of
+ * what the DOM contributes to this feature — a scrollport reports where it is, and the rule
+ * reads it — so faking it is faking the input, not the answer.
  */
 
 /** Tall enough that a handful of rows overflows it, so a test can scroll at all. */
@@ -49,7 +49,34 @@ const geometry = {
 
 const scrolledTo = new WeakMap<Element, number>()
 
+/**
+ * Every `ResizeObserver` the Reader stands up, with what it observes. A DOM with no layout has
+ * no height to change, so a test changes one by hand and tells the observers watching that
+ * element, the way a browser would after laying it out again.
+ */
+type Observing = { callback: () => void; elements: Set<Element> }
+
+const observers: Observing[] = []
+const realObserver = globalThis.ResizeObserver
+
 beforeAll(() => {
+  globalThis.ResizeObserver = class {
+    private readonly observing: Observing
+    constructor(callback: () => void) {
+      this.observing = { callback, elements: new Set() }
+      observers.push(this.observing)
+    }
+    observe(element: Element) {
+      this.observing.elements.add(element)
+    }
+    unobserve(element: Element) {
+      this.observing.elements.delete(element)
+    }
+    disconnect() {
+      this.observing.elements.clear()
+    }
+  } as unknown as typeof ResizeObserver
+
   // A row is a Console line, a table row or a timeline entry — every one of them an `li` or
   // a `tr`, which is what makes one measure enough for all three columns.
   Object.defineProperty(Element.prototype, "scrollHeight", {
@@ -62,7 +89,7 @@ beforeAll(() => {
   Object.defineProperty(Element.prototype, "scrollTop", {
     configurable: true,
     get(this: Element) {
-      return scrolledTo.get(this) ?? 0
+      return Math.min(scrolledTo.get(this) ?? 0, bottomOf(this))
     },
     set(this: Element, top: number) {
       scrolledTo.set(this, Math.min(Math.max(top, 0), bottomOf(this)))
@@ -71,6 +98,7 @@ beforeAll(() => {
 })
 
 afterAll(() => {
+  globalThis.ResizeObserver = realObserver
   Object.defineProperty(Element.prototype, "scrollHeight", geometry.scrollHeight!)
   Object.defineProperty(HTMLElement.prototype, "clientHeight", geometry.clientHeight!)
   Object.defineProperty(Element.prototype, "scrollTop", geometry.scrollTop!)
@@ -78,6 +106,7 @@ afterAll(() => {
 
 afterEach(() => {
   localStorage.clear()
+  observers.length = 0
 })
 
 /** How far down a scrollport goes: what "the bottom" means, and what a browser clamps to. */
@@ -180,6 +209,16 @@ function scrollUp(name: ColumnName, up = ROW) {
   fireEvent.scroll(port)
 }
 
+/**
+ * The column's scrollport is `height` pixels tall now, as the REPL drawer opening, its edge
+ * dragged or the window resizing leaves it, and the observers watching it are told.
+ */
+function resized(name: ColumnName, height: number) {
+  const port = scrollport(name)
+  Object.defineProperty(port, "clientHeight", { configurable: true, value: height })
+  for (const { callback, elements } of observers) if (elements.has(port)) callback()
+}
+
 function scrollBackToTheBottom(name: ColumnName) {
   const port = scrollport(name)
   port.scrollTop = bottomOf(port)
@@ -241,6 +280,65 @@ describe("a following column", () => {
     expect(console.scrollTop).toBeGreaterThan(wasAt)
     expect(pinnedToBottom("Console")).toBe(true)
     expect(pinnedToBottom("Activity table")).toBe(true)
+  })
+})
+
+describe("a column whose height changes", () => {
+  for (const name of COLUMNS) {
+    test(`stays on the bottom of the ${name} as it gets shorter`, async () => {
+      const { user } = openTheReader(...HISTORY)
+      await select(user, "/reports/monthly.csv")
+
+      resized(name, PORT - 2 * ROW)
+
+      expect(pinnedToBottom(name)).toBe(true)
+    })
+
+    test(`stays on the bottom of the ${name} as it gets taller`, async () => {
+      const { user } = openTheReader(...HISTORY)
+      await select(user, "/reports/monthly.csv")
+
+      resized(name, PORT + 2 * ROW)
+
+      expect(pinnedToBottom(name)).toBe(true)
+    })
+  }
+
+  test("is not paused by a scroll that lands before its observers are told", async () => {
+    const { arrive } = openTheReader(...HISTORY)
+    const port = scrollport("Console")
+
+    // A drag on the drawer's edge can shorten the port between its last pin and the scroll
+    // event that pin queued. user-event has no scroll gesture.
+    Object.defineProperty(port, "clientHeight", { configurable: true, value: PORT - 2 * ROW })
+    fireEvent.scroll(port)
+    arrive(run.log(null, "job one"))
+
+    expect(pinnedToBottom("Console")).toBe(true)
+    expect(pill("Console")).not.toBeInTheDocument()
+  })
+
+  test("leaves a paused column where it was scrolled to, and its count as it was", async () => {
+    const { arrive } = openTheReader(...HISTORY)
+    scrollUp("Console", 2 * ROW)
+    arrive(run.log(null, "job one"))
+    const wasAt = scrollport("Console").scrollTop
+
+    resized("Console", PORT - 2 * ROW)
+    resized("Console", PORT + 2 * ROW)
+
+    expect(scrollport("Console").scrollTop).toBe(wasAt)
+    expect(pill("Console")).toHaveTextContent("1 new")
+  })
+
+  test("follows a Console that comes back from a fold, on the port it comes back with", async () => {
+    const { user } = openTheReader(...HISTORY)
+    await collapseConsole(user)
+    await expandConsole(user)
+
+    resized("Console", PORT - 2 * ROW)
+
+    expect(pinnedToBottom("Console")).toBe(true)
   })
 })
 
