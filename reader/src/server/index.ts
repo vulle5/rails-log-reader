@@ -12,11 +12,14 @@ import { replSocket, type ReplSocket } from "./repl-socket"
 import { onShutdown } from "./shutdown"
 import { openSidecar, readEarlier, type Sidecar } from "./sidecar"
 
-const detectedRailsRoot = findRailsRoot(process.cwd())
+/** Where the Reader was started: the directory the launcher names, or the working directory. */
+const startedIn = process.argv[2] ?? process.cwd()
+
+const detectedRailsRoot = findRailsRoot(startedIn)
 
 if (detectedRailsRoot === null) {
   console.error(
-    `rails-log-reader: ${process.cwd()} is not a Rails root.\n` +
+    `rails-log-reader: ${startedIn} is not a Rails root.\n` +
       `No ${RAILS_ROOT_MARKER} was found here or in any parent directory. ` +
       `Start the Reader from inside your Rails app.`,
   )

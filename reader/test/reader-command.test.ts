@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { appendFile, cp, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
 import { networkInterfaces, tmpdir } from "node:os"
 import { join } from "node:path"
 import { WebSocket } from "ws"
@@ -320,6 +320,61 @@ describe("starting the Reader", () => {
     const answered = await Bun.fetch(new URL("earlier?from=halfway", url))
 
     expect(answered.status).toBe(400)
+  })
+})
+
+/**
+ * A copy of the Reader to edit, so that a test can change its UI sources without changing the
+ * ones this suite runs from. Its `node_modules` is this one's, linked rather than copied.
+ */
+async function readerCopy() {
+  const copy = await emptyDirectory()
+  const own = join(import.meta.dir, "..")
+  for (const entry of ["bin", "src", "rails", "bunfig.toml", "package.json", "tsconfig.json"]) {
+    await cp(join(own, entry), join(copy, entry), { recursive: true })
+  }
+  await symlink(join(own, "node_modules"), join(copy, "node_modules"))
+  return copy
+}
+
+/** The page at `url` and every script and stylesheet it loads, as one string. */
+async function servedPage(url: string) {
+  const page = await (await Bun.fetch(url)).text()
+  const assets = [...page.matchAll(/(?:src|href)="(\/_bun\/[^"]+)"/g)].map((found) => found[1] ?? "")
+  const served = await Promise.all(assets.map(async (asset) => await (await Bun.fetch(new URL(asset, url))).text()))
+  return [page, ...served].join("\n")
+}
+
+/** Whether the page at `url` comes to serve `text` within a few seconds of it being written. */
+async function comesToServe(url: string, text: string) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if ((await servedPage(url)).includes(text)) return true
+    await Bun.sleep(200)
+  }
+  return false
+}
+
+describe("developing the Reader", () => {
+  test("serves a UI source that was replaced by a rename, and every edit to it after", async () => {
+    const copy = await readerCopy()
+    const reader = Bun.spawn([Bun.which("bun") ?? "bun", join(copy, "bin", "rails-log-reader.ts"), "--hot"], {
+      cwd: await railsRoot(),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, [PORT_VARIABLE]: "0" },
+    })
+    started.push(reader)
+    const url = await readerUrl(reader)
+    await servedPage(url)
+
+    // Written beside the source and renamed over it, the way an editor or an agent saves.
+    const source = join(copy, "src", "ui", "main.tsx")
+    await writeFile(`${source}.saving`, `${await readFile(source, "utf8")}\nconsole.log("renamed over")\n`)
+    await rename(`${source}.saving`, source)
+    expect(await comesToServe(url, "renamed over")).toBe(true)
+
+    await appendFile(source, `console.log("edited in place")\n`)
+    expect(await comesToServe(url, "edited in place")).toBe(true)
   })
 })
 
