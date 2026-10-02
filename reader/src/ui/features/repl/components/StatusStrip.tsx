@@ -110,7 +110,7 @@ function ResultControls({ result, rawView: [raw, onRaw] }: { result: Extract<Out
   return (
     <>
       {source !== null && (
-        <div className="inline-flex rounded-full bg-background p-px" role="group" aria-label="Show the result as">
+        <div className="inline-flex rounded-full bg-sunken p-px" role="group" aria-label="Show the result as">
           <PillHalf pressed={!raw} onClick={() => onRaw(false)}>
             Pretty
           </PillHalf>
