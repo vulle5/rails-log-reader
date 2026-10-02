@@ -98,28 +98,32 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
       ) : (
         <div className="flex min-h-0 flex-auto flex-col overflow-hidden">{children}</div>
       )}
-      {/* Only where there is something to go and see. A pill on a paused column with nothing
-          below it would read "0 new" — sending the reader to look at nothing, and covering
-          the lines they scrolled up to read while it did. Scrolling back down is the way out
-          of a pause either way; the pill is what the count is for.
-
-          Positioned against the column and not its scrollport, so it stays put while the rows
+      {/* Positioned against the column and not its scrollport, so it stays put while the rows
           it is counting move underneath, and appears without pushing them around. */}
-      {!scroll.following && scroll.unseen > 0 && (
-        <button
-          type="button"
-          className="absolute bottom-3 left-1/2 z-2 -translate-x-1/2 cursor-pointer rounded-full bg-accent px-2.5 py-0.75 text-xs text-background tabular-nums shadow-pill hover:bg-accent-hover"
-          onClick={scroll.resume}
-          title="Follow new activity again"
-        >
-          {/* `floor`: the Memory bound is evicting one row for every row it takes, so the
-              count below has stalled rather than stopped — "+" says so rather than reading
-              like a number that quietly froze. */}
-          <span aria-hidden="true">↓</span> {scroll.unseen}
-          {scroll.floor ? "+" : ""} new
-        </button>
-      )}
+      <NewPill scroll={scroll} />
     </section>
+  )
+}
+
+/**
+ * An *auto-scroll*'s "↓ N new" pill, centred at the bottom of the nearest positioned element,
+ * which is what it floats over. Only on a paused one with something counted below, never
+ * "0 new"; clicking it resumes.
+ */
+export function NewPill({ scroll }: { scroll: ColumnAutoScroll }) {
+  if (scroll.following || scroll.unseen === 0) return null
+
+  return (
+    <button
+      type="button"
+      className="absolute bottom-3 left-1/2 z-2 -translate-x-1/2 cursor-pointer rounded-full bg-accent px-2.5 py-0.75 text-xs text-background tabular-nums shadow-pill hover:bg-accent-hover"
+      onClick={scroll.resume}
+      title="Follow new activity again"
+    >
+      {/* "+" while `floor`: the count is a lower bound once the Memory bound is evicting. */}
+      <span aria-hidden="true">↓</span> {scroll.unseen}
+      {scroll.floor ? "+" : ""} new
+    </button>
   )
 }
 
