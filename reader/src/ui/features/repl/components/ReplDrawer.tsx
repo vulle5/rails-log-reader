@@ -29,8 +29,9 @@ import { Transcript, type Reveal } from "./Transcript"
  * The header's right side is the status slot, before the fold button: what the console
  * process is doing, open or folded. The body is the *Transcript* over the prompt, with how the
  * console process exited between them once it has, and Restart at the end of the prompt's hint
- * row. While the drawer is open it asks for the console process to be started. On a page that
- * may not act it says where Ruby can be run from instead, and asks for nothing.
+ * row. An input this tab sends to run, and a Restart from any tab, put the Transcript back to
+ * following. While the drawer is open it asks for the console process to be started. On a page
+ * that may not act it says where Ruby can be run from instead, and asks for nothing.
  */
 export function ReplDrawer({
   folded,
@@ -77,6 +78,13 @@ export function ReplDrawer({
   const search = useContext(SearchContext)
   const { transcript } = repl.snapshot
   const found = useMemo(() => (folded ? transcriptMatches(search, transcript) : 0), [folded, search, transcript])
+  const [sent, setSent] = useState(0)
+
+  function submit(input: string) {
+    const refused = repl.submit(input)
+    if (refused === null) setSent((count) => count + 1)
+    return refused
+  }
 
   useEffect(() => {
     if (!folded && actsOnlyFrom === null) boot()
@@ -129,6 +137,7 @@ export function ReplDrawer({
             <>
               <Transcript
                 entries={repl.snapshot.transcript}
+                refollowsWhen={`${sent} ${repl.restarts}`}
                 railsRoot={railsRoot}
                 entryRows={entryRows}
                 onShowRow={onShowRow}
@@ -137,7 +146,7 @@ export function ReplDrawer({
               />
               {repl.snapshot.state.kind === "exited" && <ExitNotice state={repl.snapshot.state} />}
               <ReplPrompt
-                submit={repl.submit}
+                submit={submit}
                 check={repl.check}
                 complete={repl.complete}
                 interrupt={repl.interrupt}

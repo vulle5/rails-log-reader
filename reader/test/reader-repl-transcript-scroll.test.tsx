@@ -1,14 +1,18 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { TRANSCRIPT_LIMIT, type EvaluationEntry, type Outcome, type TranscriptEntry } from "../src/shared/repl"
+import { TRANSCRIPT_LIMIT, type EvaluationEntry, type Outcome, type ReplState, type TranscriptEntry } from "../src/shared/repl"
 import { Transcript, type Reveal } from "../src/ui/features/repl/components/Transcript"
+import type { HistoryEntry } from "../src/ui/features/repl/lib/input-history"
+import { Reader } from "../src/ui/Reader"
+import { aReplSession, openRepl, openTheReader, replDrawer, replOpen } from "./reader.harness"
 
 /**
  * The *Transcript*'s *Auto-scroll*: following as entries arrive and grow, and as the prompt
  * under it changes its height; paused by scrolling up, and counting what came to something on
- * the "↓ N new" pill while it is.
+ * the "↓ N new" pill while it is; following again on a submit from this tab and on a Restart,
+ * through the rendered Reader over a stand-in session.
  *
  * happy-dom does no layout, so the layout is supplied: every character the Transcript draws is
  * a pixel of its height, its port is `PORT` pixels tall, and `scrollTop` clamps to the range a
@@ -79,6 +83,7 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.ResizeObserver = realObserver
   Element.prototype.scrollIntoView = scrollIntoView
+  localStorage.clear()
 })
 
 /** How far down a port goes: what "the bottom" means, and what a browser clamps to. */
@@ -114,6 +119,30 @@ function aTranscript(entries: readonly TranscriptEntry[] = HISTORY, reveal: Reve
   }
 
   return { user, arrive }
+}
+
+const ROOT = "/work/blog"
+const READY: ReplState = { kind: "ready", pid: 48213 }
+
+/**
+ * The Reader with its REPL drawer open over a stand-in session holding `entries`, with the
+ * eval loop's `capabilities`, and a way to hand it the session's next snapshot along with how
+ * many Restarts the session has told this tab of.
+ */
+async function aDrawer(entries: readonly TranscriptEntry[] = HISTORY, capabilities: string[] = []) {
+  const view = openTheReader([], { repl: aReplSession({ state: READY, capabilities, transcript: entries }).repl, railsRoot: ROOT })
+  if (!replOpen()) await openRepl(view.user)
+
+  function arrive(next: readonly TranscriptEntry[], restarts = 0) {
+    const { repl } = aReplSession({ state: READY, capabilities, transcript: next })
+    view.rerender(<Reader {...view.fold.props} railsRoot={ROOT} repl={{ ...repl, restarts }} />)
+  }
+
+  return { user: view.user, arrive }
+}
+
+function prompt() {
+  return within(replDrawer()).getByRole("textbox", { name: "Ruby" })
 }
 
 function port() {
@@ -326,5 +355,101 @@ describe("revealing an entry", () => {
 
     expect(port().scrollTop).toBe(0)
     expect(pill()).toHaveTextContent("1 new")
+  })
+})
+
+describe("submitting from this tab", () => {
+  test("scrolls the Transcript to the bottom and follows again, so the running evaluation is in view", async () => {
+    const { user, arrive } = await aDrawer()
+    scrollUp()
+    arrive([...HISTORY, evaluation(5)])
+
+    await user.type(prompt(), "1 + 1{Enter}")
+
+    expect(pinnedToBottom()).toBe(true)
+    expect(noPill()).toBe(true)
+
+    arrive([...HISTORY, evaluation(5), evaluation(6, null)])
+
+    expect(pinnedToBottom()).toBe(true)
+  })
+})
+
+describe("another tab's submit", () => {
+  test("leaves this tab's Transcript where it was, and counts once when its evaluation ends", async () => {
+    const { arrive } = await aDrawer()
+    scrollUp()
+    const wasAt = port().scrollTop
+
+    arrive([...HISTORY, evaluation(5, null)])
+    arrive([...HISTORY, evaluation(5)])
+
+    expect(port().scrollTop).toBe(wasAt)
+    expect(pill()).toHaveTextContent("1 new")
+  })
+})
+
+describe("filling the prompt without running anything", () => {
+  test("from the Input history leaves the Transcript paused where it was", async () => {
+    const kept: HistoryEntry[] = [{ input: "Post.count", at: Date.now(), pid: READY.pid, raised: false }]
+    localStorage.setItem(`rails-log-reader.repl-history:${ROOT}`, JSON.stringify(kept))
+    const { user, arrive } = await aDrawer()
+    scrollUp()
+    const wasAt = port().scrollTop
+
+    await user.click(prompt())
+    await user.keyboard("{ArrowUp}{Enter}")
+    arrive([...HISTORY, evaluation(5)])
+
+    expect(prompt()).toHaveValue("Post.count")
+    expect(port().scrollTop).toBe(wasAt)
+    expect(pill()).toHaveTextContent("1 new")
+  })
+
+  test("with a Completion leaves the Transcript paused where it was", async () => {
+    const { user, arrive } = await aDrawer(HISTORY, ["complete"])
+    scrollUp()
+    const wasAt = port().scrollTop
+
+    await user.type(prompt(), "upl")
+    await user.keyboard("{Tab}")
+    await screen.findByDisplayValue("upload")
+    arrive([...HISTORY, evaluation(5)])
+
+    expect(port().scrollTop).toBe(wasAt)
+    expect(pill()).toHaveTextContent("1 new")
+  })
+})
+
+describe("a Restart", () => {
+  /** The fresh console process's Transcript, enough to overflow the port again. */
+  const RESTARTED = [printed(6, "Loading development environment (rails 8.0.2)\n"), evaluation(7), evaluation(8), evaluation(9)]
+
+  test("from this tab refollows the Transcript and drops its count", async () => {
+    const { user, arrive } = await aDrawer()
+    scrollUp()
+    arrive([...HISTORY, evaluation(5)])
+
+    await user.click(within(replDrawer()).getByRole("button", { name: "Restart" }))
+    arrive([], 1)
+
+    expect(noPill()).toBe(true)
+
+    arrive(RESTARTED, 1)
+
+    expect(pinnedToBottom()).toBe(true)
+    expect(noPill()).toBe(true)
+  })
+
+  test("from another tab refollows the Transcript and drops its count", async () => {
+    const { arrive } = await aDrawer()
+    scrollUp()
+    arrive([...HISTORY, evaluation(5)])
+
+    arrive([], 1)
+    arrive(RESTARTED, 1)
+
+    expect(pinnedToBottom()).toBe(true)
+    expect(noPill()).toBe(true)
   })
 })

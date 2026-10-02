@@ -149,12 +149,16 @@ type AutoScrollOptions = {
    * a relist: a tab or a chip re-derives the same stream thinned, and a reader who scrolled
    * up in it is still reading where they were.
    *
-   * The Detail column alone supplies one, and supplies *Selection* — not its own filter
-   * chip, for the same reason the other columns' chips are not `refollowsWhen` either. A new
-   * Selection is a different row's timeline, which opens at its newest activity rather than
-   * inheriting the last one's scroll position; the schema chip thins that same timeline, so
-   * it is `listing`'s concern only, exactly the "same stream thinned" case a Console chip
-   * already is.
+   * Of the columns, the Detail column alone supplies one, and supplies *Selection* — not its
+   * own filter chip, for the same reason the other columns' chips are not `refollowsWhen`
+   * either. A new Selection is a different row's timeline, which opens at its newest activity
+   * rather than inheriting the last one's scroll position; the schema chip thins that same
+   * timeline, so it is `listing`'s concern only, exactly the "same stream thinned" case a
+   * Console chip already is.
+   *
+   * The Transcript supplies one too, and the same key as its `listing`, since a change here
+   * does nothing unless `listing` changes with it: it changes on a submit from this tab, and
+   * on a Restart from any.
    */
   refollowsWhen?: string
   /**

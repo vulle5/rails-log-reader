@@ -119,6 +119,7 @@ export function aReplSession(
     snapshot: held,
     loaded: true,
     refusal,
+    restarts: 0,
     boot: () => {
       asked.boots++
     },

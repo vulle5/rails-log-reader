@@ -26,6 +26,7 @@ export type Reveal = { entry: number }
  * own height changes while the prompt grows or shrinks, until it is scrolled up. Paused, it
  * counts what came to something on the "↓ N new" pill: an evaluation ending, however it ended,
  * and an entry of what the console process printed outside any evaluation.
+ * `refollowsWhen` changing alone resumes it, and drops the count.
  *
  * An evaluation is a raised block with a status strip along its bottom, which says what it came
  * to, links to its *Evaluation row*, by `entryRows`, and holds its result's controls. Its left
@@ -38,6 +39,7 @@ export type Reveal = { entry: number }
  */
 export function Transcript({
   entries,
+  refollowsWhen = "",
   railsRoot,
   entryRows = NO_ROWS,
   onShowRow = () => {},
@@ -45,6 +47,8 @@ export function Transcript({
   onRevealed = () => {},
 }: {
   entries: readonly TranscriptEntry[]
+  /** Changes whenever this tab submits, or the session restarts. */
+  refollowsWhen?: string
   railsRoot: string | null
   /** Each evaluation's *Evaluation row*, by its entry's id: `entryRows`. */
   entryRows?: ReadonlyMap<number, EntryRow>
@@ -54,7 +58,7 @@ export function Transcript({
   onRevealed?: () => void
 }) {
   const box = useRef<HTMLDivElement>(null)
-  const scroll = useAutoScroll({ items: useConclusions(entries), listing: "", content: entries })
+  const scroll = useAutoScroll({ items: useConclusions(entries), listing: refollowsWhen, refollowsWhen, content: entries })
   const held = useOpenModifierHeld()
 
   // After following, so a Transcript drawn by the same click that asks lands on the entry.

@@ -38,6 +38,8 @@ export type ReplHandle = {
   restart: (sandbox: boolean) => void
   /** The latest input the server refused from this tab, and why. A new object for each. */
   refusal: { reason: string; input: string } | null
+  /** How many Restarts the server has told this tab of, its own and any other tab's. */
+  restarts: number
 }
 
 /** A session this page is not attached to: never started, and refusing every input. */
@@ -51,6 +53,7 @@ export const DETACHED_REPL: ReplHandle = {
   interrupt: () => {},
   restart: () => {},
   refusal: null,
+  restarts: 0,
 }
 
 /** What a completion comes to when the page is not connected to the Reader. */
@@ -75,6 +78,7 @@ export function useReplSession(mayAct: boolean, onExit: (pid: number) => void): 
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT)
   const [loaded, setLoaded] = useState(false)
   const [refusal, setRefusal] = useState<ReplHandle["refusal"]>(null)
+  const [restarts, setRestarts] = useState(0)
   const socket = useRef<WebSocket | null>(null)
   const booting = useRef(false)
   // The checks this tab has asked and not yet been answered, by id.
@@ -111,7 +115,10 @@ export function useReplSession(mayAct: boolean, onExit: (pid: number) => void): 
         else if (message.type === "checked") answered(message.id, message.complete)
         else if (message.type === "completions") completed(message.id, message.completion)
         else if (message.type === "exit") exitListener.current(message.pid)
-        else if (isReplUpdate(message)) setSnapshot((held) => applyReplUpdate(held, message))
+        else if (isReplUpdate(message)) {
+          setSnapshot((held) => applyReplUpdate(held, message))
+          if (message.type === "restarted") setRestarts((told) => told + 1)
+        }
       }
       opened.onclose = () => {
         if (socket.current === opened) socket.current = null
@@ -190,7 +197,7 @@ export function useReplSession(mayAct: boolean, onExit: (pid: number) => void): 
     if (open?.readyState === WebSocket.OPEN) send(open, { type: "restart", sandbox })
   }
 
-  return { snapshot, loaded, boot, submit, check, complete, interrupt, restart, refusal }
+  return { snapshot, loaded, boot, submit, check, complete, interrupt, restart, refusal, restarts }
 }
 
 function send(socket: WebSocket, command: ReplCommand) {
