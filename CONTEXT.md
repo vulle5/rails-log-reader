@@ -705,11 +705,14 @@ layout. Double-clicking a divider returns its column to its default width. There
 to take you to a row.
 _Avoid_: gutter, splitter, resizer.
 
-**Auto-scroll** — a column following new activity: stuck to the bottom, so whatever arrives
-is on screen the moment it does. There are three, one per column, and they share the rule and
-nothing else — scrolling the *Console* back to find a boot line says nothing about whether the
-*Activity table* should keep following new traffic, and pinning a hanging request in the
-*Detail column* says nothing about either.
+**Auto-scroll** — a column, or the *Transcript*, following new activity: stuck to the bottom, so whatever arrives
+is on screen the moment it does. There are four, one per column and one for the *REPL*'s
+*Transcript*, and they share the rule and nothing else — scrolling the *Console* back to find a
+boot line says nothing about whether the *Activity table* should keep following new traffic,
+pinning a hanging request in the *Detail column* says nothing about either, and rereading an
+old result in the Transcript says nothing about any of them. Stuck means stuck whatever moved
+the bottom: a following one keeps it while its own height changes, as the REPL drawer opening,
+its edge dragged, the prompt growing or the window resizing change it.
 
 **Scrolling up is the only gesture that pauses one**, and reaching the bottom again is the
 only thing that resumes it — silently, because that is the gesture the developer already
@@ -749,11 +752,25 @@ quietly stopped moving — which costs nothing beyond what the seam above alread
 is the same "prompt to go and look, not a ledger" trade, admitted where it applies rather
 than worn silently.
 
-All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
+The Transcript's entries grow after they arrive, so it counts what *came to* something rather
+than what was appended: an *Evaluation* finishing counts once, as a result, as `raised`, or as
+having lost its console process, and so does an entry of what the console process printed
+outside any evaluation. A running evaluation's printed output does not count as it streams,
+because the evaluation ending is what is worth stopping to read, and one evaluation started in
+another tab is never counted at its start and again at its end.
+
+All four open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
 different thing to be at the bottom of, rather than the same stream thinned. Its own SCHEMA
 chip is the same stream thinned, exactly the case a Console chip already is, so toggling it
-never refollows on its own — only a new Selection does.
+never refollows on its own — only a new Selection does. The Transcript starts following again
+whenever the *REPL* submits from this tab, because a submit asks to see its answer. Another
+tab's submit is something that arrived, and is counted when it ends. Picking an *Input history*
+entry or taking a *Completion* runs nothing, so neither refollows it. A Restart refollows it in
+every tab and drops its count, because a new console process's Transcript is a different thing
+to be at the bottom of, and a count left standing would point at entries that are gone.
+Folding the REPL drawer is never dropping: it reopens with its Auto-scroll as it was, counting
+what ended while it was folded, so the *Unseen result* on its header hands over to the pill.
 _Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
 is the control).
 
