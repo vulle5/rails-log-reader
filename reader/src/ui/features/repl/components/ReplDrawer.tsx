@@ -11,10 +11,11 @@ import { cn } from "../../../lib/cn"
 import type { DetailTabId } from "../../detail-column/components/DetailTabs"
 import { useInputHistory } from "../hooks/input-history"
 import type { ReplHandle } from "../hooks/repl-session"
+import { useTranscriptScroll, type Reveal } from "../hooks/transcript-scroll"
 import { useUnseenResult, type UnseenResult } from "../hooks/unseen-result"
 import { transcriptMatches } from "../lib/entry-matches"
 import { ReplPrompt } from "./ReplPrompt"
-import { Transcript, type Reveal } from "./Transcript"
+import { Transcript } from "./Transcript"
 
 /**
  * The *REPL* drawer: an outlined panel under the Console and the Activity table, headed "REPL"
@@ -30,8 +31,9 @@ import { Transcript, type Reveal } from "./Transcript"
  * process is doing, open or folded. The body is the *Transcript* over the prompt, with how the
  * console process exited between them once it has, and Restart at the end of the prompt's hint
  * row. An input this tab sends to run, and a Restart from any tab, put the Transcript back to
- * following. While the drawer is open it asks for the console process to be started. On a page
- * that may not act it says where Ruby can be run from instead, and asks for nothing.
+ * following. Folding keeps the Transcript's *Auto-scroll* as it was, still counting what ends.
+ * While the drawer is open it asks for the console process to be started. On a page that may
+ * not act it says where Ruby can be run from instead, and asks for nothing.
  */
 export function ReplDrawer({
   folded,
@@ -79,6 +81,7 @@ export function ReplDrawer({
   const { transcript } = repl.snapshot
   const found = useMemo(() => (folded ? transcriptMatches(search, transcript) : 0), [folded, search, transcript])
   const [sent, setSent] = useState(0)
+  const scroll = useTranscriptScroll({ entries: transcript, refollowsWhen: `${sent} ${repl.restarts}`, reveal, onRevealed })
 
   function submit(input: string) {
     const refused = repl.submit(input)
@@ -136,13 +139,11 @@ export function ReplDrawer({
           {actsOnlyFrom === null ? (
             <>
               <Transcript
-                entries={repl.snapshot.transcript}
-                refollowsWhen={`${sent} ${repl.restarts}`}
+                entries={transcript}
+                scroll={scroll}
                 railsRoot={railsRoot}
                 entryRows={entryRows}
                 onShowRow={onShowRow}
-                reveal={reveal}
-                onRevealed={onRevealed}
               />
               {repl.snapshot.state.kind === "exited" && <ExitNotice state={repl.snapshot.state} />}
               <ReplPrompt

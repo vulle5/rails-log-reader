@@ -101,8 +101,9 @@ export function arrived(state: AutoScroll, howMany: number, evicted = 0): AutoSc
 export type ColumnAutoScroll = AutoScroll & {
   /**
    * Goes on the scrollport — the column's own body, never the window. A scrollport that
-   * unmounts and mounts again, the way the Console's does across a fold, comes back where the
-   * column was: on the bottom if it is following, and where it was left if it is paused.
+   * unmounts and mounts again, the way the Console's and the Transcript's do across a fold,
+   * comes back where the column was: on the bottom if it is following, and where it was left
+   * if it is paused.
    */
   port: RefCallback<HTMLElement>
   onScroll: () => void

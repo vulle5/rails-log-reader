@@ -3,10 +3,11 @@ import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { TRANSCRIPT_LIMIT, type EvaluationEntry, type Outcome, type ReplState, type TranscriptEntry } from "../src/shared/repl"
-import { Transcript, type Reveal } from "../src/ui/features/repl/components/Transcript"
+import { Transcript } from "../src/ui/features/repl/components/Transcript"
+import { useTranscriptScroll, type Reveal } from "../src/ui/features/repl/hooks/transcript-scroll"
 import type { HistoryEntry } from "../src/ui/features/repl/lib/input-history"
 import { Reader } from "../src/ui/Reader"
-import { aReplSession, openRepl, openTheReader, replDrawer, replOpen } from "./reader.harness"
+import { aReplSession, foldRepl, openRepl, openTheReader, replDrawer, replOpen } from "./reader.harness"
 
 /**
  * The *Transcript*'s *Auto-scroll*: following as entries arrive and grow, and as the prompt
@@ -112,13 +113,19 @@ const HISTORY: TranscriptEntry[] = [evaluation(1), evaluation(2), evaluation(3),
  */
 function aTranscript(entries: readonly TranscriptEntry[] = HISTORY, reveal: Reveal | null = null) {
   const user = userEvent.setup()
-  const { rerender } = render(<Transcript entries={entries} railsRoot={null} reveal={reveal} />)
+  const { rerender } = render(<FollowedTranscript entries={entries} reveal={reveal} />)
 
   function arrive(next: readonly TranscriptEntry[]) {
-    rerender(<Transcript entries={next} railsRoot={null} />)
+    rerender(<FollowedTranscript entries={next} reveal={null} />)
   }
 
   return { user, arrive }
+}
+
+/** The Transcript over its own Auto-scroll, as the REPL drawer draws it. */
+function FollowedTranscript({ entries, reveal }: { entries: readonly TranscriptEntry[]; reveal: Reveal | null }) {
+  const scroll = useTranscriptScroll({ entries, refollowsWhen: "", reveal })
+  return <Transcript entries={entries} scroll={scroll} railsRoot={null} />
 }
 
 const ROOT = "/work/blog"
@@ -139,6 +146,29 @@ async function aDrawer(entries: readonly TranscriptEntry[] = HISTORY, capabiliti
   }
 
   return { user: view.user, arrive }
+}
+
+/**
+ * The Reader reloaded onto a folded REPL drawer, before the session's snapshot has arrived, and
+ * a way to hand it the snapshot holding `entries` once it does.
+ */
+function aReloadOntoAFoldedDrawer() {
+  const view = openTheReader([], { repl: { ...aReplSession({ state: READY }).repl, loaded: false }, railsRoot: ROOT })
+
+  function load(entries: readonly TranscriptEntry[]) {
+    const { repl } = aReplSession({ state: READY, transcript: entries })
+    view.rerender(<Reader {...view.fold.props} railsRoot={ROOT} repl={repl} />)
+  }
+
+  return { user: view.user, load }
+}
+
+function unseenMark() {
+  return within(replDrawer()).getByText("new")
+}
+
+function unseenMarkAbsent() {
+  return within(replDrawer()).queryByText("new")
 }
 
 function prompt() {
@@ -448,6 +478,57 @@ describe("a Restart", () => {
 
     arrive([], 1)
     arrive(RESTARTED, 1)
+
+    expect(pinnedToBottom()).toBe(true)
+    expect(noPill()).toBe(true)
+  })
+})
+
+describe("folding the REPL drawer", () => {
+  test("keeps a paused Transcript paused, where it was, when it reopens", async () => {
+    const { user, arrive } = await aDrawer()
+    scrollUp()
+    const wasAt = port().scrollTop
+
+    await foldRepl(user)
+    await openRepl(user)
+    arrive([...HISTORY, evaluation(5)])
+
+    expect(port().scrollTop).toBe(wasAt)
+    expect(pill()).toHaveTextContent("1 new")
+  })
+
+  test("counts what ended while it was folded, which the Unseen result hands over to the pill", async () => {
+    const { user, arrive } = await aDrawer()
+    scrollUp()
+    await foldRepl(user)
+
+    arrive([...HISTORY, evaluation(5)])
+    expect(unseenMark()).toBeVisible()
+
+    await openRepl(user)
+
+    expect(unseenMarkAbsent()).not.toBeInTheDocument()
+    expect(pill()).toHaveTextContent("1 new")
+  })
+
+  test("keeps a following Transcript following, so it reopens on its newest entry", async () => {
+    const { user, arrive } = await aDrawer()
+    await foldRepl(user)
+
+    arrive([...HISTORY, evaluation(5)])
+    await openRepl(user)
+
+    expect(within(port()).getAllByRole("listitem").at(-1)).toHaveTextContent("Post.find(5)")
+    expect(pinnedToBottom()).toBe(true)
+    expect(noPill()).toBe(true)
+  })
+
+  test("leaves a reload onto a folded drawer following, with the history it replays uncounted", async () => {
+    const { user, load } = aReloadOntoAFoldedDrawer()
+
+    load(HISTORY)
+    await openRepl(user)
 
     expect(pinnedToBottom()).toBe(true)
     expect(noPill()).toBe(true)
