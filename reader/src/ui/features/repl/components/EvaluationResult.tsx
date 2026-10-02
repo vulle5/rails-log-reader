@@ -21,15 +21,19 @@ import { Cut, ErrorNote, Marker } from "./TranscriptText"
  * first drawn, and the one note under the cut opens the rest wherever the value shows.
  *
  * A `rawView` holds the toggle in its owner's place instead, for an owner that counts what it lights.
+ * A `bare` result is drawn with no controls at all, for an owner that draws them elsewhere and
+ * holds the toggle as its `rawView`.
  */
 export function EvaluationResult({
   outcome,
   entryCut,
   rawView,
+  bare = false,
 }: {
   outcome: Extract<Outcome, { kind: "result" }>
   entryCut?: EntryCut
   rawView?: RawView
+  bare?: boolean
 }) {
   const source = rubySource(outcome.tree)
   const [ownRaw, setOwnRaw] = useState(false)
@@ -44,7 +48,7 @@ export function EvaluationResult({
           <Marker>{"=> "}</Marker>
         </CutText>
       ) : (
-        <ResultView source={source} text={outcome.text} raw={raw} onRaw={setRaw} note={note} />
+        <ResultView source={source} text={outcome.text} raw={raw} onRaw={setRaw} note={note} bare={bare} />
       )}
       {showsRaw && outcome.cut && <Cut>Result cut at 64 KB</Cut>}
       {outcome.inspectError !== null && <ErrorNote>{`inspect raised ${outcome.inspectError}`}</ErrorNote>}
@@ -57,7 +61,8 @@ export type RawView = readonly [raw: boolean, onRaw: (raw: boolean) => void]
 
 /**
  * `=>`, then the result beside it, with Pretty | Raw and the copy control at the right of its
- * first line, so a result's controls sit together whichever way it shows.
+ * first line, so a result's controls sit together whichever way it shows. A `bare` one has
+ * neither, and runs its block's whole width.
  */
 function ResultView({
   source,
@@ -65,12 +70,14 @@ function ResultView({
   raw,
   onRaw,
   note,
+  bare,
 }: {
   source: ValueSource
   text: string
   raw: boolean
   onRaw: (raw: boolean) => void
   note: CutNote | null
+  bare: boolean
 }) {
   const toggles = (
     <ToggleGroup label="Show the result as">
@@ -89,11 +96,15 @@ function ResultView({
       <Marker>{"=>"}</Marker>
       <div className="min-w-0 flex-1">
         {raw ? (
-          <Copyable text={text} label="Copy result" controls={toggles}>
+          bare ? (
             <CutText text={text} note={note} />
-          </Copyable>
+          ) : (
+            <Copyable text={text} label="Copy result" controls={toggles}>
+              <CutText text={text} note={note} />
+            </Copyable>
+          )
         ) : (
-          <ValueViewer label="Result" source={source} controls={toggles} cut={note === null ? undefined : { lines: ENTRY_LINES, note }} />
+          <ValueViewer label="Result" source={source} bare={bare} controls={toggles} cut={note === null ? undefined : { lines: ENTRY_LINES, note }} />
         )}
       </div>
     </div>

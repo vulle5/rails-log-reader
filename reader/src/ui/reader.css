@@ -83,6 +83,9 @@
   --shadow-pinned-row: inset 3px 0 0 var(--color-accent);
   /* An *Interrupted* row's edge, drawn inside its first cell so marking it moves no text. */
   --shadow-interrupted: inset 3px 0 0 var(--color-faint);
+  /* A *Transcript* evaluation's edge once it raised or lost its console process: the pinned
+     group's edge in the error colour. */
+  --shadow-failed: inset 2px 0 0 var(--color-error);
 
   /* The small labels set into a line of text: filter chips, and the tags beside a Console line. */
   --radius-chip: 3px;

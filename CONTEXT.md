@@ -253,6 +253,15 @@ exception. Only the console process dying makes it *Interrupted*.
 process: a Restart clears it, and a tab that opens later is shown it whole. It keeps only the
 latest so many, dropping the oldest first, so an *Evaluation row* can outlive its entry.
 
+An evaluation is drawn as a raised block whose left edge is the accent while it runs and once it
+returns a result, and the error colour once it raised or lost its console process. A status
+strip along the block's bottom carries all of its chrome, so the input and the result carry
+none. The strip says what the evaluation came to: its result's class, `raised`, that it lost its
+console, or `running…`. Then come its *Evaluation row*'s non-zero counts and its time, as a link
+that opens the row on its Timeline tab. The time climbs in seconds while the row is *In-flight*
+and freezes once it is *Interrupted*. Once the *Memory bound* has taken the row, the strip says
+so in place of the link. A result's Pretty | Raw and Copy come last, and Copy copies what shows.
+
 An entry's printed output and its result, as first drawn, are each cut to a fixed number of
 lines, with what's left counted under the cut. When the entry has an *Evaluation row*, the cut
 offers to open that row on its *Result* tab; when it has none, it shows the rest in place. The
@@ -466,8 +475,8 @@ input's first line where its path goes. Its Status is its state, where a faint `
 finished without raising. Its DB time is what Rails itself counted, and Total climbs while it
 runs. Two runs of the same input are told apart by when they started, never by a number. What
 the console process emits outside any evaluation stays in its *Run row*.
-Each *Transcript* entry links to its row with its counts (`3 queries · 1 log`), which opens
-Timeline. The row's *Detail column* header shows the whole input, highlighted as Ruby the way
+Each *Transcript* entry's status strip links to its row with its counts and time
+(`3 queries · 1 log · 38ms →`), which opens Timeline. The row's *Detail column* header shows the whole input, highlighted as Ruby the way
 the Transcript's inputs are, and the class and message when it raised. The header links back to
 the entry for as long as the Transcript still holds it. An entry whose row the *Memory bound*
 took says so rather than linking to nothing.

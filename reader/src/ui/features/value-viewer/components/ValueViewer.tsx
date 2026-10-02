@@ -40,7 +40,8 @@ import type {
  * value and of its path. Every text copied is the source's: the viewer only asks for it.
  *
  * A `caption` is drawn over the tree. The copy control sits at the right of the first line, the
- * caption's or the tree's, with `controls` before it.
+ * caption's or the tree's, with `controls` before it. A `bare` viewer has neither, for a caller
+ * that draws its own elsewhere.
  *
  * A `cut` draws the top level only as far as fits in its `lines` as first drawn, and its `note`
  * under it, given how many lines it left out. What the developer opens inside the lines it draws
@@ -52,11 +53,13 @@ export function ValueViewer({
   caption,
   controls,
   cut,
+  bare = false,
 }: {
   label: string
   source: ValueSource
   caption?: ReactNode
   controls?: ReactNode
+  bare?: boolean
   cut?: { lines: number; note: (more: number) => ReactNode }
 }) {
   const value = source.tree
@@ -88,7 +91,7 @@ export function ValueViewer({
 
   if (value.type === "container" && isEmpty(value)) {
     return (
-      <Copyable text={null} label={label} controls={controls}>
+      <Copyable text={null} label={label} controls={bare ? undefined : controls}>
         {caption}
         <p className="font-mono text-sm">
           <Empty node={value} />
@@ -98,7 +101,7 @@ export function ValueViewer({
   }
 
   return (
-    <Copyable text={wholeText} label={`Copy ${label.toLowerCase()}`} controls={controls}>
+    <Copyable text={bare ? null : wholeText} label={`Copy ${label.toLowerCase()}`} controls={bare ? undefined : controls}>
       {caption}
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (

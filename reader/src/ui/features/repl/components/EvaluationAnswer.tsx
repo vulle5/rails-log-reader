@@ -32,23 +32,26 @@ export function Printed({ output, cut, entryCut }: { output: string; cut: boolea
 }
 
 /**
- * An evaluation's result, cut by `entryCut` when given, and shown raw or pretty by `rawView` when
- * given, or its error drawn as the *Detail column* draws an exception's backtrace.
+ * An evaluation's result, cut by `entryCut` when given, shown raw or pretty by `rawView` when
+ * given, and with no controls when `bare`, or its error drawn as the *Detail column* draws an
+ * exception's backtrace.
  */
 export function Answer({
   outcome,
   railsRoot,
   entryCut,
   rawView,
+  bare,
 }: {
   outcome: Outcome
   railsRoot: string | null
   entryCut?: EntryCut
   rawView?: RawView
+  bare?: boolean
 }) {
   switch (outcome.kind) {
     case "result":
-      return <EvaluationResult outcome={outcome} entryCut={entryCut} rawView={rawView} />
+      return <EvaluationResult outcome={outcome} entryCut={entryCut} rawView={rawView} bare={bare} />
     case "error":
       return (
         <>

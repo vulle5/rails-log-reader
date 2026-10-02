@@ -1,16 +1,15 @@
-import { useEffect, useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import type { EvaluationRow } from "../../../../shared/activity"
-import { LOAD_ON_OPEN_EVENTS } from "../../../../shared/bounds"
 import type { EntryRow, EvaluationEntry, TranscriptEntry } from "../../../../shared/repl"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { useMatches } from "../../../hooks/search"
 import { cn } from "../../../lib/cn"
-import { LinkButton } from "../../../components/LinkButton"
 import type { DetailTabId } from "../../detail-column/components/DetailTabs"
 import { type EntryCut } from "./EntryCut"
 import { Answer, Printed } from "./EvaluationAnswer"
 import { RubyCode } from "./RubyCode"
+import { StatusStrip } from "./StatusStrip"
 import { Marker, Text } from "./TranscriptText"
 
 /** How near its end the Transcript can be scrolled and still follow what arrives. */
@@ -26,10 +25,11 @@ export type Reveal = { entry: number }
  * away from it, and likewise when its own height changes, as it does while the prompt grows or
  * shrinks. An error's backtrace is drawn as the *Detail column* draws an exception's.
  *
- * An evaluation links to its *Evaluation row*, by `entryRows`, with the row's counts, and says so
- * once the *Memory bound* has taken it. What an entry printed and its result are each cut at
- * `ENTRY_LINES` lines as first drawn: the cut opens the row on its Result tab, or, with no row
- * held, shows the rest in place.
+ * An evaluation is a raised block with a status strip along its bottom, which says what it came
+ * to, links to its *Evaluation row*, by `entryRows`, and holds its result's controls. Its left
+ * edge is the accent, and the error colour once it raised or lost its console process. What an
+ * entry printed and its result are each cut at `ENTRY_LINES` lines as first drawn: the cut opens
+ * the row on its Result tab, or, with no row held, shows the rest in place.
  *
  * Asked to `reveal` an entry, it scrolls to it, once it is drawn, and then tells `onRevealed`.
  */
@@ -93,12 +93,12 @@ export function Transcript({
         onScroll={scrolled}
       >
         {entries.map((entry) => (
-          // An evaluation is a raised block edged in the accent, so where one ends and the next
-          // begins reads at a glance, and so does which one a control at its far edge belongs to.
+          // An evaluation is a raised block, so where one ends and the next begins reads at a glance.
           <li
             key={entry.id}
-            className={cn(entry.kind === "evaluation" && "bg-raised px-3 py-1.5 shadow-pinned")}
+            className={cn(entry.kind === "evaluation" && "bg-raised px-3 pt-1.5 shadow-pinned data-[outcome=error]:shadow-failed")}
             data-entry={entry.id}
+            data-outcome={entry.kind === "evaluation" ? cameTo(entry) : undefined}
           >
             {entry.kind === "evaluation" ? (
               <Evaluation entry={entry} row={entryRows.get(entry.id) ?? null} railsRoot={railsRoot} onShowRow={onShowRow} />
@@ -116,7 +116,19 @@ const NO_ROWS: ReadonlyMap<number, EntryRow> = new Map()
 
 const IN_PLACE: EntryCut = { openResult: null }
 
-/** An evaluation's entry: its input and the link to its row, then what it printed, then its answer. */
+/**
+ * What an evaluation came to, as its edge draws it: `result` once it returned one, `error` once
+ * it raised or lost its console process, and nothing while it runs.
+ */
+function cameTo({ outcome }: EvaluationEntry) {
+  if (outcome === null) return undefined
+  return outcome.kind === "result" ? "result" : "error"
+}
+
+/**
+ * An evaluation's entry: its input, then what it printed, then its answer, and its status strip
+ * under them all. Its Pretty | Raw is its own, and opens pretty.
+ */
 function Evaluation({
   entry,
   row,
@@ -130,37 +142,24 @@ function Evaluation({
 }) {
   const entryCut: EntryCut = row?.kind === "held" ? { openResult: () => onShowRow(row.row, "result") } : IN_PLACE
   const inputMatches = useMatches(entry.input)
+  const rawView = useState(false)
 
   return (
     <>
-      {/* Spaced from what follows, so a result's controls, which stand taller than its first line,
-          clear the row link at the same edge. */}
-      <div className="mb-1 flex items-baseline gap-3">
-        <Text className="min-w-0 flex-auto text-strong">
-          <Marker>{"› "}</Marker>
-          <RubyCode source={entry.input} matches={inputMatches} />
-        </Text>
-        {row?.kind === "held" && (
-          <LinkButton className="flex-none" onClick={() => onShowRow(row.row, "timeline")}>
-            {counts(row.row)}
-          </LinkButton>
-        )}
-        {row?.kind === "evicted" && (
-          <span
-            className="flex-none font-ui text-xs text-faint"
-            title={`The Reader keeps only its latest ${LOAD_ON_OPEN_EVENTS.toLocaleString("en")} events, and let go of the queries and log lines this ran as some of the oldest`}
-          >
-            queries cleared to save memory
-          </span>
-        )}
-      </div>
+      <Text className="text-strong">
+        <Marker>{"› "}</Marker>
+        <RubyCode source={entry.input} matches={inputMatches} />
+      </Text>
       <Printed output={entry.output} cut={entry.outputCut} entryCut={entryCut} />
-      {entry.outcome !== null && <Answer outcome={entry.outcome} railsRoot={railsRoot} entryCut={entryCut} />}
+      {entry.outcome !== null && <Answer outcome={entry.outcome} railsRoot={railsRoot} entryCut={entryCut} rawView={rawView} bare />}
+      {/* Out to the block's sides, short of its coloured edge, so the hairline over it spans the block. */}
+      <StatusStrip
+        className="mt-1.5 -mr-3 -ml-2.5 pr-3 pl-2.5"
+        outcome={entry.outcome}
+        row={row}
+        onShowRow={onShowRow}
+        rawView={rawView}
+      />
     </>
   )
-}
-
-/** A row's SQL and log counts: `3 queries · 1 log`. */
-function counts({ sqlCount, logCount }: EvaluationRow) {
-  return `${sqlCount} ${sqlCount === 1 ? "query" : "queries"} · ${logCount} ${logCount === 1 ? "log" : "logs"}`
 }

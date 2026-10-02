@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { within } from "@testing-library/react"
+import { act, waitFor, within } from "@testing-library/react"
 
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { EvaluationEntry, Outcome, ReplSnapshot, ReplState, RubyNode, StartedConsole, TranscriptEntry } from "../src/shared/repl"
@@ -24,9 +24,9 @@ import {
 import { aRun } from "./sidecar.fixtures"
 
 /**
- * A *Transcript* entry's link to its *Evaluation row*, and the cut that keeps one long entry
- * from burying the rest, through the rendered Reader over a seeded fold and a stand-in *REPL*
- * session.
+ * A *Transcript* entry's status strip, with its link to its *Evaluation row*, and the cut that
+ * keeps one long entry from burying the rest, through the rendered Reader over a seeded fold and
+ * a stand-in *REPL* session.
  */
 
 afterEach(() => {
@@ -69,9 +69,9 @@ function textResult(text: string): Outcome {
   return { kind: "result", className: "Object", text, cut: false, tree: { type: "object", inspect: text }, inspectError: null }
 }
 
-/** The console Run `PID`, booted. */
-function consoleRun() {
-  const run = aRun("con-1")
+/** The console Run `PID`, booted, its wall clock from `epoch`. */
+function consoleRun(epoch?: number) {
+  const run = aRun("con-1", epoch)
   return { run, header: run.header("console", PID) }
 }
 
@@ -112,19 +112,115 @@ function theEntry(at = 0) {
   return found
 }
 
-describe("a Transcript entry's row link", () => {
-  test("says its row's SQL and log counts", async () => {
-    const { run, header } = consoleRun()
-    await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
+function statusStrip(at = 0) {
+  return within(theEntry(at)).getByRole("group", { name: "Status" })
+}
 
-    expect(within(theEntry()).getByRole("button", { name: "3 queries · 1 log" })).toBeInTheDocument()
+function rowLink(at = 0) {
+  return within(statusStrip(at)).getByRole("button", { name: /quer/ })
+}
+
+/** The seconds a time in `element`'s text reads, such as the `5.2` of `no queries · 5.2s`. */
+function seconds(element: HTMLElement) {
+  const found = element.textContent?.match(/([\d.]+)s\b/)
+  if (found === null || found === undefined) throw new Error(`no seconds in ${element.textContent}`)
+  return Number(found[1])
+}
+
+describe("a Transcript entry's status strip", () => {
+  test("carries the row link, with nothing beside the input or the result", async () => {
+    const { run, header } = consoleRun()
+    await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)]], { transcript: [entry({ id: 1, outcome: hashOf(2) })] })
+
+    const strip = statusStrip()
+    expect(within(strip).getByRole("button", { name: "3 queries · 1 log · 500ms" })).toBeInTheDocument()
+    expect(within(strip).getByRole("group", { name: "Show the result as" })).toBeInTheDocument()
+    expect(within(strip).getByRole("button", { name: "Copy result" })).toBeInTheDocument()
+    expect(within(theEntry()).getAllByRole("button", { name: /quer|Copy result|Pretty|Raw/ }).every((button) => strip.contains(button))).toBe(true)
   })
 
-  test("counts one query and many logs in their own words", async () => {
+  test("says a result's class", async () => {
     const { run, header } = consoleRun()
-    await theReader([[header, ...recorded(run, 1, "Post.count", 1, 2)]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
+    await theReader([[header, ...recorded(run, 1, "Post.count")]], { transcript: [entry({ id: 1, outcome: hashOf(2) })] })
 
-    expect(within(theEntry()).getByRole("button", { name: "1 query · 2 logs" })).toBeInTheDocument()
+    expect(within(statusStrip()).getByText("Hash")).toBeInTheDocument()
+    expect(theEntry()).toHaveAttribute("data-outcome", "result")
+  })
+
+  test("counts one query and many logs in their own words, and leaves a zero out", async () => {
+    const { run, header } = consoleRun()
+    await theReader([[header, ...recorded(run, 1, "Post.count", 1, 2), ...recorded(run, 2, "Comment.count", 2, 0)]], {
+      transcript: [entry({ id: 1, outcome: INTEGER }), entry({ id: 2, input: "Comment.count", outcome: INTEGER })],
+    })
+
+    expect(within(statusStrip(0)).getByRole("button", { name: "1 query · 2 logs · 400ms" })).toBeInTheDocument()
+    expect(within(statusStrip(1)).getByRole("button", { name: "2 queries · 300ms" })).toBeInTheDocument()
+  })
+
+  test("reads no queries when every count is zero", async () => {
+    const { run, header } = consoleRun()
+    await theReader([[header, ...recorded(run, 1, "Post.count")]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
+
+    expect(within(statusStrip()).getByRole("button", { name: "no queries · 100ms" })).toBeInTheDocument()
+  })
+
+  test("says a second and more in seconds", async () => {
+    const { run, header } = consoleRun()
+    await theReader([[header, ...recorded(run, 1, "Post.count", 12)]], {
+      transcript: [entry({ id: 1, outcome: INTEGER })],
+    })
+
+    expect(within(statusStrip()).getByRole("button", { name: "12 queries · 1.3s" })).toBeInTheDocument()
+  })
+
+  test("says running, its time climbing from when it started", async () => {
+    const { run, header } = consoleRun(Date.now() - 5_000)
+    await theReader([[header, run.evaluationStart(recordedAs(1), "sleep 10")]], {
+      state: { kind: "busy", pid: PID, id: 1, since: Date.now() - 5_000 },
+      transcript: [entry({ id: 1, input: "sleep 10" })],
+    })
+
+    expect(within(statusStrip()).getByText("running…")).toBeInTheDocument()
+    // Nearly five seconds ago, by the Run's clock.
+    const first = seconds(rowLink())
+    expect(first).toBeGreaterThan(4.5)
+    await waitFor(() => expect(seconds(rowLink())).toBeGreaterThan(first))
+    expect(theEntry()).not.toHaveAttribute("data-outcome")
+  })
+
+  test("freezes an Interrupted row's time at its last reading", async () => {
+    const { run, header } = consoleRun(Date.now() - 5_000)
+    await theReader([[header, run.evaluationStart(recordedAs(1), "sleep 10"), run.end()]], {
+      state: { kind: "exited", code: null, signal: "SIGKILL", stderr: "" },
+      transcript: [entry({ id: 1, input: "sleep 10", outcome: { kind: "lost" } })],
+    })
+
+    const reading = seconds(rowLink())
+    expect(reading).toBeLessThan(1)
+
+    // Long enough for a climbing time to have moved on a tenth of a second.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 250)))
+
+    expect(seconds(rowLink())).toBe(reading)
+  })
+
+  test("says raised, and edges the block in the error colour", async () => {
+    const { run, header } = consoleRun()
+    const raised: Outcome = { kind: "error", className: "RuntimeError", message: "boom", backtrace: [], causes: [] }
+    await theReader([[header, run.evaluationStart(recordedAs(1)), run.evaluationFinish(recordedAs(1), { outcome: "raised", class: "RuntimeError", message: "boom" })]], {
+      transcript: [entry({ id: 1, outcome: raised })],
+    })
+
+    expect(within(statusStrip()).getByText("raised")).toBeInTheDocument()
+    expect(theEntry()).toHaveAttribute("data-outcome", "error")
+    expect(within(statusStrip()).queryByRole("button", { name: "Copy result" })).not.toBeInTheDocument()
+  })
+
+  test("says when the console process died before it answered, and edges the block in the error colour", async () => {
+    await theReader([[]], { state: { kind: "exited", code: null, signal: "SIGKILL", stderr: "" }, transcript: [entry({ id: 1, outcome: { kind: "lost" } })] })
+
+    expect(within(statusStrip()).getByText("lost its console")).toBeInTheDocument()
+    expect(theEntry()).toHaveAttribute("data-outcome", "error")
   })
 
   test("selects the row on Timeline, though another tab was chosen", async () => {
@@ -136,7 +232,7 @@ describe("a Transcript entry's row link", () => {
     await user.click(rowShowing("Comment.count"))
     await showDetailTab(user, "Result")
 
-    await user.click(within(theEntry(0)).getByRole("button", { name: "3 queries · 1 log" }))
+    await user.click(rowLink(0))
 
     expect(rowShowing("Post.count")).toHaveAttribute("aria-selected", "true")
     expect(detailTab("Timeline")).toHaveAttribute("aria-selected", "true")
@@ -147,7 +243,7 @@ describe("a Transcript entry's row link", () => {
     const { user } = await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
     await user.click(tab("Requests"))
 
-    await user.click(within(theEntry()).getByRole("button", { name: "3 queries · 1 log" }))
+    await user.click(rowLink())
 
     expect(tab("All")).toHaveAttribute("aria-selected", "true")
     expect(rowShowing("Post.count")).toHaveAttribute("aria-selected", "true")
@@ -160,13 +256,14 @@ describe("a Transcript entry's row link", () => {
     })
     expect(activityRows().some((row) => within(row).queryByText("Post.count") !== null)).toBe(false)
 
-    expect(within(theEntry()).getByText("queries cleared to save memory")).toBeInTheDocument()
+    expect(within(statusStrip()).getByText("queries cleared to save memory")).toBeInTheDocument()
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
   })
 
-  test("is absent for an entry with no row", async () => {
+  test("has no row link for an entry with no row", async () => {
     await theReader([[]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
 
+    expect(within(statusStrip()).getByText("Integer")).toBeInTheDocument()
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
     expect(within(theEntry()).queryByText("queries cleared to save memory")).not.toBeInTheDocument()
   })
@@ -176,10 +273,10 @@ describe("a Transcript entry's row link", () => {
     const standalone: TranscriptEntry = { kind: "output", id: 1, output: "Loading development environment\n", outputCut: false }
     await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)]], { transcript: [standalone] })
 
-    expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
+    expect(within(theEntry()).queryByRole("group", { name: "Status" })).not.toBeInTheDocument()
   })
 
-  test("is absent for a row another console process ran", async () => {
+  test("has no row link for a row another console process ran", async () => {
     const { run, header } = consoleRun()
     await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)]], {
       consoles: [{ pid: PID, cleared: true }, { pid: PID + 1, cleared: false }],
@@ -188,6 +285,51 @@ describe("a Transcript entry's row link", () => {
     })
 
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
+  })
+})
+
+describe("a Transcript result's controls", () => {
+  /** `hashOf(2)` as `pretty_inspect` writes it, which is not its `inspect`. */
+  const PRETTY_INSPECT = "{k1: 1,\n k2: 2}\n"
+
+  function controls() {
+    return within(statusStrip())
+  }
+
+  test("show the result pretty, and Raw shows its pretty_inspect text", async () => {
+    const { user } = await theReader([[]], { transcript: [entry({ id: 1, outcome: { ...hashOf(2), text: PRETTY_INSPECT } as Outcome })] })
+    expect(controls().getByRole("button", { name: "Pretty" })).toHaveAttribute("aria-pressed", "true")
+
+    await user.click(controls().getByRole("button", { name: "Raw" }))
+
+    expect(controls().getByRole("button", { name: "Raw" })).toHaveAttribute("aria-pressed", "true")
+    expect(within(theEntry()).queryByRole("tree")).not.toBeInTheDocument()
+    expect(within(theEntry()).getByText(wholeText(PRETTY_INSPECT))).toBeInTheDocument()
+  })
+
+  test("copy what is showing, and confirm it", async () => {
+    const outcome = { ...hashOf(2), text: PRETTY_INSPECT } as Outcome
+    const { user } = await theReader([[]], { transcript: [entry({ id: 1, outcome })] })
+    const copy = controls().getByRole("button", { name: "Copy result" })
+
+    await user.click(copy)
+
+    expect(await navigator.clipboard.readText()).toBe("{k1: 1, k2: 2}")
+    expect(copy).toHaveTextContent("Copied")
+
+    await user.click(controls().getByRole("button", { name: "Raw" }))
+    await user.click(copy)
+
+    expect(await navigator.clipboard.readText()).toBe(PRETTY_INSPECT)
+  })
+
+  test("are Copy alone for a value with no structure to draw", async () => {
+    const { user } = await theReader([[]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
+
+    expect(controls().queryByRole("group", { name: "Show the result as" })).not.toBeInTheDocument()
+    await user.click(controls().getByRole("button", { name: "Copy result" }))
+
+    expect(await navigator.clipboard.readText()).toBe("3")
   })
 })
 

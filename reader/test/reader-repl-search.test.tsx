@@ -166,10 +166,10 @@ describe("Search in the Transcript", () => {
       transcript: [entry({ output: lines(25), outcome: textResult("3") }), entry({ id: 2, input: "exit!", outcome: { kind: "lost" } })],
     })
 
-    expect(within(theEntry()).getByRole("button", { name: "0 queries · 0 logs" })).toBeInTheDocument()
+    expect(within(theEntry()).getByRole("button", { name: "no queries · 100ms" })).toBeInTheDocument()
     expect(theEntry()).toHaveTextContent("…5 more lines · open in Result")
 
-    for (const term of ["queries", "more lines", "open in Result", "=>", "›", "exited"]) {
+    for (const term of ["queries", "more lines", "open in Result", "=>", "›", "exited", "lost its console", "Copy"]) {
       await search(user, term)
       expect(lit(transcript())).toEqual([])
     }
