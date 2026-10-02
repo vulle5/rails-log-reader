@@ -474,9 +474,9 @@ export function ReplPrompt({
         {/* The input is as tall as its text, which this invisible copy of it sets: the one of the
             three boxes in the flow. Grey text is drawn but never sizes it. Its height is capped at
             the smaller of 12 lines and half the drawer's body, which is its container less the
-            hint row's `h-5`, in whole lines, and never less than one. */}
+            hint row's `h-6`, in whole lines, and never less than one. */}
         <div
-          className="pointer-events-none invisible max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.25rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
+          className="pointer-events-none invisible max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.5rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
           aria-hidden="true"
         >
           {input}{" "}
@@ -540,9 +540,9 @@ export function ReplPrompt({
           }}
         />
       </div>
-      <div className="flex h-5 flex-none items-center gap-3 px-3">
+      <div className="flex h-6 flex-none items-center gap-3 px-3 pb-1">
         <div
-          className={cn("min-w-0 flex-auto truncate text-xs @container", notice === null ? "text-faint" : notice.error ? "text-error" : "text-muted")}
+          className={cn("min-w-0 flex-auto truncate text-xs leading-5 @container", notice === null ? "text-faint" : notice.error ? "text-error" : "text-muted")}
           role="status"
         >
           {notice?.reason ?? (

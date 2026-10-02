@@ -47,7 +47,7 @@ export function InputHistoryList({
 
   return (
     // The container is sized by the drawer's body, so the list never outgrows the room over the prompt.
-    <div className="absolute bottom-full left-2 z-10 mb-1 flex max-h-[min(14rem,calc(100cqh-5.5rem))] w-[min(36rem,calc(100%-1rem))] flex-col overflow-hidden rounded-md border border-outline bg-raised shadow-dialog">
+    <div className="absolute bottom-full left-2 z-10 mb-1 flex max-h-[min(14rem,calc(100cqh-5.75rem))] w-[min(36rem,calc(100%-1rem))] flex-col overflow-hidden rounded-md border border-outline bg-raised shadow-dialog">
       <p className="flex-none border-b border-border px-2 py-1 text-xs text-muted">
         History {filter === "" ? <span className="text-faint">— type to filter</span> : <span className="font-mono text-foreground">“{filter}”</span>}
       </p>

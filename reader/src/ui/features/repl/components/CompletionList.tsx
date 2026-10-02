@@ -52,7 +52,7 @@ export function CompletionList({
 
   return (
     <div
-      className="absolute z-10 flex max-h-[min(12rem,calc(100cqh-5.5rem))] w-72 -translate-y-full flex-col overflow-hidden rounded-md border border-outline bg-raised shadow-dialog"
+      className="absolute z-10 flex max-h-[min(12rem,calc(100cqh-5.75rem))] w-72 -translate-y-full flex-col overflow-hidden rounded-md border border-outline bg-raised shadow-dialog"
       style={position}
     >
       {receiver !== null && <p className="flex-none truncate border-b border-border px-2 py-1 font-mono text-xs text-muted">{receiver}</p>}
