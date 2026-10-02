@@ -2,6 +2,8 @@ import type { Envelope } from "../src/shared/wire"
 
 const RUN_ID = "6f1a2c30-4b8e-4a11-9d0e-2f7c5a9b1e44"
 const REQUEST_ID = "b3d9f0c2-71a4-4f2d-8f2a-1c6e0d5b7a93"
+const CONSOLE_RUN_ID = "0c4e7a19-2d53-4f6b-a8e1-93b2d7f0c615"
+const EVALUATION_ID = "repl-5e0a9c1d-3"
 
 /**
  * One envelope per event type, as the Initializer would write it for the Example app.
@@ -9,7 +11,7 @@ const REQUEST_ID = "b3d9f0c2-71a4-4f2d-8f2a-1c6e0d5b7a93"
  */
 export const SAMPLE_ENVELOPES: Envelope[] = [
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 1,
     at_mono: 118_492_300_000,
@@ -25,7 +27,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 2,
     at_mono: 118_492_400_000,
@@ -35,7 +37,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     payload: { method: "GET", path: "/posts/12" },
   },
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 3,
     at_mono: 118_493_100_000,
@@ -45,7 +47,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     payload: { controller: "PostsController", action: "show", format: "html", params: { pairs: [["id", "12"]] } },
   },
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 4,
     at_mono: 118_494_050_000,
@@ -63,7 +65,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 5,
     at_mono: 118_494_900_000,
@@ -78,7 +80,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 6,
     at_mono: 118_501_700_000,
@@ -88,7 +90,7 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     payload: { status: 200, duration_ms: 78.3, view_runtime_ms: 61.2, db_runtime_ms: 1.4 },
   },
   {
-    v: 4,
+    v: 5,
     run_id: RUN_ID,
     seq: 7,
     at_mono: 118_502_300_000,
@@ -112,7 +114,27 @@ export const SAMPLE_ENVELOPES: Envelope[] = [
     },
   },
   {
-    v: 4,
+    v: 5,
+    run_id: CONSOLE_RUN_ID,
+    seq: 1,
+    at_mono: 412_900_100_000,
+    at_wall: 1_756_915_300_010,
+    request_id: EVALUATION_ID,
+    type: "evaluation_start",
+    payload: { input: "Post.where(published: true).count", sandbox: false },
+  },
+  {
+    v: 5,
+    run_id: CONSOLE_RUN_ID,
+    seq: 2,
+    at_mono: 412_904_300_000,
+    at_wall: 1_756_915_300_014,
+    request_id: EVALUATION_ID,
+    type: "evaluation_finish",
+    payload: { outcome: "raised", class: "ActiveRecord::StatementInvalid", message: "no such column: posts.published", db_runtime_ms: 0.8 },
+  },
+  {
+    v: 5,
     run_id: RUN_ID,
     seq: 8,
     at_mono: 902_118_400_000,

@@ -1,6 +1,6 @@
 import { createContext, useEffect, useState } from "react"
 
-import { openModifierKey } from "../../../lib/platform"
+import { openModifierKey } from "../lib/platform"
 
 /**
  * Whether `openModifier` is down right now. Let go of on the window losing focus too, since a

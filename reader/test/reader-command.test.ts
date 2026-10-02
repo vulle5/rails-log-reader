@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { appendFile, cp, mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises"
+import { networkInterfaces, tmpdir } from "node:os"
 import { join } from "node:path"
+import { WebSocket } from "ws"
 
+import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "../src/server/allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "../src/server/app-name"
 import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
+import { EMPTY_SNAPSHOT, type ReplCommand, type ReplMessage } from "../src/shared/repl"
 import type { Envelope } from "../src/shared/wire"
+import { stubConsoleHeard, stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
 import { aRun, appendToSidecar } from "./sidecar.fixtures"
 
 const SERVER = Bun.fileURLToPath(new URL("../src/server/index.ts", import.meta.url))
@@ -68,23 +72,56 @@ function spawnReader(entry: string, cwd: string, env: Record<string, string>) {
 }
 
 /**
+ * Everything a Reader has printed so far, read for as long as it runs. Kept per Reader rather
+ * than read afresh, because a stream stops being readable once one reader lets go of it, and
+ * the Reader goes on printing after the line that says where it is.
+ */
+type Transcript = { said: string; grew: Promise<boolean> }
+
+const transcripts = new WeakMap<Bun.Subprocess, Transcript>()
+
+function transcriptOf(reader: Bun.Subprocess) {
+  const existing = transcripts.get(reader)
+  if (existing !== undefined) return existing
+
+  // `grew` settles each time more arrives, `true`, and once more when stdout closes, `false`.
+  let settle = (_more: boolean) => {}
+  const pending = () => new Promise<boolean>((resolve) => (settle = resolve))
+  const transcript: Transcript = { said: "", grew: pending() }
+
+  void (async () => {
+    const decoder = new TextDecoder()
+    for await (const chunk of reader.stdout as ReadableStream<Uint8Array>) {
+      transcript.said += decoder.decode(chunk, { stream: true })
+      const grown = settle
+      transcript.grew = pending()
+      grown(true)
+    }
+    settle(false)
+  })()
+
+  transcripts.set(reader, transcript)
+  return transcript
+}
+
+/** The first match for `pattern` in what the Reader has printed, once it has printed one. */
+async function printed(reader: Bun.Subprocess, pattern: RegExp) {
+  const transcript = transcriptOf(reader)
+
+  while (true) {
+    const found = transcript.said.match(pattern)
+    if (found !== null) return found
+    if (!(await transcript.grew)) throw new Error(`the Reader never printed ${pattern}, only: ${transcript.said}`)
+  }
+}
+
+/**
  * Where the Reader says it is, read from the line it prints on the way up. That line is
  * written after the socket is bound, so arriving at it is also how these tests know the
  * Reader is up — there is nothing to poll and no port to have guessed.
  */
 async function readerUrl(reader: Bun.Subprocess) {
-  const stream = reader.stdout as ReadableStream<Uint8Array>
-  const decoder = new TextDecoder()
-  let said = ""
-
-  for await (const chunk of stream) {
-    said += decoder.decode(chunk, { stream: true })
-
-    const announced = said.match(/(http:\/\/\S+)/)
-    if (announced?.[1] !== undefined) return announced[1]
-  }
-
-  throw new Error(`the Reader never said where it was, only: ${said}`)
+  return (await printed(reader, /(http:\/\/\S+)/))[1] ?? ""
 }
 
 /** `Bun.fetch` rather than the global, which the shell tests replace with happy-dom's. */
@@ -286,8 +323,73 @@ describe("starting the Reader", () => {
   })
 })
 
+/**
+ * A copy of the Reader to edit, so that a test can change its UI sources without changing the
+ * ones this suite runs from. Its `node_modules` is this one's, linked rather than copied.
+ */
+async function readerCopy() {
+  const copy = await emptyDirectory()
+  const own = join(import.meta.dir, "..")
+  for (const entry of ["bin", "src", "rails", "bunfig.toml", "package.json", "tsconfig.json"]) {
+    await cp(join(own, entry), join(copy, entry), { recursive: true })
+  }
+  await symlink(join(own, "node_modules"), join(copy, "node_modules"))
+  return copy
+}
+
+/** The page at `url` and every script and stylesheet it loads, as one string. */
+async function servedPage(url: string) {
+  const page = await (await Bun.fetch(url)).text()
+  const assets = [...page.matchAll(/(?:src|href)="(\/_bun\/[^"]+)"/g)].map((found) => found[1] ?? "")
+  const served = await Promise.all(assets.map(async (asset) => await (await Bun.fetch(new URL(asset, url))).text()))
+  return [page, ...served].join("\n")
+}
+
+/** Whether the page at `url` comes to serve `text` within a few seconds of it being written. */
+async function comesToServe(url: string, text: string) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if ((await servedPage(url)).includes(text)) return true
+    await Bun.sleep(200)
+  }
+  return false
+}
+
+describe("developing the Reader", () => {
+  test("serves a UI source that was replaced by a rename, and every edit to it after", async () => {
+    const copy = await readerCopy()
+    const reader = Bun.spawn([Bun.which("bun") ?? "bun", join(copy, "bin", "rails-log-reader.ts"), "--hot"], {
+      cwd: await railsRoot(),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, [PORT_VARIABLE]: "0" },
+    })
+    started.push(reader)
+    const url = await readerUrl(reader)
+    await servedPage(url)
+
+    // Written beside the source and renamed over it, the way an editor or an agent saves.
+    const source = join(copy, "src", "ui", "main.tsx")
+    await writeFile(`${source}.saving`, `${await readFile(source, "utf8")}\nconsole.log("renamed over")\n`)
+    await rename(`${source}.saving`, source)
+    expect(await comesToServe(url, "renamed over")).toBe(true)
+
+    await appendFile(source, `console.log("edited in place")\n`)
+    expect(await comesToServe(url, "edited in place")).toBe(true)
+  })
+})
+
 /** The Reader's own master copy, read the same way `initializerFileStatus` reads it. */
 const MASTER_INITIALIZER = join(import.meta.dir, "..", "rails", "rails_log_reader.rb")
+
+const STALE_INITIALIZER = "# a stale copy of the Initializer\n"
+
+/** A Host app with a copy of the Initializer that has drifted from the master. */
+async function staleRoot() {
+  const root = await railsRoot()
+  await mkdir(join(root, "config", "initializers"), { recursive: true })
+  await writeFile(join(root, INITIALIZER_RELATIVE_PATH), STALE_INITIALIZER)
+  return root
+}
 
 /** What `GET /initializer-status` answers, with the Marker file absent unless a test says otherwise. */
 function answer(said: { installed: boolean; current: boolean; enabled?: boolean }) {
@@ -314,9 +416,7 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
   })
 
   test("GET /initializer-status says not current when the copy has drifted", async () => {
-    const root = await railsRoot()
-    await mkdir(join(root, "config", "initializers"), { recursive: true })
-    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+    const root = await staleRoot()
     const url = await readerUrl(run(root))
 
     const response = await Bun.fetch(new URL("initializer-status", url))
@@ -335,12 +435,13 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
   })
 
   test("POST /initializer-repair overwrites the copy in place and touches nothing else", async () => {
-    const root = await railsRoot()
-    await mkdir(join(root, "config", "initializers"), { recursive: true })
-    await writeFile(join(root, INITIALIZER_RELATIVE_PATH), "# a stale copy of the Initializer\n")
+    const root = await staleRoot()
     const url = await readerUrl(run(root))
 
-    const repaired = await Bun.fetch(new URL("initializer-repair", url), { method: "POST" })
+    const repaired = await Bun.fetch(new URL("initializer-repair", url), {
+      method: "POST",
+      headers: { origin: new URL(url).origin },
+    })
 
     expect(await repaired.json()).toEqual({ ok: true })
     expect(await readFile(join(root, INITIALIZER_RELATIVE_PATH))).toEqual(await readFile(MASTER_INITIALIZER))
@@ -349,6 +450,417 @@ describe("the Initializer's version-mismatch surface (#29)", () => {
 
     const status = await Bun.fetch(new URL("initializer-status", url))
     expect(await status.json()).toEqual(answer({ installed: true, current: true }))
+  })
+})
+
+/**
+ * A request as a browser on some other page would send it: the `Host` it was addressed to and
+ * the `Origin` of the page that sent it, either of which may be absent. Sent to the Reader's
+ * own socket whatever `Host` says, the way a rebound name arrives.
+ */
+async function requestAs(
+  url: string,
+  path: string,
+  { host, origin, method = "GET" }: { host?: string; origin?: string; method?: string },
+) {
+  const headers: Record<string, string> = {}
+  if (host !== undefined) headers.host = host
+  if (origin !== undefined) headers.origin = origin
+  return await Bun.fetch(new URL(path, url), { method, headers })
+}
+
+async function repaired(root: string) {
+  return (await readFile(join(root, INITIALIZER_RELATIVE_PATH), "utf8")) !== STALE_INITIALIZER
+}
+
+describe("who the Reader answers", () => {
+  test("listens on 127.0.0.1 alone, and says it is on localhost", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const port = new URL(url).port
+
+    expect(url).toBe(`http://localhost:${port}/`)
+    expect((await Bun.fetch(`http://127.0.0.1:${port}/app-name-override`)).status).toBe(200)
+
+    const elsewhere = Object.values(networkInterfaces())
+      .flat()
+      .filter((address) => address !== undefined && !address.internal && address.family === "IPv4")
+      .map((address) => address?.address)
+    for (const address of ["[::1]", ...elsewhere]) {
+      await expect(Bun.fetch(`http://${address}:${port}/app-name-override`)).rejects.toThrow()
+    }
+  })
+
+  test("refuses a view and an act addressed to a Host outside the allowlist, and names the Host", async () => {
+    const root = await staleRoot()
+    const reader = run(root)
+    const url = await readerUrl(reader)
+
+    const view = await requestAs(url, "/", { host: "rebound.example:5273" })
+    const act = await requestAs(url, "/initializer-repair", {
+      method: "POST",
+      host: "elsewhere.example",
+      origin: "http://elsewhere.example",
+    })
+
+    expect(view.status).toBe(403)
+    expect(await view.text()).toBe("")
+    expect(act.status).toBe(403)
+    expect(await act.text()).toBe("")
+    expect(await repaired(root)).toBe(false)
+    await printed(reader, /refused.*Host rebound\.example:5273/)
+    await printed(reader, /refused.*Host elsewhere\.example/)
+  })
+
+  test("serves localhost and 127.0.0.1 on any port, so a remapped forward still works", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    for (const host of ["localhost:8080", "127.0.0.1:5274", "localhost"]) {
+      expect((await requestAs(url, "/", { host })).status).toBe(200)
+    }
+  })
+
+  test("serves views to a host in RAILS_LOG_READER_ALLOWED_HOSTS, a leading dot's subdomains included, and refuses it acts", async () => {
+    const root = await staleRoot()
+    const reader = run(root, { [ALLOWED_HOSTS_VARIABLE]: "tunnel.example, .ngrok.example" })
+    const url = await readerUrl(reader)
+
+    for (const host of ["tunnel.example", "abc.ngrok.example:443", "ngrok.example"]) {
+      expect((await requestAs(url, "/", { host })).status).toBe(200)
+      expect((await requestAs(url, "/initializer-status", { host, origin: `http://${host}` })).status).toBe(200)
+    }
+    expect((await requestAs(url, "/", { host: "other.tunnel.example" })).status).toBe(403)
+
+    // A tunnel serves the page over https and passes it on as http, so the browser's Origin
+    // names the scheme the page was loaded on, not the one the Reader was reached on.
+    expect((await requestAs(url, "/initializer-status", { host: "tunnel.example", origin: "https://tunnel.example" })).status).toBe(200)
+    expect((await requestAs(url, "/initializer-status", { host: "tunnel.example", origin: "https://elsewhere.example" })).status).toBe(403)
+
+    const act = await requestAs(url, "/initializer-repair", {
+      method: "POST",
+      host: "tunnel.example",
+      origin: "http://tunnel.example",
+    })
+    expect(act.status).toBe(403)
+    expect(await repaired(root)).toBe(false)
+    await printed(reader, /refused.*Host tunnel\.example/)
+  })
+
+  test("repairs the Initializer only for the Reader's own exact Origin", async () => {
+    const root = await staleRoot()
+    const reader = run(root)
+    const url = await readerUrl(reader)
+    const host = new URL(url).host
+
+    for (const origin of ["http://attacker.example", "http://localhost:3000", `https://${host}`, "null", undefined]) {
+      const refused = await requestAs(url, "/initializer-repair", { method: "POST", host, origin })
+      expect(refused.status).toBe(403)
+    }
+    expect(await repaired(root)).toBe(false)
+    await printed(reader, /refused.*Origin http:\/\/localhost:3000/)
+
+    const accepted = await requestAs(url, "/initializer-repair", { method: "POST", host, origin: `http://${host}` })
+    expect(accepted.status).toBe(200)
+    expect(await repaired(root)).toBe(true)
+  })
+
+  test("refuses a GET whose Origin is not its own, and serves one with none", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+
+    expect((await requestAs(url, "/initializer-status", { host, origin: "http://localhost:3000" })).status).toBe(403)
+    expect((await requestAs(url, "/", { host, origin: "null" })).status).toBe(403)
+    expect((await requestAs(url, "/initializer-status", { host })).status).toBe(200)
+    expect((await requestAs(url, "/initializer-status", { host, origin: `http://${host}` })).status).toBe(200)
+  })
+
+  test("answers anything no route declares only as the page, read with GET or HEAD", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+    const origin = `http://${host}`
+
+    for (const [method, path] of [["POST", "/nowhere"], ["PUT", "/"], ["DELETE", "/initializer-repair"]] as const) {
+      expect((await requestAs(url, path, { method, host, origin })).status).toBe(405)
+    }
+    expect((await requestAs(url, "/nowhere", { method: "HEAD", host })).status).toBe(200)
+  })
+
+  test("opens no socket that no route declares, the development page's own aside", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+
+    const upgrade = (path: string) =>
+      Bun.fetch(new URL(path, url), {
+        headers: {
+          host,
+          origin: `http://${host}`,
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+        },
+      })
+
+    expect((await upgrade("/nowhere")).status).toBe(404)
+    expect((await upgrade("/_bun/hmr")).status).toBe(101)
+  })
+
+  test("never says Access-Control-Allow-Origin, whether it serves or refuses", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+    const host = new URL(url).host
+
+    const routes = ["/", "/earlier?from=0", "/app-name-override", "/initializer-status", "/reader-port", "/nowhere"]
+    for (const origin of [undefined, `http://${host}`, "http://attacker.example"]) {
+      for (const path of routes) {
+        for (const method of ["GET", "OPTIONS"]) {
+          const response = await requestAs(url, path, { host, origin, method })
+          expect(response.headers.get("access-control-allow-origin")).toBeNull()
+          await response.body?.cancel()
+        }
+      }
+      const repair = await requestAs(url, "/initializer-repair", { method: "POST", host: "attacker.example", origin })
+      expect(repair.headers.get("access-control-allow-origin")).toBeNull()
+    }
+  })
+
+  test("tells the page which port it is on, which a tunnelled page cannot read off its own address", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    const response = await Bun.fetch(new URL("reader-port", url))
+
+    expect(await response.json()).toEqual({ port: Number(new URL(url).port) })
+  })
+})
+
+/**
+ * The page's side of `/repl`: a WebSocket that is sent every message as it arrives and hands
+ * back the first one after a given point that `holds` is true of.
+ */
+function replSocket(url: string, origin: string) {
+  const socket = new WebSocket(url.replace(/^http/, "ws") + "repl", { headers: { origin } })
+  const received: ReplMessage[] = []
+  let arrived = () => {}
+  socket.on("message", (data) => {
+    received.push(JSON.parse(String(data)) as ReplMessage)
+    arrived()
+  })
+  const opened = new Promise<void>((resolve, reject) => {
+    socket.on("open", resolve)
+    socket.on("error", reject)
+  })
+
+  return {
+    async send(command: ReplCommand) {
+      await opened
+      socket.send(JSON.stringify(command))
+    },
+    async next(holds: (message: ReplMessage) => boolean, from = 0) {
+      const deadline = Date.now() + 10_000
+      while (true) {
+        const found = received.slice(from).find(holds)
+        if (found !== undefined) return found
+        if (Date.now() > deadline) throw new Error(`no such message, only ${JSON.stringify(received)}`)
+        await new Promise<void>((resolve) => {
+          arrived = resolve
+          setTimeout(resolve, 100)
+        })
+      }
+    },
+    received,
+    close: () => socket.close(),
+  }
+}
+
+describe("the REPL socket", () => {
+  async function aReaderOverTheStubConsole() {
+    const root = await stubConsoleRoot()
+    temporary.push(root)
+    const url = await readerUrl(run(root))
+    return { root, url, origin: `http://${new URL(url).host}` }
+  }
+
+  test("opens on the session's snapshot, and runs Ruby in the console process end to end", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+
+    expect(await repl.next((message) => message.type === "snapshot")).toEqual({ type: "snapshot", snapshot: EMPTY_SNAPSHOT })
+
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+    await repl.send({ type: "submit", input: "1 + 1" })
+
+    expect(await repl.next((message) => message.type === "finished")).toEqual({
+      type: "finished",
+      id: expect.any(Number),
+      outcome: { kind: "result", className: "Object", text: "1 + 1", cut: false, tree: { type: "object", inspect: "1 + 1" }, inspectError: null },
+    })
+    repl.close()
+  })
+
+  test("shows a tab that opens later the whole Transcript, and refuses its input only to it", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const first = replSocket(url, origin)
+    await first.send({ type: "boot" })
+    await first.next((message) => message.type === "state" && message.state.kind === "ready")
+    await first.send({ type: "submit", input: "sleep 500" })
+    await first.next((message) => message.type === "state" && message.state.kind === "busy")
+
+    const second = replSocket(url, origin)
+    const snapshot = await second.next((message) => message.type === "snapshot")
+    await second.send({ type: "submit", input: "1 + 1" })
+
+    expect(snapshot).toMatchObject({ snapshot: { state: { kind: "busy" }, transcript: [{ kind: "output" }, { input: "sleep 500" }] } })
+    expect(await second.next((message) => message.type === "refused")).toEqual({
+      type: "refused",
+      reason: "Already running. Wait for it to finish.",
+      input: "1 + 1",
+    })
+    await first.next((message) => message.type === "finished")
+    await second.next((message) => message.type === "finished")
+    expect(first.received.some((message) => message.type === "refused")).toBe(false)
+    first.close()
+    second.close()
+  })
+
+  test("interrupts the running evaluation", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+    await repl.send({ type: "submit", input: "nap 60000" })
+    await repl.next((message) => message.type === "output" && message.text === "napping\n")
+
+    await repl.send({ type: "interrupt" })
+
+    expect(await repl.next((message) => message.type === "finished")).toMatchObject({ outcome: { kind: "error", className: "Interrupt" } })
+    repl.close()
+  })
+
+  test("checks whether an input is complete, answering only the tab that asked", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    const other = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+
+    await repl.send({ type: "check", id: 7, text: "[1, 2].each do |x|" })
+    await repl.send({ type: "check", id: 8, text: "1 + 1" })
+
+    expect(await repl.next((message) => message.type === "checked" && message.id === 7)).toEqual({ type: "checked", id: 7, complete: false })
+    expect(await repl.next((message) => message.type === "checked" && message.id === 8)).toEqual({ type: "checked", id: 8, complete: true })
+    expect(other.received.some((message) => message.type === "checked")).toBe(false)
+    repl.close()
+    other.close()
+  })
+
+  test("completes a word, answering only the tab that asked, and refuses while an evaluation runs", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    const other = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+
+    await repl.send({ type: "complete", id: 4, text: '"abc".up', caret: 8 })
+    await repl.send({ type: "complete", id: 5, text: "zzz", caret: 3 })
+
+    expect(await repl.next((message) => message.type === "completions" && message.id === 4)).toEqual({
+      type: "completions",
+      id: 4,
+      completion: {
+        kind: "candidates",
+        from: 6,
+        receiver: "String",
+        candidates: [
+          { text: "upcase", kind: "method" },
+          { text: "upcase!", kind: "method" },
+        ],
+      },
+    })
+    expect(await repl.next((message) => message.type === "completions" && message.id === 5)).toEqual({
+      type: "completions",
+      id: 5,
+      completion: { kind: "none", reason: "Nothing completes “zzz”." },
+    })
+    expect(other.received.some((message) => message.type === "completions")).toBe(false)
+
+    await repl.send({ type: "submit", input: "nap 60000" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "busy")
+    await repl.send({ type: "complete", id: 6, text: "1.ab", caret: 4 })
+
+    expect(await repl.next((message) => message.type === "completions" && message.id === 6)).toEqual({
+      type: "completions",
+      id: 6,
+      completion: { kind: "none", reason: "Completion waits for the running evaluation to finish." },
+    })
+    repl.close()
+    other.close()
+  })
+
+  test("ignores a completion request with no whole-number caret", async () => {
+    const { url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+
+    await repl.send({ type: "complete", id: 1, text: "1.ab", caret: 1.5 })
+    await repl.send({ type: "complete", id: 2, text: "1.ab", caret: 4 })
+
+    await repl.next((message) => message.type === "completions" && message.id === 2)
+    expect(repl.received.some((message) => message.type === "completions" && message.id === 1)).toBe(false)
+    repl.close()
+  })
+
+  test("restarts the console process, sandboxed when asked", async () => {
+    const { root, url, origin } = await aReaderOverTheStubConsole()
+    const repl = replSocket(url, origin)
+    await repl.send({ type: "boot" })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+    const from = repl.received.length
+
+    await repl.send({ type: "restart", sandbox: true })
+    await repl.next((message) => message.type === "state" && message.state.kind === "ready", from)
+
+    expect((await stubConsoleStarts(root)).at(-1)).toContain("--sandbox")
+    repl.close()
+  })
+
+  test("closes the console process's stdin and then sends it SIGTERM when the Reader is stopped by a signal", async () => {
+    for (const signal of ["SIGTERM", "SIGINT"] as const) {
+      const { root, url, origin } = await aReaderOverTheStubConsole()
+      const reader = started.at(-1)!
+      const repl = replSocket(url, origin)
+      await repl.send({ type: "boot" })
+      await repl.next((message) => message.type === "state" && message.state.kind === "ready")
+      await repl.send({ type: "submit", input: "sleep 60000" })
+      await repl.next((message) => message.type === "state" && message.state.kind === "busy")
+
+      reader.kill(signal)
+      await reader.exited
+      const deadline = Date.now() + 2_000
+      while ((await stubConsoleHeard(root)).length < 2 && Date.now() < deadline) await Bun.sleep(50)
+
+      expect(await stubConsoleHeard(root)).toEqual(["stdin closed", "SIGTERM"])
+    }
+  })
+
+  test("refuses the upgrade with a bare 403 for a foreign, other-port, missing or null Origin", async () => {
+    const { root, url } = await aReaderOverTheStubConsole()
+    const host = new URL(url).host
+
+    for (const origin of ["http://attacker.example", "http://localhost:3000", `https://${host}`, "null", undefined]) {
+      const headers: Record<string, string> = {
+        host,
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+      }
+      if (origin !== undefined) headers.origin = origin
+      const refused = await Bun.fetch(new URL("/repl", url), { headers })
+
+      expect(refused.status).toBe(403)
+      expect(await refused.text()).toBe("")
+    }
+    expect(await stubConsoleStarts(root)).toEqual([])
   })
 })
 
@@ -424,5 +936,24 @@ describe("the app-name override", () => {
 
   test("trims surrounding whitespace from an override that is otherwise set", () => {
     expect(readAppNameOverride("  MyApp  ")).toBe("MyApp")
+  })
+})
+
+/** Read once at startup, the way the port and the app name are. */
+describe("the allowed-hosts setting", () => {
+  test("allows nothing beyond loopback unless RAILS_LOG_READER_ALLOWED_HOSTS is set", () => {
+    expect(readAllowedHosts(undefined)).toEqual([])
+    expect(readAllowedHosts("  ")).toEqual([])
+  })
+
+  test("is a comma-separated list of hostnames, lower-cased and trimmed", () => {
+    expect(readAllowedHosts(" Tunnel.Example , .ngrok.example,")).toEqual(["tunnel.example", ".ngrok.example"])
+  })
+
+  test("is refused rather than half-read when an entry is not a bare hostname", () => {
+    expect(readAllowedHosts("tunnel.example:443")).toBeNull()
+    expect(readAllowedHosts("*")).toBeNull()
+    expect(readAllowedHosts("https://tunnel.example")).toBeNull()
+    expect(readAllowedHosts(".")).toBeNull()
   })
 })

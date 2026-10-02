@@ -409,6 +409,20 @@ describe("Pretty and Raw", () => {
     expect(await navigator.clipboard.readText()).toBe(RAW)
   })
 
+  test("confirms a copy, pretty or raw", async () => {
+    const user = await showBody()
+    expect(copyBody()).not.toHaveTextContent("Copied")
+
+    await user.click(copyBody())
+
+    expect(copyBody()).toHaveTextContent("Copied")
+
+    await user.click(toggle("Raw"))
+    await user.click(copyBody())
+
+    expect(copyBody()).toHaveTextContent("Copied")
+  })
+
   test("copies a nested node's path as parsed_body Ruby, and its value as its JSON", async () => {
     const user = await showBody()
     const tree = valueTree("Response body")

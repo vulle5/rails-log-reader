@@ -24,7 +24,9 @@ from the menu in [#140](https://github.com/vulle5/rails-log-reader/issues/140).
 - **An exact `Origin`, not a same-site one.** `localhost:3000` is the same *site* as
   `localhost:5273`, so `Sec-Fetch-Site` cannot tell the Host app from the Reader. It is not
   used. On a GET, `Origin` must match when present. A same-origin `EventSource` or `fetch` GET
-  sends none, so a missing one is allowed there.
+  sends none, so a missing one is allowed there. A view also accepts `https://` + `Host`, which
+  is what a page loaded through an https tunnel sends, since the tunnel passes the request on
+  as http. It is still the Reader's own page. An act accepts only `http://`.
 - **No CORS, ever.** No route sends `Access-Control-Allow-Origin`. Eval requests must be
   `application/json`, which forces a preflight the Reader never approves.
 - **Refusals are a bare `403`**, plus one line on the Reader's stdout naming the refused

@@ -4,9 +4,12 @@ import userEvent, { type UserEvent } from "@testing-library/user-event"
 
 import { activityTable, type ActivityRow } from "../src/shared/activity"
 import { consoleStream } from "../src/shared/console"
+import { completeRefusal, EMPTY_SNAPSHOT, submitRefusal, type Completion, type ReplSnapshot } from "../src/shared/repl"
 import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
 import type { Envelope } from "../src/shared/wire"
+import type { ReplHandle } from "../src/ui/features/repl/hooks/repl-session"
 import { Reader } from "../src/ui/Reader"
+import { stubComplete, stubCompletion } from "./repl.fixtures"
 
 /**
  * The Reader's UI tests, mounted through one seam: `Reader` over folds seeded from envelopes,
@@ -48,12 +51,17 @@ export function aFold() {
       stream.evict(evicted)
       evictedRows += evicted.length
     },
+    /** What the *REPL* session hook forwards to the fold when a console process exits. */
+    consoleExited(pid: number) {
+      activity.consoleExited(pid)
+    },
     /** Fresh arrays every read, the way a live `useSidecar` render passes them. */
     get props(): ReaderProps {
       return {
         rows: [...activity.rows],
         lines: [...stream.lines],
         evictedRows,
+        evictedEvaluations: new Map(activity.evictedEvaluations),
         railsRoot: identity?.railsRoot ?? null,
       }
     },
@@ -86,6 +94,60 @@ export function openTheReaderOver(fold: Folded, props: ReaderProps = {}) {
   return { user, fold, ...view }
 }
 
+/**
+ * A *REPL* session for `Reader`'s `repl` prop, holding `snapshot` and remembering what was asked
+ * of it. It refuses an input by the rule the real session keeps, and checks every input as
+ * complete unless its capabilities include "check", then by `stubComplete`. It completes by
+ * `completing`, `stubCompletion` unless given, and by the rule the real session keeps says why
+ * it does not when the console process is busy or has no completion.
+ */
+export function aReplSession(
+  snapshot: Partial<ReplSnapshot> = {},
+  refusal: ReplHandle["refusal"] = null,
+  completing: (text: string, caret: number) => Completion | Promise<Completion> = stubCompletion,
+) {
+  const asked = {
+    boots: 0,
+    submitted: [] as string[],
+    checked: [] as string[],
+    completed: [] as { text: string; caret: number }[],
+    interrupts: 0,
+    restarts: [] as boolean[],
+  }
+  const held = { ...EMPTY_SNAPSHOT, ...snapshot }
+  const repl: ReplHandle = {
+    snapshot: held,
+    loaded: true,
+    refusal,
+    restarts: 0,
+    boot: () => {
+      asked.boots++
+    },
+    submit: (input) => {
+      const refused = submitRefusal(held.state)
+      if (refused === null) asked.submitted.push(input)
+      return refused
+    },
+    check: async (text) => {
+      asked.checked.push(text)
+      return !held.capabilities.includes("check") || stubComplete(text)
+    },
+    complete: async (text, caret) => {
+      const refused = completeRefusal(held.state, held.capabilities)
+      if (refused !== null) return { kind: "none", reason: refused }
+      asked.completed.push({ text, caret })
+      return await completing(text, caret)
+    },
+    interrupt: () => {
+      asked.interrupts++
+    },
+    restart: (sandbox) => {
+      asked.restarts.push(sandbox)
+    },
+  }
+  return { repl, asked }
+}
+
 // ---- finding things -----------------------------------------------------------------
 
 export function column(name: "Console" | "Activity table" | "Detail column") {
@@ -106,12 +168,15 @@ export function rowShowing(text: string) {
   return found
 }
 
-/** A Request row's cell under the column heading `heading`. */
+/** A row's cell under the column heading `heading`: the one spanning it, where one spans several. */
 export function cellUnder(row: HTMLElement, heading: string) {
   const headings = within(column("Activity table")).getAllByRole("columnheader")
   const at = headings.findIndex((each) => each.textContent === heading)
-  const cell = within(row).getAllByRole("cell")[at]
-  if (cell === undefined) throw new Error(`the row has no cell under ${heading}`)
+  let spanned = 0
+  const cell = within(row)
+    .getAllByRole("cell")
+    .find((each) => (spanned += Number(each.getAttribute("colspan") ?? 1)) > at)
+  if (at === -1 || cell === undefined) throw new Error(`the row has no cell under ${heading}`)
   return cell
 }
 
@@ -240,4 +305,24 @@ export function consoleCollapsed() {
 /** Reopens a *Collapsed Console*, by the strip that is its one button. */
 export async function expandConsole(user: UserEvent) {
   await user.click(within(column("Console")).getByRole("button", { name: /^Expand Console/ }))
+}
+
+/** The *REPL* drawer under the Console and the Activity table, open or folded. */
+export function replDrawer() {
+  return screen.getByRole("region", { name: "REPL" })
+}
+
+/** Whether the REPL drawer is open, which is when its header offers to fold it. */
+export function replOpen() {
+  return within(replDrawer()).queryByRole("button", { name: "Fold REPL" }) !== null
+}
+
+/** Opens a folded REPL drawer, by the button in its header. */
+export async function openRepl(user: UserEvent) {
+  await user.click(within(replDrawer()).getByRole("button", { name: "Open REPL" }))
+}
+
+/** Folds an open REPL drawer to its header, by the button in it. */
+export async function foldRepl(user: UserEvent) {
+  await user.click(within(replDrawer()).getByRole("button", { name: "Fold REPL" }))
 }

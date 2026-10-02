@@ -100,3 +100,7 @@ trace regardless of what is expanded on screen.
   on reselection, and copy staying unaffected.
 - `CONTEXT.md`'s Detail column entry already read "gem frames collapsed by default" ahead
   of this change — written down as the target shape before the code caught up to it.
+- `isHostFrame` also counts a `(repl):N` frame as a Host-app frame, with or without a
+  `railsRoot`: it is the developer's own input to the *REPL*, and the *Transcript* draws an
+  error's backtrace with the same `Backtrace` component the Detail column does
+  (`reader/src/ui/components/Backtrace.tsx`), so those frames are never collapsed there either.

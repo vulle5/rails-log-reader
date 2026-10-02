@@ -96,7 +96,7 @@ function Line({ line, pinned, lit, onHover, onPick }: LineProps) {
       className={cn(
         "group flex cursor-default items-baseline gap-1.5 border-b border-border py-0.5 pl-3 text-sm whitespace-nowrap data-[source=rails]:text-muted",
         // A marked line ignores the hover, and the pinned group wins over the lit one passing across it.
-        "not-data-grouping:hover:bg-raised data-[grouping~=lit]:not-data-[grouping~=pinned]:bg-lit data-[grouping~=pinned]:bg-pinned data-[grouping~=pinned]:shadow-pinned",
+        "not-data-grouping:hover:bg-sunken data-[grouping~=lit]:not-data-[grouping~=pinned]:bg-lit data-[grouping~=pinned]:bg-pinned data-[grouping~=pinned]:shadow-pinned",
       )}
       data-line={line.id}
       data-level={severity}

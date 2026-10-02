@@ -1,21 +1,20 @@
 import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
-import type { ActivityRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
+import type { ActivityRow, EvaluationRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
 import { eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
+import { LinkButton } from "../../../components/LinkButton"
 import { Tag } from "../../../components/Tag"
+import { PrettyRawPill } from "../../../components/PrettyRawPill"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
-import { Highlight, Marked, SearchContext, useMatches, type Match, type Search } from "../../../hooks/search"
-import { CopyButton, LineCopy } from "../../../components/CopyButton"
+import { Highlight, Marked, SearchContext, useMatches, type Search } from "../../../hooks/search"
+import { Copyable, CopyButton, LineCopy } from "../../../components/CopyButton"
 import { bytes, mediaType, size, statusLine } from "../lib/format"
-import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
-import { fillScheme, sourceLocation } from "../lib/source-location"
-import { OpenModifierHeld, useOpenModifierHeld } from "../hooks/open-modifier"
-import { EditorContext } from "../../../hooks/editor-scheme"
-import { withOpenModifier } from "../../../lib/platform"
+import { Backtrace, Openable } from "../../../components/Backtrace"
+import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { exceptionText } from "../lib/exception-text"
 import { tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
@@ -26,6 +25,11 @@ import { DetailScroller, DetailTabs, type DetailTab, type DetailTabId, type Pane
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import { countMatches } from "../../value-viewer/lib/value-matches"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
+import { evaluationEntry, type HeldEntry } from "../../../../shared/repl"
+import type { ReplHandle } from "../../repl/hooks/repl-session"
+import { RubyCode } from "../../repl/components/RubyCode"
+import { ResultPanel, resultLabel } from "../../repl/components/ResultPanel"
+import { resultMatches } from "../../repl/lib/entry-matches"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines
@@ -55,7 +59,7 @@ import type { ValueSource } from "../../value-viewer/lib/value-tree"
  */
 export function detailItems(row: ActivityRow | null, filter: DetailFilter) {
   if (row === null) return 0
-  const trailing = row.kind === "request" ? row.trailing : []
+  const trailing = row.kind === "run" ? [] : row.trailing
   return eventsShown(row.timeline, filter).length + eventsShown(trailing, filter).length
 }
 
@@ -66,6 +70,9 @@ export function DetailColumn({
   tab,
   onTab,
   scroll,
+  repl,
+  actsOnlyFrom,
+  onShowInRepl,
 }: {
   row: ActivityRow | null
   filter: DetailFilter
@@ -76,6 +83,12 @@ export function DetailColumn({
   onTab: (tab: DetailTabId) => void
   /** The column's *auto-scroll*, which follows the timeline's own scrollport. */
   scroll: PanelScroll
+  /** The *REPL* session, whose *Transcript* an *Evaluation row*'s Result tab reads. */
+  repl: Pick<ReplHandle, "snapshot" | "loaded">
+  /** Where acts can be made from, when this page is not there, else `null`. */
+  actsOnlyFrom: string | null
+  /** Opens the REPL drawer at the Transcript entry `entry`. */
+  onShowInRepl: (entry: number) => void
 }) {
   const held = useOpenModifierHeld()
 
@@ -91,6 +104,18 @@ export function DetailColumn({
     <OpenModifierHeld value={held}>
       {row.kind === "request" ? (
         <RequestDetail row={row} filter={filter} railsRoot={railsRoot} tab={tab} onTab={onTab} scroll={scroll} />
+      ) : row.kind === "evaluation" ? (
+        <EvaluationDetail
+          row={row}
+          filter={filter}
+          railsRoot={railsRoot}
+          tab={tab}
+          onTab={onTab}
+          scroll={scroll}
+          held={repl.loaded ? evaluationEntry(repl.snapshot, row.pid, row.evaluationId) : null}
+          actsOnlyFrom={actsOnlyFrom}
+          onShowInRepl={onShowInRepl}
+        />
       ) : (
         <RunDetail row={row} filter={filter} railsRoot={railsRoot} scroll={scroll} />
       )}
@@ -167,7 +192,7 @@ function RequestDetail({
                     block of nothing but SCHEMA queries, hidden, must not leave an empty "After the
                     request finished" section behind — the section is about there being something
                     to show under it. */}
-                {trailing.length > 0 && <Trailing events={trailing} railsRoot={railsRoot} />}
+                {trailing.length > 0 && <Trailing caption="After the request finished" events={trailing} railsRoot={railsRoot} />}
               </>
             ),
           },
@@ -247,6 +272,108 @@ function RunDetail({
   )
 }
 
+/**
+ * An *Evaluation row*: headed by `REPL`, its whole input highlighted as Ruby, and what it raised,
+ * all off the Sidecar, so the header says what ran after the *Transcript* is gone. While the
+ * Transcript holds its entry, Show in REPL opens the drawer at it.
+ *
+ * Its Timeline holds the queries and log lines it owns, and those that came after it finished in
+ * a trailing section of their own, as a request's do. Its Result shows its Transcript entry.
+ */
+function EvaluationDetail({
+  row,
+  filter,
+  railsRoot,
+  tab,
+  onTab,
+  scroll,
+  held,
+  actsOnlyFrom,
+  onShowInRepl,
+}: {
+  row: EvaluationRow
+  filter: DetailFilter
+  railsRoot: string | null
+  tab: DetailTabId
+  onTab: (tab: DetailTabId) => void
+  scroll: PanelScroll
+  /** Where its Transcript entry is, or `null` while this page holds no session to look in. */
+  held: HeldEntry | null
+  actsOnlyFrom: string | null
+  onShowInRepl: (entry: number) => void
+}) {
+  const trailing = eventsShown(row.trailing, filter)
+  const label = resultLabel(row.outcome, held)
+  const search = useContext(SearchContext)
+  // Whether Raw was chosen on the Result tab. Any new Selection, one shown before included,
+  // opens pretty.
+  const [raw, setRaw] = useState(false)
+  const [rawFor, setRawFor] = useState(row.id)
+  if (rawFor !== row.id) {
+    setRawFor(row.id)
+    setRaw(false)
+  }
+  const entry = held?.kind === "held" ? held.entry : null
+  const matches = useMemo(() => (entry === null ? 0 : resultMatches(search, entry, raw)), [search, entry, raw])
+
+  return (
+    <Detail
+      kind="REPL"
+      name=""
+      facts={row.sandbox ? "sandbox" : ""}
+      action={
+        held?.kind === "held" && (
+          <LinkButton className="flex-none" onClick={() => onShowInRepl(held.entry.id)}>
+            Show in REPL
+          </LinkButton>
+        )
+      }
+      below={
+        <>
+          {row.input !== null && (
+            // Held to a few lines, so a long input never pushes the tabs out of reach.
+            <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap wrap-anywhere">
+              <code>
+                <RubyCode source={row.input} />
+              </code>
+            </pre>
+          )}
+          <Cut field="input" original={row.inputCutFrom ?? undefined} />
+          {row.exception !== null && <ExceptionLine className="mt-1" exception={row.exception} />}
+          <Cut field="message" original={row.messageCutFrom ?? undefined} />
+        </>
+      }
+    >
+      <DetailTabs
+        chosen={tab}
+        onChoose={onTab}
+        tabs={[
+          {
+            id: "timeline",
+            label: "Timeline",
+            scroll,
+            panel: (
+              <>
+                <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+                {trailing.length > 0 && <Trailing caption="After the evaluation finished" events={trailing} railsRoot={railsRoot} />}
+              </>
+            ),
+          },
+          {
+            id: "result",
+            label: "Result",
+            ...(label !== null && { hint: { text: label, tone: "strong" as const } }),
+            // Another Selection's result opens at its top, and folded.
+            subject: row.id,
+            matches,
+            panel: <ResultPanel held={held} actsOnlyFrom={actsOnlyFrom} railsRoot={railsRoot} rawView={[raw, setRaw]} />,
+          },
+        ]}
+      />
+    </Detail>
+  )
+}
+
 /** A request's params in the *Value viewer*: everything params-specific is in `paramsSource`. */
 function Params({ source }: { source: ValueSource }) {
   return (
@@ -290,20 +417,6 @@ function ResponseHeaders({ response }: { response: RowResponse | null }) {
           </ul>
         )}
       </Copyable>
-    </div>
-  )
-}
-
-/**
- * A block with one copy control for the whole of it, placed as the *Value viewer* places its
- * own: centred on the block's first line, which the right padding keeps clear of it. No text,
- * no control.
- */
-function Copyable({ text, label, children }: { text: string | null; label: string; children: ReactNode }) {
-  return (
-    <div className="relative pr-15">
-      {text !== null && <CopyButton className="-top-0.5 right-0" text={text} label={label} />}
-      {children}
     </div>
   )
 }
@@ -446,9 +559,10 @@ function Response({
   const hasTree = body.source !== null
   const caption = (
     <>
-      <div className="flex items-baseline gap-3 pb-3">
+      {/* Raised as the copy control is, so Pretty | Raw sit level with it. */}
+      <div className="-mt-0.5 flex items-center gap-3 pb-3">
         {stripLine}
-        <BodyView hasTree={hasTree} raw={raw} onRaw={onRaw} />
+        <PrettyRawPill size="md" label="Show the body as" raw={raw} onRaw={onRaw} prettyDisabled={!hasTree} />
       </div>
       {body.cutFrom !== null ? (
         <p className="pb-3 text-faint">
@@ -544,62 +658,42 @@ function RawBody({ text }: { text: string }) {
   )
 }
 
-/** Pretty | Raw, the pressed one showing. Pretty is disabled, and struck through, when the body has no tree. */
-function BodyView({ hasTree, raw, onRaw }: { hasTree: boolean; raw: boolean; onRaw: (raw: boolean) => void }) {
-  return (
-    <div className="flex gap-0.5" role="group" aria-label="Show the body as">
-      <BodyViewButton pressed={!raw} disabled={!hasTree} onClick={() => onRaw(false)}>
-        Pretty
-      </BodyViewButton>
-      <BodyViewButton pressed={raw} onClick={() => onRaw(true)}>
-        Raw
-      </BodyViewButton>
-    </div>
-  )
-}
-
-function BodyViewButton({
-  pressed,
-  disabled = false,
-  onClick,
-  children,
-}: {
-  pressed: boolean
-  disabled?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      className="cursor-pointer rounded border border-transparent px-1.5 font-ui text-2xs text-muted not-aria-pressed:enabled:hover:bg-sunken disabled:cursor-default disabled:text-faint disabled:line-through aria-pressed:border-border aria-pressed:bg-selected aria-pressed:text-foreground"
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
-
 /**
  * The whole of one row's detail: a heading saying which row is being read, so the column says
  * so without the table beside it, then what it holds. The heading never scrolls: what is under
- * it is its own scrollport.
+ * it is its own scrollport. `action` sits at the heading line's far end, and `below` under it.
  */
-function Detail({ kind, name, facts, children }: { kind: ReactNode; name: string; facts: string; children: ReactNode }) {
+function Detail({
+  kind,
+  name,
+  facts,
+  action,
+  below,
+  children,
+}: {
+  kind: ReactNode
+  name: string
+  facts: string
+  action?: ReactNode
+  below?: ReactNode
+  children: ReactNode
+}) {
   return (
     <article className="flex min-h-0 flex-auto flex-col">
-      <header className="flex flex-none items-baseline gap-2 border-b border-border bg-raised px-3 py-2 font-mono text-sm">
-        {/* A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */}
-        <span className="font-bold text-accent">{kind}</span>
-        <span className="truncate">
-          <Highlight text={name} />
-        </span>
-        {/* The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */}
-        <span className="ml-auto whitespace-nowrap text-muted">
-          <Highlight text={facts} />
-        </span>
+      <header className="flex-none border-b border-border bg-raised px-3 py-2 font-mono text-sm">
+        <div className="flex items-baseline gap-2">
+          {/* A request's method, in its colour, or a *Run row*'s kind, in the accent GET would have. */}
+          <span className="font-bold text-accent">{kind}</span>
+          <span className="truncate">
+            <Highlight text={name} />
+          </span>
+          {/* The controller action, or a Run row's facts: pushed to the far edge and never wrapped. */}
+          <span className="ml-auto whitespace-nowrap text-muted">
+            <Highlight text={facts} />
+          </span>
+          {action}
+        </div>
+        {below}
       </header>
       {children}
     </article>
@@ -845,108 +939,32 @@ function Exception({
     // The right padding keeps the message clear of the copy button, which is anchored here and
     // not to the column.
     <section
-      className="relative border-y border-border border-t-error py-2 pr-15 pl-3"
+      className="relative border-y border-border border-t-error py-2 pr-23 pl-3"
       aria-label="Exception"
     >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
           somewhere else, so it alone gets a control for it — a query or a log line is easy
           enough to select by hand. */}
-      <CopyButton text={exceptionText(exception, cutFrom)} label="Copy exception" />
-      <p className="font-mono text-sm text-error">
-        <span className="font-bold">
-          <Highlight text={exception.class} />
-        </span>{" "}
-        <Highlight text={exception.message} />
-      </p>
-      <Backtrace backtrace={exception.backtrace} railsRoot={railsRoot} />
+      <CopyButton className="absolute top-1.5 right-2" size="md" text={() => exceptionText(exception, cutFrom)} label="Copy exception" />
+      <ExceptionLine className="font-mono text-sm" exception={exception} />
+      <Backtrace className="mt-1.5" backtrace={exception.backtrace} railsRoot={railsRoot} />
       <Cut field="backtrace" original={cutFrom ?? undefined} />
     </section>
   )
 }
 
-/**
- * Collapse state lives in this component's own `useState`, not on the exception or the
- * row: selecting elsewhere unmounts it, so the next selection starts from an empty
- * `revealed` set with no explicit reset.
- */
-function Backtrace({ backtrace, railsRoot }: { backtrace: readonly string[]; railsRoot: string | null }) {
-  const search = useContext(SearchContext)
-  // Only ever grows: nothing removes an entry once revealed.
-  const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
-  const segments = useMemo(() => segmentBacktrace(backtrace, railsRoot), [backtrace, railsRoot])
-  const held = useContext(OpenModifierHeld)
-
+/** An exception's class, bold, then its message, in the error colour. */
+function ExceptionLine({ className, exception }: { className?: string; exception: { class: string; message: string } }) {
   return (
-    // Full and uncleaned, so it is long: it scrolls with the column rather than being capped.
-    <ol
-      className="mt-1.5 font-mono text-xs leading-normal whitespace-pre-wrap text-muted wrap-anywhere"
-      aria-label="Backtrace"
-    >
-      {segments.map((segment) =>
-        segment.type === "frame" ? (
-          // The Host app's own frames, at full contrast against the muted rest.
-          <li
-            key={segment.index}
-            className="data-[frame=host]:text-strong"
-            data-frame={segment.host ? "host" : undefined}
-          >
-            <Frame frame={segment.frame} railsRoot={railsRoot} held={held} />
-          </li>
-        ) : (
-          <GapSegment
-            key={segment.from}
-            segment={segment}
-            railsRoot={railsRoot}
-            held={held}
-            revealed={revealed.has(segment.from) || segment.frames.some((frame) => search.find(frame).length > 0)}
-            onReveal={() => setRevealed((prev) => new Set(prev).add(segment.from))}
-          />
-        ),
-      )}
-    </ol>
+    <p className={cn("text-error", className)}>
+      <span className="font-bold">
+        <Highlight text={exception.class} />
+      </span>{" "}
+      <span>
+        <Highlight text={exception.message} />
+      </span>
+    </p>
   )
-}
-
-function GapSegment({
-  segment,
-  railsRoot,
-  held,
-  revealed,
-  onReveal,
-}: {
-  segment: Extract<BacktraceSegment, { type: "gap" }>
-  railsRoot: string | null
-  held: boolean
-  revealed: boolean
-  onReveal: () => void
-}) {
-  if (revealed) {
-    return (
-      <>
-        {segment.frames.map((frame, at) => (
-          <li key={segment.from + at}>
-            <Frame frame={frame} railsRoot={railsRoot} held={held} />
-          </li>
-        ))}
-      </>
-    )
-  }
-
-  return (
-    <li>
-      <button
-        type="button"
-        className="cursor-pointer font-mono text-xs text-faint italic underline decoration-dotted hover:text-muted focus-visible:text-muted"
-        onClick={onReveal}
-      >
-        {segment.frames.length === 1 ? "1 frame hidden" : `${segment.frames.length} frames hidden`}
-      </button>
-    </li>
-  )
-}
-
-function Frame({ frame, railsRoot, held }: { frame: string; railsRoot: string | null; held: boolean }) {
-  return <Openable frame={frame} matches={useMatches(frame)} railsRoot={railsRoot} held={held} />
 }
 
 /**
@@ -976,68 +994,16 @@ function Callsite({
 }
 
 /**
- * One raw frame, a backtrace's or a Callsite's, starting at `from` in the text `matches` were
- * found in. Where it holds a *Source location*, its `path:line` — and never the method after
- * it — opens in the editor on an open-modifier click, and a plain click stays a text
- * selection. Underlined only while it is hovered *and* `held`, so pressing the modifier alone
- * restyles nothing. A click with no *Editor scheme* set asks for one and opens nothing, not
- * even once one has been given.
- */
-function Openable({
-  frame,
-  from = 0,
-  matches,
-  railsRoot,
-  held,
-}: {
-  frame: string
-  from?: number
-  matches: readonly Match[]
-  railsRoot: string | null
-  held: boolean
-}) {
-  const editor = useContext(EditorContext)
-  const [hovered, setHovered] = useState(false)
-  const location = sourceLocation(frame, railsRoot)
-
-  if (location === null) return <Marked text={frame} from={from} matches={matches} />
-
-  return (
-    <>
-      <span
-        className="data-armed:cursor-pointer data-armed:underline"
-        data-armed={hovered && held ? "" : undefined}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        // Ctrl-mousedown would otherwise add a selection range in Firefox before the click.
-        onMouseDown={(event) => {
-          if (withOpenModifier(event)) event.preventDefault()
-        }}
-        onClick={(event) => {
-          if (!withOpenModifier(event)) return
-          event.preventDefault()
-          if (editor.scheme === null) editor.requestScheme()
-          else window.location.assign(fillScheme(editor.scheme, location))
-        }}
-      >
-        <Marked text={frame.slice(0, location.end)} from={from} matches={matches} />
-      </span>
-      <Marked text={frame.slice(location.end)} from={from + location.end} matches={matches} />
-    </>
-  )
-}
-
-/**
- * The *trailing section*: events whose `seq` places them after the `request_finish`. Visibly
+ * The *trailing section*: events whose `seq` places them after their owner's finish. Visibly
  * separate and captioned, never silently at the end of the timeline — a log line arriving
  * after its request finished is genuinely surprising, and folding it in would read as a
  * Reader bug rather than as the truth about the file. Set apart by a rule as well as the
  * caption, so it cannot be mistaken for the timeline it sits below.
  */
-function Trailing({ events, railsRoot }: { events: readonly TimelineEvent[]; railsRoot: string | null }) {
+function Trailing({ caption, events, railsRoot }: { caption: string; events: readonly TimelineEvent[]; railsRoot: string | null }) {
   return (
-    <section className="mt-3 border-t border-dashed border-border" aria-label="After the request finished">
-      <Caption className="px-3 py-1.5">After the request finished</Caption>
+    <section className="mt-3 border-t border-dashed border-border" aria-label={caption}>
+      <Caption className="px-3 py-1.5">{caption}</Caption>
       <Timeline events={events} railsRoot={railsRoot} />
     </section>
   )

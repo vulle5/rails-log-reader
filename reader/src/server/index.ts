@@ -1,17 +1,25 @@
 import { join } from "node:path"
 
-import index from "../ui/index.html"
+import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "./allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "./app-name"
+import { refusal, type RouteKind } from "./gate"
 import { initializerFileStatus, repairInitializerFile } from "./initializer-file"
+import { servePage, type PageSocket } from "./page"
 import { PORT_VARIABLE, readPort } from "./port"
 import { RAILS_ROOT_MARKER, findRailsRoot } from "./rails-root"
+import { replSession, type ReplSession } from "./repl-session"
+import { replSocket, type ReplSocket } from "./repl-socket"
+import { onShutdown } from "./shutdown"
 import { openSidecar, readEarlier, type Sidecar } from "./sidecar"
 
-const detectedRailsRoot = findRailsRoot(process.cwd())
+/** Where the Reader was started: the directory the launcher names, or the working directory. */
+const startedIn = process.argv[2] ?? process.cwd()
+
+const detectedRailsRoot = findRailsRoot(startedIn)
 
 if (detectedRailsRoot === null) {
   console.error(
-    `rails-log-reader: ${process.cwd()} is not a Rails root.\n` +
+    `rails-log-reader: ${startedIn} is not a Rails root.\n` +
       `No ${RAILS_ROOT_MARKER} was found here or in any parent directory. ` +
       `Start the Reader from inside your Rails app.`,
   )
@@ -31,6 +39,19 @@ if (port === null) {
   )
   process.exit(1)
 }
+
+const readHosts = readAllowedHosts(process.env[ALLOWED_HOSTS_VARIABLE])
+
+if (readHosts === null) {
+  console.error(
+    `rails-log-reader: ${ALLOWED_HOSTS_VARIABLE} is set to "${process.env[ALLOWED_HOSTS_VARIABLE]}". ` +
+      `It takes comma-separated hostnames with no port or scheme, like "tunnel.example,.ngrok.example".`,
+  )
+  process.exit(1)
+}
+
+// Narrowed the way `railsRoot` is, for the closures below.
+const allowedHosts: string[] = readHosts
 
 const logDirectory = join(railsRoot, "log")
 
@@ -158,11 +179,70 @@ async function repairInitializer() {
   }
 }
 
+/** The bound port, which the page cannot read off its own address once a tunnel is in front. */
+function readerPort(_request: Request, server: Bun.Server<ReaderSocket>) {
+  return Response.json({ port: server.port })
+}
+
+/** Whose WebSocket this is: the development page's HMR socket, or a tab's REPL. */
+type ReaderSocket = PageSocket | ReplSocket
+
+type Handler = (request: Request, server: Bun.Server<ReaderSocket>) => Response | undefined | Promise<Response | undefined>
+
+/**
+ * `handler`, run only for a request `refusal` lets through. A refused one gets a bare `403`,
+ * and the Reader prints the `Host` or `Origin` it refused, which is how a developer finds the
+ * name to add to `RAILS_LOG_READER_ALLOWED_HOSTS`.
+ */
+function gated(kind: RouteKind, handler: Handler) {
+  return (request: Request, server: Bun.Server<ReaderSocket>) => {
+    const refused = refusal(request, kind, allowedHosts)
+    if (refused === null) return handler(request, server)
+
+    console.log(`rails-log-reader: refused ${request.method} ${new URL(request.url).pathname} for ${refused}`)
+    return new Response(null, { status: 403 })
+  }
+}
+
+const view = (handler: Handler) => gated("view", handler)
+const act = (handler: Handler) => gated("act", handler)
+
+const page = servePage(process.env.NODE_ENV === "production" ? false : { hmr: true, console: true })
+
+declare global {
+  /** The REPL session, kept on `globalThis` because `bun --hot` runs this module again. */
+  var readerReplSession: ReplSession | undefined
+}
+
+/** One console process for the Reader's lifetime, which a hot reload does not end. */
+function sharedReplSession() {
+  if (globalThis.readerReplSession !== undefined) return globalThis.readerReplSession
+
+  const session = replSession(railsRoot)
+  onShutdown(() => session.close())
+  globalThis.readerReplSession = session
+  return session
+}
+
+const repl = replSocket(sharedReplSession())
+
+/** Each socket's events, sent to the handler of whoever opened it. */
+const websocket: Bun.WebSocketHandler<ReaderSocket> = {
+  open: (socket) => handlerOf(socket).open?.(socket),
+  message: (socket, message) => handlerOf(socket).message(socket, message),
+  close: (socket, code, reason) => handlerOf(socket).close?.(socket, code, reason),
+}
+
+function handlerOf(socket: Bun.ServerWebSocket<ReaderSocket>) {
+  return (socket.data.kind === "repl" ? repl.websocket : page.websocket) as Bun.WebSocketHandler<ReaderSocket>
+}
+
 const server = serveOrSaySo(port)
 
 // The port it actually bound, which with an ephemeral one is the only place that is written
-// down. Printed before anything else, because it is the line a developer came for.
-console.log(`Rails log reader  ${server.url}`)
+// down. Printed before anything else, because it is the line a developer came for. Named
+// `localhost` though it binds `127.0.0.1`.
+console.log(`Rails log reader  http://localhost:${server.port}/`)
 console.log(`Rails root        ${railsRoot}`)
 
 /**
@@ -173,8 +253,11 @@ console.log(`Rails root        ${railsRoot}`)
  */
 function serveOrSaySo(port: number) {
   try {
-    return Bun.serve({
+    return Bun.serve<ReaderSocket>({
       port,
+      hostname: "127.0.0.1",
+      // Every route is a view or an act, and passes the gate before it runs. The page, its
+      // assets and anything else unmatched is the `fetch` below, a view too.
       routes: {
         // A connection that is quiet whenever the Host app is, which is most of the time — so
         // exempt from `Bun.serve`'s 10 s idle timeout, which would otherwise reap it every
@@ -182,17 +265,19 @@ function serveOrSaySo(port: number) {
         // arriving late. Only this route: nothing else here is meant to be held open.
         // There's no test for this, because Bun's default timeout is 10 s and the test
         // would have to wait that long to fail.
-        "/events": (request, server) => {
+        "/events": view((request, server) => {
           server.timeout(request, 0)
           return envelopeStream()
-        },
-        "/earlier": { GET: earlier },
-        "/app-name-override": { GET: appNameOverrideRoute },
-        "/initializer-status": { GET: initializerStatus },
-        "/initializer-repair": { POST: repairInitializer },
-        "/*": index,
+        }),
+        "/earlier": { GET: view(earlier) },
+        "/app-name-override": { GET: view(appNameOverrideRoute) },
+        "/reader-port": { GET: view(readerPort) },
+        "/initializer-status": { GET: view(initializerStatus) },
+        "/initializer-repair": { POST: act(repairInitializer) },
+        "/repl": { GET: act(repl.upgrade) },
       },
-      development: process.env.NODE_ENV === "production" ? false : { hmr: true, console: true },
+      fetch: view(page.fetch),
+      websocket,
     })
   } catch (problem) {
     if ((problem as { code?: string }).code !== "EADDRINUSE") throw problem

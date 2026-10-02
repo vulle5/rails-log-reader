@@ -4,15 +4,16 @@ import { screen, within } from "@testing-library/react"
 import { activityRows, column, consoleLines, openTheReader } from "./reader.harness"
 
 describe("opening the Reader", () => {
-  test("lays out the Console, the Activity table and the Detail column, in that order", () => {
+  test("lays out the Console, the Activity table and the Detail column, in that order, then the REPL drawer", () => {
     openTheReader()
 
     const regions = screen.getAllByRole("region")
 
-    expect(regions).toHaveLength(3)
+    expect(regions).toHaveLength(4)
     expect(regions[0]).toHaveAccessibleName("Console")
     expect(regions[1]).toHaveAccessibleName("Activity table")
     expect(regions[2]).toHaveAccessibleName("Detail column")
+    expect(regions[3]).toHaveAccessibleName("REPL")
   })
 
   test("heads each column with the name the glossary gives it", () => {

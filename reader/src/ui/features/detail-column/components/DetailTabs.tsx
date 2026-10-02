@@ -1,5 +1,6 @@
 import { useId, type KeyboardEvent, type ReactNode } from "react"
 
+import { MatchesBadge } from "../../../components/Matches"
 import type { ColumnAutoScroll } from "../../../hooks/auto-scroll"
 import { cn } from "../../../lib/cn"
 
@@ -12,7 +13,7 @@ import { cn } from "../../../lib/cn"
  */
 
 /** Every tab a row can have. Which ones a row has, and which of them are enabled, is its own. */
-export type DetailTabId = "timeline" | "params" | "headers" | "response"
+export type DetailTabId = "timeline" | "params" | "headers" | "response" | "result"
 
 export type DetailTab = {
   id: DetailTabId
@@ -147,15 +148,6 @@ export function DetailTabs({
         )}
       </div>
     </>
-  )
-}
-
-/** What Search found behind a tab, lit the way a match is: the tab's description, never its name. */
-function MatchesBadge({ id, count }: { id: string; count: number }) {
-  return (
-    <span id={id} className="rounded-xs bg-match px-1 text-2xs text-foreground tabular-nums" aria-hidden="true">
-      {count === 1 ? "1 match" : `${count} matches`}
-    </span>
   )
 }
 

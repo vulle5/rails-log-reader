@@ -5,8 +5,8 @@ import { cn } from "../lib/cn"
 
 /**
  * One of the Reader's three columns: a heading, and a body that is the column's scrollport. An
- * outlined panel, floating on the backdrop behind the columns: the Console in the backdrop's
- * own fill, the other two lighter.
+ * outlined panel, floating on the backdrop behind the columns: the Console and the Activity
+ * table in the columns' own fill, the Detail column lighter.
  *
  * `data-column` says which column an element is, and `data-scrollport` marks its body: what
  * *Hover grouping* and its jump find a column and its scrollport by.
@@ -40,10 +40,11 @@ type ColumnProps = {
    * auto-scroll follows.
    */
   bodyScrolls?: boolean
+  className?: string
   children?: ReactNode
 }
 
-export function Column({ place, name, controls, action, scroll, bodyScrolls = true, children }: ColumnProps) {
+export function Column({ place, name, controls, action, scroll, bodyScrolls = true, className, children }: ColumnProps) {
   // `min-h-0` for the same reason as `min-w-0`: a grid item's automatic minimum size is its
   // content, so without it a column would overflow the track the grid constrained it to and
   // hand the overflow back to the page.
@@ -51,9 +52,10 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
     <section
       className={cn(
         "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-outline",
-        place === "console" && "bg-sunken",
+        place === "console" && "bg-background",
         place === "activity" && "bg-background",
         place === "detail" && "bg-raised",
+        className,
       )}
       role="region"
       aria-label={name}
@@ -65,7 +67,7 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
           action !== undefined && "@container",
         )}
       >
-        <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{name}</h2>
+        <ColumnHeading>{name}</ColumnHeading>
         {action === undefined ? (
           controls
         ) : (
@@ -96,27 +98,36 @@ export function Column({ place, name, controls, action, scroll, bodyScrolls = tr
       ) : (
         <div className="flex min-h-0 flex-auto flex-col overflow-hidden">{children}</div>
       )}
-      {/* Only where there is something to go and see. A pill on a paused column with nothing
-          below it would read "0 new" — sending the reader to look at nothing, and covering
-          the lines they scrolled up to read while it did. Scrolling back down is the way out
-          of a pause either way; the pill is what the count is for.
-
-          Positioned against the column and not its scrollport, so it stays put while the rows
+      {/* Positioned against the column and not its scrollport, so it stays put while the rows
           it is counting move underneath, and appears without pushing them around. */}
-      {!scroll.following && scroll.unseen > 0 && (
-        <button
-          type="button"
-          className="absolute bottom-3 left-1/2 z-2 -translate-x-1/2 cursor-pointer rounded-full bg-accent px-2.5 py-0.75 text-xs text-background tabular-nums shadow-pill hover:bg-accent-hover"
-          onClick={scroll.resume}
-          title="Follow new activity again"
-        >
-          {/* `floor`: the Memory bound is evicting one row for every row it takes, so the
-              count below has stalled rather than stopped — "+" says so rather than reading
-              like a number that quietly froze. */}
-          <span aria-hidden="true">↓</span> {scroll.unseen}
-          {scroll.floor ? "+" : ""} new
-        </button>
-      )}
+      <NewPill scroll={scroll} />
     </section>
   )
+}
+
+/**
+ * An *auto-scroll*'s "↓ N new" pill, centred at the bottom of the nearest positioned element,
+ * which is what it floats over. Only on a paused one with something counted below, never
+ * "0 new"; clicking it resumes.
+ */
+export function NewPill({ scroll }: { scroll: ColumnAutoScroll }) {
+  if (scroll.following || scroll.unseen === 0) return null
+
+  return (
+    <button
+      type="button"
+      className="absolute bottom-3 left-1/2 z-2 -translate-x-1/2 cursor-pointer rounded-full bg-accent px-2.5 py-0.75 text-xs text-background tabular-nums shadow-pill hover:bg-accent-hover"
+      onClick={scroll.resume}
+      title="Follow new activity again"
+    >
+      {/* "+" while `floor`: the count is a lower bound once the Memory bound is evicting. */}
+      <span aria-hidden="true">↓</span> {scroll.unseen}
+      {scroll.floor ? "+" : ""} new
+    </button>
+  )
+}
+
+/** A column's name at the head of it, and the *REPL* drawer's, which is headed the same way. */
+export function ColumnHeading({ children }: { children: ReactNode }) {
+  return <h2 className="text-xs font-semibold tracking-wider text-muted uppercase">{children}</h2>
 }

@@ -3,7 +3,15 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { SIDECAR_NAME } from "../src/server/sidecar"
-import type { AppLogPayload, Envelope, RequestFinishPayload, RequestRoutePayload, ResponsePayload, SqlPayload } from "../src/shared/wire"
+import type {
+  AppLogPayload,
+  Envelope,
+  EvaluationFinishPayload,
+  RequestFinishPayload,
+  RequestRoutePayload,
+  ResponsePayload,
+  SqlPayload,
+} from "../src/shared/wire"
 
 /**
  * Seam 1's whole apparatus: a real `log/` directory with a real Sidecar in it, and an
@@ -155,6 +163,16 @@ export function aRun(runId: string, epoch = EPOCH) {
       } as ResponsePayload
       return { ...envelope("response", requestId, payload), ...(truncated === undefined ? {} : { truncated }) }
     },
+    // `truncated` is how a test writes an input or a message the wire cut.
+    evaluationStart: (evaluationId: string, input = "Post.count", sandbox = false, truncated?: Record<string, number>) => ({
+      ...envelope("evaluation_start", evaluationId, { input, sandbox }),
+      ...(truncated === undefined ? {} : { truncated }),
+    }),
+    evaluationFinish: (
+      evaluationId: string,
+      finished: EvaluationFinishPayload = { outcome: "ok", db_runtime_ms: 0.4 },
+      truncated?: Record<string, number>,
+    ) => ({ ...envelope("evaluation_finish", evaluationId, finished), ...(truncated === undefined ? {} : { truncated }) }),
     log: (
       requestId: string | null,
       message = "Rendering posts/show.html.erb",

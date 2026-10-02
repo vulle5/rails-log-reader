@@ -1,13 +1,16 @@
 import { useCallback, useContext, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 
-import { CopyButton, LineCopy } from "../../../components/CopyButton"
+import { Copyable, LineCopy } from "../../../components/CopyButton"
+import { FoldedOverMatches } from "../../../components/Matches"
 import { cn } from "../../../lib/cn"
 import { Marked, SearchContext, type Search } from "../../../hooks/search"
-import { keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
+import { countMatches, keysMatch, leafText, matchesInside, pathKey } from "../lib/value-matches"
+import { cutTree, isEmpty } from "../lib/tree-cut"
 import type {
   ContainerKind,
   ContainerNode,
   LeafNode,
+  LeafType,
   PathStep,
   TokenClass,
   ValueChild,
@@ -36,10 +39,29 @@ import type {
  * One control copies the whole value, and each node, on hover or focus, offers a copy of its
  * value and of its path. Every text copied is the source's: the viewer only asks for it.
  *
- * A `caption` is drawn over the tree, and the copy control sits on its line rather than the
- * tree's first, so the control is in the same place whatever the viewer is placed under.
+ * A `caption` is drawn over the tree. The copy control sits at the right of the first line, the
+ * caption's or the tree's, with `controls` before it. A `bare` viewer has neither, for a caller
+ * that draws its own elsewhere.
+ *
+ * A `cut` draws the top level only as far as fits in its `lines` as first drawn, and its `note`
+ * under it, given how many lines it left out. What the developer opens inside the lines it draws
+ * is drawn whole, and so is the whole top level while a match lies past the cut.
  */
-export function ValueViewer({ label, source, caption }: { label: string; source: ValueSource; caption?: ReactNode }) {
+export function ValueViewer({
+  label,
+  source,
+  caption,
+  controls,
+  cut,
+  bare = false,
+}: {
+  label: string
+  source: ValueSource
+  caption?: ReactNode
+  controls?: ReactNode
+  bare?: boolean
+  cut?: { lines: number; note: (more: number) => ReactNode }
+}) {
   const value = source.tree
   const search = useContext(SearchContext)
   const inside = useMemo(() => matchesInside(search, value), [search, value])
@@ -65,27 +87,25 @@ export function ValueViewer({ label, source, caption }: { label: string; source:
   }, [])
   const view: ViewState = { source, search, inside, isOpen, onToggle: toggle, whole, onOpenWhole: openWhole }
   const wholeText = useMemo(() => source.copyText(value), [source, value])
+  const kept = useMemo(() => (cut === undefined ? null : keptUnder(search, value, cut.lines)), [search, value, cut?.lines])
 
   if (value.type === "container" && isEmpty(value)) {
     return (
-      <>
+      <Copyable text={null} label={label} controls={bare ? undefined : controls}>
         {caption}
         <p className="font-mono text-sm">
           <Empty node={value} />
         </p>
-      </>
+      </Copyable>
     )
   }
 
   return (
-    // The right padding keeps the top lines clear of the copy button, which is anchored here.
-    <div className="relative pr-15">
-      {/* Centred on the first line, the caption's or the tree's, which starts at the block's top edge. */}
-      <CopyButton className="-top-0.5 right-0" text={wholeText} label={`Copy ${label.toLowerCase()}`} />
+    <Copyable text={bare ? null : wholeText} label={`Copy ${label.toLowerCase()}`} controls={bare ? undefined : controls}>
       {caption}
       <ul className="font-mono text-sm leading-sql" role="tree" aria-label={label}>
         {value.type === "container" ? (
-          <Children node={value} path={[]} {...view} />
+          <Children node={value} path={[]} shown={kept?.children} {...view} />
         ) : (
           <li className="group/line" role="treeitem">
             <Leaf leaf={value} path={[]} {...view} />
@@ -93,7 +113,8 @@ export function ValueViewer({ label, source, caption }: { label: string; source:
           </li>
         )}
       </ul>
-    </div>
+      {kept !== null && cut?.note(kept.more)}
+    </Copyable>
   )
 }
 
@@ -106,6 +127,19 @@ const LONG_STRING = 80
 
 /** One character of a string as drawn: an escape, or a code point. */
 const CHARACTER = /\\u[0-9a-fA-F]{4}|\\[\s\S]|[\s\S]/gu
+
+/**
+ * Where `value` is cut to `lines`, as `cutTree` cuts it, unless a match lies in a child past the
+ * cut, when it is drawn whole while the term matches there.
+ */
+function keptUnder(search: Search, value: ValueNode, lines: number) {
+  const kept = cutTree(value, lines)
+  if (kept === null || value.type !== "container") return kept
+
+  const past = value.children.slice(kept.children)
+  const matched = past.some((child) => (keysMatch(value) && search.find(child.key).length > 0) || countMatches(search, child.node) > 0)
+  return matched ? null : kept
+}
 
 /** The developer's folds over a match, and the search they were made under. */
 type HeldFolds = { search: Search; paths: ReadonlySet<string> }
@@ -138,10 +172,16 @@ type ViewState = {
   onOpenWhole: (path: string) => void
 }
 
-function Children({ node, path, ...view }: { node: ContainerNode; path: readonly PathStep[] } & ViewState) {
+/** `node`'s children, or only the first `shown` of them, and then no line for what its source cut. */
+function Children({
+  node,
+  path,
+  shown,
+  ...view
+}: { node: ContainerNode; path: readonly PathStep[]; shown?: number } & ViewState) {
   return (
     <>
-      {node.children.map((child) => (
+      {node.children.slice(0, shown).map((child) => (
         <Item
           key={child.key}
           child={child}
@@ -150,7 +190,7 @@ function Children({ node, path, ...view }: { node: ContainerNode; path: readonly
           {...view}
         />
       ))}
-      {node.cut !== undefined && (
+      {node.cut !== undefined && shown === undefined && (
         <li className="pl-4 text-faint italic" role="treeitem">
           {node.cut.more === null ? "…more" : `…${node.cut.more} more ${noun(node, node.cut.more)}`}
         </li>
@@ -175,7 +215,7 @@ function Item({
     return (
       <li className="group/line pl-4" role="treeitem" aria-labelledby={line}>
         <span id={line}>
-          <Key text={child.key} keyed={keyed} search={search} />
+          <Key text={child.key} type={child.keyType} keyed={keyed} search={search} />
           {node.type === "container" ? <Empty node={node} /> : <Leaf leaf={node} path={path} {...view} />}
         </span>
         <NodeCopies node={node} path={path} source={source} line={line} />
@@ -218,15 +258,13 @@ function Item({
           {open ? "▾" : "▸"}
         </span>
         <span id={line}>
-          <Key text={child.key} keyed={keyed} search={search} />
-          {/* Folded over a match, which only the developer's own fold leaves: lit, but not itself a match. */}
+          <Key text={child.key} type={child.keyType} keyed={keyed} search={search} />
           {open ? (
             <Opening node={node} />
           ) : found !== undefined ? (
-            <span className="rounded-xs bg-match" data-lit>
+            <FoldedOverMatches count={found}>
               <Summary node={node} />
-              {` · ${found} ${found === 1 ? "match" : "matches"}`}
-            </span>
+            </FoldedOverMatches>
           ) : (
             <Summary node={node} />
           )}
@@ -251,6 +289,7 @@ function Item({
 /**
  * A node's copies of its value and of its path, drawn when its line is hovered or one of them
  * is focused. Each is described by the node's line, so a screen reader says which node it copies.
+ * A node the source has no path to offers only its value.
  */
 function NodeCopies({
   node,
@@ -263,27 +302,26 @@ function NodeCopies({
   source: ValueSource
   line?: string
 }) {
+  const pathText = source.pathText(path)
   return (
     <>
       <LineCopy label="Copy value" idle="value" text={() => source.copyText(node)} line={line} />
-      <LineCopy label="Copy path" idle="path" text={() => source.pathText(path)} line={line} />
+      {pathText !== null && <LineCopy label="Copy path" idle="path" text={() => pathText} line={line} />}
     </>
   )
 }
 
-/** `keyed` when the key is text Search matches, rather than a list index. */
-function Key({ text, keyed, search }: { text: string; keyed: boolean; search: Search }) {
+/**
+ * `keyed` when the key is text Search matches, rather than a list index. A key with a `type` is
+ * coloured as a leaf of that type is, its colon with it.
+ */
+function Key({ text, type, keyed, search }: { text: string; type?: LeafType; keyed: boolean; search: Search }) {
   return (
-    <span className="text-sql-identifier">
+    <Token className="text-sql-identifier" token={type?.token} sourceType={type?.sourceType}>
       <Marked text={text} matches={keyed ? search.find(text) : []} />
       {": "}
-    </span>
+    </Token>
   )
-}
-
-/** A container holding nothing, and not cut short: there is nothing more to it than it shows. */
-function isEmpty(node: ContainerNode) {
-  return node.children.length === 0 && node.cut === undefined
 }
 
 /** An empty container, said as its brackets alone: `{}`, `[]`, or `Comment {}`. */
@@ -319,11 +357,14 @@ function Summary({ node }: { node: ContainerNode }) {
 }
 
 function noun(node: ContainerNode, count: number) {
-  const [one, many] = DRAWN[node.kind].nouns
+  const [one, many] = node.nouns ?? DRAWN[node.kind].nouns
   return count === 1 ? one : many
 }
 
-/** A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app sent. */
+/**
+ * A filtered value is a `FILTERED` marker rather than text, so it never reads as a string the app
+ * sent. A cycle is marked as one, faint, so it never reads as the value it repeats.
+ */
 function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path: readonly PathStep[] } & ViewState) {
   const matches = search.find(leafText(leaf))
   if (leaf.type === "filtered") {
@@ -338,7 +379,7 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
   }
   if (leaf.type === "cycle") {
     return (
-      <Token>
+      <Token className="text-faint italic" cycle>
         <Marked text={leaf.text} matches={matches} />
       </Token>
     )
@@ -354,7 +395,7 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
     matches.some(([, stop]) => stop > shown.length)
   ) {
     return (
-      <Token token={leaf.token}>
+      <Token token={leaf.token} sourceType={leaf.sourceType}>
         <Marked text={leaf.text} matches={matches} />
       </Token>
     )
@@ -362,7 +403,7 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
 
   return (
     <>
-      <Token token={leaf.token} cut>
+      <Token token={leaf.token} sourceType={leaf.sourceType} cut>
         <Marked text={shown} matches={matches} />
       </Token>
       <button className="cursor-pointer text-faint italic hover:underline" type="button" onClick={() => onOpenWhole(key)}>
@@ -372,8 +413,22 @@ function Leaf({ leaf, path, search, whole, onOpenWhole }: { leaf: LeafNode; path
   )
 }
 
-/** A leaf's text in the colour of its token class, read off its `data-token`. */
-function Token({ token, cut = false, children }: { token?: TokenClass; cut?: boolean; children: ReactNode }) {
+/** A leaf's text in the colour of its token class, read off its `data-token`, with its source's type as `data-source-type`. */
+function Token({
+  token,
+  sourceType,
+  cut = false,
+  cycle = false,
+  className,
+  children,
+}: {
+  token?: TokenClass
+  sourceType?: string
+  cut?: boolean
+  cycle?: boolean
+  className?: string
+  children: ReactNode
+}) {
   return (
     <span
       className={cn(
@@ -381,10 +436,14 @@ function Token({ token, cut = false, children }: { token?: TokenClass; cut?: boo
         "data-[token=string]:text-sql-string",
         "data-[token=number]:text-sql-number",
         "data-[token=keyword]:text-sql-keyword",
+        "data-[token=symbol]:text-sql-identifier",
         "data-[token=null]:text-faint data-[token=null]:italic",
+        className,
       )}
       data-token={token}
+      data-source-type={sourceType}
       data-cut={cut || undefined}
+      data-cycle={cycle || undefined}
     >
       {children}
     </span>

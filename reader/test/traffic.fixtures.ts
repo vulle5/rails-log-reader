@@ -1,4 +1,14 @@
-import type { BindValue, Envelope, EventType, ParamsHash, ParamValue, RequestRoutePayload, ResponsePayload, Severity } from "../src/shared/wire"
+import type {
+  BindValue,
+  Envelope,
+  EvaluationFinishPayload,
+  EventType,
+  ParamsHash,
+  ParamValue,
+  RequestRoutePayload,
+  ResponsePayload,
+  Severity,
+} from "../src/shared/wire"
 import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
 
 /**
@@ -10,8 +20,8 @@ import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
  * is true of a test: a fold that holds up over four hand-written events proves very little
  * about one reading a busy dev app. So the whole stream is here, its crafted scenarios
  * still buried in ordinary traffic: four requests in flight at once, an N+1 shape, a 500
- * with a backtrace, a request that hangs, a `rake` Run and a `rails console` Run writing
- * into the same file as the server.
+ * with a backtrace, a request that hangs, a `rake` Run and a `rails console` Run, its
+ * evaluations each owning their own queries, writing into the same file as the server.
  *
  * Three things are ported rather than copied, because the prototype predates the wire:
  *
@@ -27,6 +37,9 @@ import { BOOT_MONO, EPOCH } from "./sidecar.fixtures"
 export const SERVER_RUN = "srv-91204"
 export const RAKE_RUN = "rake-91887"
 export const CONSOLE_RUN = "con-92014"
+
+/** The console Run's evaluations, by what each did: the last raised. */
+export const EVALUATIONS = { lookup: "repl-7c1e-1", count: "repl-7c1e-2", update: "repl-7c1e-3" }
 
 type Emission = {
   at: number
@@ -670,13 +683,34 @@ for (let n = 0; n < 118; n += 1) {
   if (n === 61) log(at + 30, null, "warn", "reports:rebuild — batch 62 retried after a lock timeout", RAKE_RUN)
 }
 
-// --- a third Run: someone poking at `rails c` while all this happens ---------
+// --- a third Run: someone poking at the REPL's `rails c` while all this happens ---------
+// Each evaluation owns its queries and log lines. What the console says outside one, as it
+// boots, is its Run row's.
+function evaluationStart(at: number, evaluationId: string, input: string) {
+  emit({ at, runId: CONSOLE_RUN, requestId: evaluationId, type: "evaluation_start", payload: { input, sandbox: false } })
+}
+
+function evaluationFinish(at: number, evaluationId: string, payload: EvaluationFinishPayload) {
+  emit({ at, runId: CONSOLE_RUN, requestId: evaluationId, type: "evaluation_finish", payload })
+}
+
 header(7300, CONSOLE_RUN, "console", 92_014)
 log(7300, null, "info", "Loading development environment (Rails 8.0.2)", CONSOLE_RUN)
-sql(8100, null, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."email" = ? LIMIT ?  [["email", "…"], ["LIMIT", 1]]', 1.1, false, CONSOLE_RUN)
-sql(9450, null, "Order Count", 'SELECT COUNT(*) FROM "orders" WHERE "orders"."user_id" = ?  [["user_id", 4021]]', 3.4, false, CONSOLE_RUN)
-log(9500, null, "warn", "DEPRECATION WARNING: Rails.application.config_for called with a String", CONSOLE_RUN)
-sql(11_200, null, "Order Update", 'UPDATE "orders" SET "state" = ?, "updated_at" = ? WHERE "orders"."id" = ?', 2.2, false, CONSOLE_RUN)
+evaluationStart(8080, EVALUATIONS.lookup, 'user = User.find_by(email: "…")')
+sql(8100, EVALUATIONS.lookup, "User Load", 'SELECT "users".* FROM "users" WHERE "users"."email" = ? LIMIT ?  [["email", "…"], ["LIMIT", 1]]', 1.1, false, CONSOLE_RUN)
+evaluationFinish(8110, EVALUATIONS.lookup, { outcome: "ok", db_runtime_ms: 1.1 })
+evaluationStart(9440, EVALUATIONS.count, "Order.where(user: user)\n  .count")
+sql(9450, EVALUATIONS.count, "Order Count", 'SELECT COUNT(*) FROM "orders" WHERE "orders"."user_id" = ?  [["user_id", 4021]]', 3.4, false, CONSOLE_RUN)
+log(9500, EVALUATIONS.count, "warn", "DEPRECATION WARNING: Rails.application.config_for called with a String", CONSOLE_RUN)
+evaluationFinish(9510, EVALUATIONS.count, { outcome: "ok", db_runtime_ms: 3.4 })
+evaluationStart(11_190, EVALUATIONS.update, 'user.orders.last.update!(state: "shipped")')
+sql(11_200, EVALUATIONS.update, "Order Update", 'UPDATE "orders" SET "state" = ?, "updated_at" = ? WHERE "orders"."id" = ?', 2.2, false, CONSOLE_RUN)
+evaluationFinish(11_230, EVALUATIONS.update, {
+  outcome: "raised",
+  class: "ActiveRecord::RecordInvalid",
+  message: "Validation failed: State is not included in the list",
+  db_runtime_ms: 2.2,
+})
 
 // ---- the file --------------------------------------------------------------
 

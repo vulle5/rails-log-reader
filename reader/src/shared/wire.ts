@@ -7,7 +7,7 @@
  * Reader built before the change reads the absence as `undefined` and renders straight
  * through it, which is the exact failure `isWireVersionUnderstood` exists to refuse.
  */
-export const WIRE_VERSION = 4
+export const WIRE_VERSION = 5
 
 export const EVENT_TYPES = [
   "run_header",
@@ -18,6 +18,8 @@ export const EVENT_TYPES = [
   "sql",
   "app_log",
   "response",
+  "evaluation_start",
+  "evaluation_finish",
 ] as const
 
 export type EventType = (typeof EVENT_TYPES)[number]
@@ -44,7 +46,10 @@ type EventEnvelope<T extends EventType, Payload> = {
    * written, which is what carries an in-flight request's elapsed through a silence.
    */
   at_wall: number
-  /** `null` means unattributed: its Run owns it. */
+  /**
+   * The owner's id: a request's, or an *Evaluation*'s, which its start event's type tells
+   * apart. `null` means unattributed: its Run owns it.
+   */
   request_id: string | null
   /**
    * Field name -> original byte length. Backtraces are exempt from the 64 KB per-field cap,
@@ -229,6 +234,26 @@ export type ResponsePayload = {
   | { no_body: NoBody }
 )
 
+/**
+ * An *Evaluation* the REPL's console process began, under the evaluation's id. `input` is cut at
+ * 64 KB, with the original size under `truncated.input`. `sandbox` says the console runs
+ * sandboxed, so what the evaluation writes is rolled back when the console ends. Its result and
+ * what it printed are never on the wire.
+ */
+export type EvaluationStartPayload = {
+  input: string
+  sandbox: boolean
+}
+
+/**
+ * How an *Evaluation* ended: `ok`, or `raised` with the exception's class and its message, cut at
+ * 64 KB with the original size under `truncated.message`. Ctrl-C is a `raised` `Interrupt`.
+ */
+export type EvaluationFinishPayload = ({ outcome: "ok" } | { outcome: "raised"; class: string; message: string }) & {
+  /** The SQL time Active Record counted on the evaluation's thread. Absent when the Initializer could not read it. */
+  db_runtime_ms?: number
+}
+
 export type RunHeaderEvent = EventEnvelope<"run_header", RunHeaderPayload>
 export type RunEndEvent = EventEnvelope<"run_end", RunEndPayload>
 export type RequestStartEvent = EventEnvelope<"request_start", RequestStartPayload>
@@ -237,6 +262,8 @@ export type RequestFinishEvent = EventEnvelope<"request_finish", RequestFinishPa
 export type SqlEvent = EventEnvelope<"sql", SqlPayload>
 export type AppLogEvent = EventEnvelope<"app_log", AppLogPayload>
 export type ResponseEvent = EventEnvelope<"response", ResponsePayload>
+export type EvaluationStartEvent = EventEnvelope<"evaluation_start", EvaluationStartPayload>
+export type EvaluationFinishEvent = EventEnvelope<"evaluation_finish", EvaluationFinishPayload>
 
 /**
  * What identifies one Event: the Run it came from and its `seq` within that Run. `seq`
@@ -258,3 +285,5 @@ export type Envelope =
   | SqlEvent
   | AppLogEvent
   | ResponseEvent
+  | EvaluationStartEvent
+  | EvaluationFinishEvent

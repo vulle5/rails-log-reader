@@ -56,7 +56,10 @@ The ticket offered parsing Rails' own human-readable output, tagged with
   "Which of my four terminals is this query from" is the case where correlation hurts most.
 - **Strictly one-way.** The Reader never talks back. Version-mismatch *repair* already works
   through the filesystem and a restart (ADR-0002), and the REPL is out of scope — so a file,
-  which cannot carry a back-channel, loses nothing.
+  which cannot carry a back-channel, loses nothing. The REPL, when it came, did not reopen
+  this: it talks to a console process the Reader starts itself, over that process's own fd 3,
+  and never to a Run through the Sidecar. See
+  [ADR-0014](0014-the-repl-is-a-reader-owned-eval-loop.md).
 - **Synchronous append**, one mutex, `sync = true`, no background thread. `seq` must be taken
   inline on the request thread regardless; a drain thread would add a queue bound, a drop
   policy and a flush-at-exit problem, and would lose events precisely at shutdown, which is

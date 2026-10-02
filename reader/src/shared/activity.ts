@@ -1,5 +1,16 @@
 import { LOAD_ON_OPEN_EVENTS } from "./bounds"
-import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, type RequestRoutePayload, type ResponsePayload, type RunKind, type SqlEvent } from "./wire"
+import {
+  eventIdentity,
+  type AppLogEvent,
+  type Envelope,
+  type EvaluationFinishEvent,
+  type EvaluationStartEvent,
+  type RequestException,
+  type RequestRoutePayload,
+  type ResponsePayload,
+  type RunKind,
+  type SqlEvent,
+} from "./wire"
 
 /** The fold: Sidecar envelopes in append order become Activity table rows. */
 
@@ -12,9 +23,9 @@ import { eventIdentity, type AppLogEvent, type Envelope, type RequestException, 
 export type TimelineEvent = SqlEvent | AppLogEvent
 
 /**
- * Where a request got to. Hanging is *not* one of these: with no timeout there is no
- * threshold to cross, so a request that hangs is in flight exactly like one that is about
- * to answer, and a climbing elapsed is the whole of the signal.
+ * Where a request, or an *Evaluation*, got to. Hanging is *not* one of these: with no timeout
+ * there is no threshold to cross, so a request that hangs is in flight exactly like one that is
+ * about to answer, and a climbing elapsed is the whole of the signal.
  */
 export type RequestState = "in-flight" | "finished" | "interrupted"
 
@@ -149,6 +160,55 @@ export type ProvenElapsed = {
 }
 
 /**
+ * One *Evaluation* the REPL's console process ran, folded from its `evaluation_start` and
+ * `evaluation_finish`: the queries and log lines carrying its id are its own, as a request's
+ * are. Its result and what it printed are not on the wire, so they are not here.
+ */
+export type EvaluationRow = {
+  kind: "evaluation"
+  /** `requestRowId` of `evaluationId`, which is what a Console line names its owner with. */
+  id: string
+  /** The `request_id` its events carry. */
+  evaluationId: string
+  runId: string
+  /**
+   * The pid of the console process that ran it, off its Run's `run_header`, even once the
+   * *Memory bound* has taken its Run row. `null` while that header has not been seen.
+   */
+  pid: number | null
+  /** Interrupted only by its own Run ending: a server booting beside a console ends nothing. */
+  state: RequestState
+  /** Opened by its children, its `evaluation_start` not held: as `RequestRow.partial`. */
+  partial: boolean
+  overBound: boolean
+  /** As `RequestRow.provenElapsed`, from its `evaluation_start`. */
+  provenElapsed: ProvenElapsed | null
+  startedAtWall: number | null
+  /** What was submitted, as the wire carried it. `null` until its `evaluation_start` is held. */
+  input: string | null
+  /** The input's size before the wire cut it at 64 KB. `null` when nothing was cut. */
+  inputCutFrom: number | null
+  /** Run in a sandboxed console, whose writes are rolled back when it ends. */
+  sandbox: boolean
+  /** `null` until it finishes. */
+  outcome: "ok" | "raised" | null
+  /** The class and message of what it raised. `null` unless it raised. */
+  exception: { class: string; message: string } | null
+  /** The message's size before the wire cut it at 64 KB. `null` when nothing was cut. */
+  messageCutFrom: number | null
+  /** From its start to its finish, in its Run's own `at_mono`. `null` until both are held. */
+  durationMs: number | null
+  /** What Rails counted on the evaluation's thread. */
+  dbRuntimeMs: number | null
+  sqlCount: number
+  /** *Echoes* excluded, as on a request row. */
+  logCount: number
+  timeline: readonly TimelineEvent[]
+  /** Events after its `evaluation_finish`, as `RequestRow.trailing`. */
+  trailing: readonly TimelineEvent[]
+}
+
+/**
  * One Run's *Run row*: everything that Run emitted with no owning request — boot lines,
  * background jobs, a `rake` burst, a `rails c` session — in one row, anchored where the Run
  * first said anything. One per Run and no gap threshold splits it, because a threshold is
@@ -205,15 +265,16 @@ export type RunRow = {
 }
 
 /**
- * One row of the Activity table: the two things that own events. Tabs filter by this and
+ * One row of the Activity table: the three things that own events. Tabs filter by this and
  * nothing else — Requests, Runs, All — never by method, status or controller.
  */
-export type ActivityRow = RequestRow | RunRow
+export type ActivityRow = RequestRow | EvaluationRow | RunRow
 
 /**
  * What a row is called. Written here and read by the *Console*, which has to name the row
  * one of its lines selects without holding that row: two spellings of one id would be a
- * click that selected nothing, and the failure would be silent.
+ * click that selected nothing, and the failure would be silent. A `request_id` names a Request
+ * row or an Evaluation row, and the Console cannot tell which, so both are called this.
  */
 export function requestRowId(requestId: string) {
   return `request ${requestId}`
@@ -236,12 +297,21 @@ export function runRowId(runId: string) {
  */
 export type EvictedRow = {
   id: string
+  /** The `request_id` of a Request row or an Evaluation row, which closes the horizon the same way. */
   requestId: string | null
 }
+
+/** *Evaluation rows* the *Memory bound* has taken, by `evaluationId`, each with its console process's pid. */
+export type EvictedEvaluations = ReadonlyMap<string, number | null>
 
 export type ActivityTable = {
   /** The same array throughout, mutated in place: rows are appended and never reordered. */
   readonly rows: readonly ActivityRow[]
+  /**
+   * The *Evaluation rows* the *Memory bound* has taken, oldest first. The same map throughout,
+   * mutated in place, and kept to the bound's ceiling as its other memories of what it took are.
+   */
+  readonly evictedEvaluations: EvictedEvaluations
   /**
    * Fold a batch of envelopes, in append order. Safe to hand the same bytes twice.
    *
@@ -265,6 +335,12 @@ export type ActivityTable = {
    * and that eviction is exactly as real as one the live fold triggers.
    */
   foldEarlier: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
+  /**
+   * The console process `pid` exited: the latest `console` Run whose `run_header` carried it
+   * ended, as its `run_end` would say, though one killed too hard wrote none. Its in-flight rows
+   * become *Interrupted*, their elapsed frozen where they left it.
+   */
+  consoleExited: (pid: number) => void
 }
 
 /**
@@ -305,6 +381,14 @@ export function activityTable(): ActivityTable {
    * unmarked row rather than a wrong one.
    */
   const evictedRuns = new Set<string>()
+  const evictedEvaluations = new Map<string, number | null>()
+  /**
+   * The latest `console` Run to boot under each pid, by its `run_header`. Kept apart from the
+   * Run rows because the bound can take a Run row while its Evaluation row is still in flight.
+   */
+  const consoleRuns = new Map<number, string>()
+  /** Console Runs an exit notice ended. */
+  const exitedRuns = new Set<string>()
   /**
    * The row currently marked `overBound`, if any — there is never more than one, since it
    * only ever holds where `rows.length` is exactly `1`. Tracked rather than recomputed by
@@ -346,7 +430,7 @@ export function activityTable(): ActivityTable {
     if (existing !== undefined) return existing
 
     const folding: Folding = {
-      row: {
+      row: isEvaluationEvent(envelope) ? evaluationRow(requestId, envelope, consolePid(envelope.run_id)) : {
         kind: "request",
         id: requestRowId(requestId),
         requestId,
@@ -384,6 +468,38 @@ export function activityTable(): ActivityTable {
     byRequest.set(requestId, folding)
     open(folding)
     return folding
+  }
+
+  /**
+   * Whether `folding` takes `envelope`: an SQL or App log event, or an event of its own owner's
+   * kind. An evaluation's event naming a row opened by children alone first makes it an
+   * Evaluation row, since that is the owner it turned out to have. Any other event of the other
+   * owner's kind is one no Initializer writes, and is left out.
+   */
+  function claims(folding: Folding, envelope: Envelope) {
+    const row = folding.row
+    if (envelope.type === "sql" || envelope.type === "app_log") return true
+    if (row.kind === "evaluation") return isEvaluationEvent(envelope)
+    if (!isEvaluationEvent(envelope)) return true
+    if (!row.partial || row.method !== null || row.controller !== null || row.status !== null || row.response !== null) return false
+
+    becomeEvaluation(folding, row, envelope)
+    return true
+  }
+
+  /** `folding`'s Request row replaced, where it stands, by an Evaluation row holding what it held. */
+  function becomeEvaluation(folding: Folding, row: FoldingRow & RequestRow, envelope: Envelope) {
+    const evaluation = evaluationRow(row.requestId, envelope, consolePid(row.runId))
+    evaluation.state = row.state
+    evaluation.overBound = row.overBound
+    evaluation.sqlCount = row.sqlCount
+    evaluation.logCount = row.logCount
+    evaluation.timeline = row.timeline
+    evaluation.trailing = row.trailing
+    const at = rows.indexOf(row)
+    if (at !== -1) rows[at] = evaluation
+    if (overBoundRow === row) overBoundRow = evaluation
+    folding.row = evaluation
   }
 
   function runningFor(envelope: Envelope) {
@@ -538,8 +654,8 @@ export function activityTable(): ActivityTable {
    * *Interrupted*: the Run ended while these requests were still in flight, so no finish is
    * ever coming. Concluded from evidence and never from a timer — a `run_end`, which carries
    * the ending's own `at_mono` and so freezes the elapsed exactly, or the next web process's
-   * `run_header`, which carries a different process's clock and can only freeze it where the
-   * request itself left it.
+   * `run_header` or a console process's exit, neither of which carries the Run's clock, so
+   * they can only freeze it where the request itself left it.
    */
   function interrupt(whoseRunEnded: (folding: Folding) => boolean, ending: Envelope | null) {
     for (const folding of byRequest.values()) {
@@ -610,16 +726,21 @@ export function activityTable(): ActivityTable {
       row.railsVersion = envelope.payload.rails_version
       row.appName = envelope.payload.app_name
       row.railsRoot = envelope.payload.rails_root
-      // A load-earlier pull can bring this header in after one of its requests already opened.
+      if (envelope.payload.kind === "console") consoleBooted(envelope.payload.pid, envelope.run_id)
+      // A load-earlier pull can bring this header in after one of its rows already opened.
       for (const folding of byRequest.values()) {
-        if (folding.row.runId === envelope.run_id) folding.row.railsRoot = envelope.payload.rails_root
+        if (folding.row.runId !== envelope.run_id) continue
+        if (folding.row.kind === "request") folding.row.railsRoot = envelope.payload.rails_root
+        else folding.row.pid = envelope.payload.pid
       }
 
       if (bootsAWebProcess(envelope.payload.kind)) {
         // The marker goes where this header landed, so it is only ever drawn on a row this
         // header opened — a Run the Reader met further down started somewhere it cannot see.
         if (opensTheRow) row.marker = true
-        interrupt((folding) => folding.row.runId !== envelope.run_id, null)
+        // A console, whose evaluations these would be, boots beside a server and ends with
+        // its own Run.
+        interrupt((folding) => folding.row.kind === "request" && folding.row.runId !== envelope.run_id, null)
       }
       return
     }
@@ -646,16 +767,26 @@ export function activityTable(): ActivityTable {
     }
 
     const folding = foldingFor(envelope, requestId)
+    if (!claims(folding, envelope)) return
     const row = folding.row
     // Only while in flight: past that the elapsed is a finished request's duration or the
     // frozen reading an Interrupted row keeps.
     if (row.state === "in-flight") proveElapsed(folding, envelope)
+    // The exit notice travels apart from the Sidecar, so what the Run wrote before it died can
+    // arrive after it.
+    if (row.state === "in-flight" && exitedRuns.has(row.runId)) row.state = "interrupted"
 
     // An *Echo* is dropped from the row rather than marked on it — the Console reads the
     // envelope stream and not this fold, so the line itself survives where the log lives —
     // and, being dropped, it never takes a place under the bound either.
     if (envelope.type === "app_log" && isEcho(folding, envelope)) return
     count(folding)
+
+    if (row.kind === "evaluation") {
+      if (isEvaluationEvent(envelope)) foldEvaluation(folding, row, envelope)
+      else if (envelope.type === "sql" || envelope.type === "app_log") foldChild(folding, row, envelope)
+      return
+    }
 
     switch (envelope.type) {
       case "request_start":
@@ -695,15 +826,75 @@ export function activityTable(): ActivityTable {
         row.response = { payload: envelope.payload, bodyCutFrom: envelope.truncated?.body ?? null }
         break
       case "sql":
-        row.sqlCount += 1
-        folding.echoing = { query: envelope, due: "sql" }
-        place(folding, envelope)
-        break
       case "app_log":
-        row.logCount += 1
-        place(folding, envelope)
+        foldChild(folding, row, envelope)
         break
     }
+  }
+
+  /**
+   * `runId` is the latest console Run under `pid`. A load-earlier pull's header is older than
+   * every one held, so it only fills a pid no held header has.
+   */
+  function consoleBooted(pid: number, runId: string) {
+    if (earlier !== null && consoleRuns.has(pid)) return
+
+    // Deleted first, so a reused pid moves to the newest end, which `keepLatest` trims last.
+    consoleRuns.delete(pid)
+    consoleRuns.set(pid, runId)
+  }
+
+  /** The pid the `run_header` of console Run `runId` carried, or `null` when no header held says. */
+  function consolePid(runId: string) {
+    for (const [pid, run] of consoleRuns) if (run === runId) return pid
+    return null
+  }
+
+  function consoleExited(pid: number) {
+    const runId = consoleRuns.get(pid)
+    if (runId === undefined) return
+
+    exitedRuns.add(runId)
+    interrupt((folding) => folding.row.runId === runId, null)
+  }
+
+  /** An SQL or App log event, onto its owner's counts and into its timeline. */
+  function foldChild(folding: Folding, row: FoldingRow, event: TimelineEvent) {
+    if (event.type === "sql") {
+      row.sqlCount += 1
+      folding.echoing = { query: event, due: "sql" }
+    } else {
+      row.logCount += 1
+    }
+    place(folding, event)
+  }
+
+  function foldEvaluation(
+    folding: Folding,
+    row: FoldingRow & EvaluationRow,
+    envelope: EvaluationStartEvent | EvaluationFinishEvent,
+  ) {
+    if (envelope.type === "evaluation_start") {
+      row.startedAtWall = envelope.at_wall
+      row.input = envelope.payload.input
+      row.inputCutFrom = envelope.truncated?.input ?? null
+      row.sandbox = envelope.payload.sandbox
+      folding.startedAtMono = envelope.at_mono
+      row.provenElapsed ??= { ms: 0, atWall: envelope.at_wall }
+      // As a request's start: only a load-earlier pull recovers it.
+      if (earlier !== null) row.partial = false
+      return
+    }
+
+    const finished = envelope.payload
+    row.outcome = finished.outcome
+    row.exception = finished.outcome === "raised" ? { class: finished.class, message: finished.message } : null
+    row.messageCutFrom = envelope.truncated?.message ?? null
+    row.dbRuntimeMs = finished.db_runtime_ms ?? null
+    row.durationMs = folding.startedAtMono === null ? null : (envelope.at_mono - folding.startedAtMono) / 1_000_000
+    folding.finishSeq = envelope.seq
+    // Finished even if it had been called Interrupted, as a request is.
+    row.state = "finished"
   }
 
   /** An event with no owning request. Its Run owns it, and that is what a *Run row* is. */
@@ -754,7 +945,7 @@ export function activityTable(): ActivityTable {
 
       held -= forget(row)
       taken.add(row)
-      takenRows.push({ id: row.id, requestId: row.kind === "request" ? row.requestId : null })
+      takenRows.push({ id: row.id, requestId: row.kind === "run" ? null : requestIdOf(row) })
       standing -= 1
     }
     compact(taken)
@@ -767,6 +958,9 @@ export function activityTable(): ActivityTable {
     keepLatest(folded, ceiling)
     keepLatest(evicted, ceiling)
     keepLatest(evictedRuns, ceiling)
+    keepLatest(evictedEvaluations, ceiling)
+    keepLatest(consoleRuns, ceiling)
+    keepLatest(exitedRuns, ceiling)
 
     updateOverBound()
     return takenRows
@@ -821,20 +1015,62 @@ export function activityTable(): ActivityTable {
       return running?.events ?? 0
     }
 
-    const folding = byRequest.get(row.requestId)
-    byRequest.delete(row.requestId)
-    evicted.add(row.requestId)
+    const requestId = requestIdOf(row)
+    const folding = byRequest.get(requestId)
+    byRequest.delete(requestId)
+    evicted.add(requestId)
+    if (row.kind === "evaluation") evictedEvaluations.set(requestId, row.pid)
     return folding?.events ?? 0
   }
 
-  return { rows, fold, foldEarlier }
+  return { rows, evictedEvaluations, fold, foldEarlier, consoleExited }
 }
 
-/** Drop a set's oldest entries: a `Set` iterates in insertion order, which is the ring's. */
-function keepLatest(remembered: Set<string>, limit: number) {
-  for (const entry of remembered) {
+function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {
+  return envelope.type === "evaluation_start" || envelope.type === "evaluation_finish"
+}
+
+/**
+ * An Evaluation row, opened by `envelope`, run by the console process `pid`: partial unless that
+ * is its `evaluation_start`.
+ */
+function evaluationRow(evaluationId: string, envelope: Envelope, pid: number | null): FoldingRow & EvaluationRow {
+  return {
+    kind: "evaluation",
+    id: requestRowId(evaluationId),
+    evaluationId,
+    runId: envelope.run_id,
+    pid,
+    state: "in-flight",
+    partial: envelope.type !== "evaluation_start",
+    overBound: false,
+    provenElapsed: null,
+    startedAtWall: null,
+    input: null,
+    inputCutFrom: null,
+    sandbox: false,
+    outcome: null,
+    exception: null,
+    messageCutFrom: null,
+    durationMs: null,
+    dbRuntimeMs: null,
+    sqlCount: 0,
+    logCount: 0,
+    timeline: [],
+    trailing: [],
+  }
+}
+
+/** The `request_id` a Request row's or an Evaluation row's events carry. */
+function requestIdOf(row: RequestRow | EvaluationRow) {
+  return row.kind === "request" ? row.requestId : row.evaluationId
+}
+
+/** Drop a set's or a map's oldest entries: both iterate in insertion order, which is the ring's. */
+function keepLatest<Key>(remembered: Set<Key> | Map<Key, unknown>, limit: number) {
+  for (const key of remembered.keys()) {
     if (remembered.size <= limit) return
-    remembered.delete(entry)
+    remembered.delete(key)
   }
 }
 
@@ -848,15 +1084,18 @@ type Echoing = {
   echoing: { query: SqlEvent; due: "sql" | "callsite" } | null
 }
 
+/** A Request row or an Evaluation row, its arrays mutable. */
+type FoldingRow = (RequestRow | EvaluationRow) & { timeline: TimelineEvent[]; trailing: TimelineEvent[] }
+
 /**
- * A row, plus the two things the fold needs to know about it that nothing renders: where its
- * `request_finish` sat in the Run's `seq`, which is what tells a Trailing event from an
- * ordinary one, and the `at_mono` its start was taken at, which is what an elapsed is
+ * A Request row or an Evaluation row, plus the two things the fold needs to know about it that
+ * nothing renders: where its finish sat in the Run's `seq`, which is what tells a Trailing event
+ * from an ordinary one, and the `at_mono` its start was taken at, which is what an elapsed is
  * measured from. The arrays are mutable here and `readonly` on the row itself, so appending
  * to a timeline is this file's business and reading it is everyone else's.
  */
 type Folding = Echoing & {
-  row: RequestRow & { timeline: TimelineEvent[]; trailing: TimelineEvent[] }
+  row: FoldingRow
   /** `null` for a *Partial request*: there is no start to measure from. */
   startedAtMono: number | null
   finishSeq: number | null

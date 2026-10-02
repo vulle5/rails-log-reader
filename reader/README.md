@@ -33,7 +33,10 @@ Started anywhere that is not a Rails root, it says so and exits.
 Always start it through `bin/rails-log-reader.ts`, which is what `bun dev` and `bun start`
 run too. Bun reads `bunfig.toml` from the working directory, which is the Host app's, so the
 launcher points Bun at the Reader's own; run the server file directly and the Tailwind plugin
-never loads, and the Reader comes up unstyled with no error. Any arguments are passed on to
+never loads, and the Reader comes up unstyled with no error. The launcher also runs the
+server from the Reader's own directory, handing it the one it was started from: Bun's
+development server only keeps hot-reloading a source under its working directory once an
+editor or agent has saved it by renaming a new file over it. Any arguments are passed on to
 Bun as runtime flags — `bun dev` passes `--hot`.
 
 The port is 5273 and there is nothing to configure, which is the point: one URL to
@@ -42,6 +45,12 @@ have 5273 — so `RAILS_LOG_READER_PORT` moves the second one, and `0` asks the 
 free port, which is what the tests here use. The Reader prints the URL it bound either
 way. Start it on a port something else is holding and it says so and exits, rather than
 throwing.
+
+It binds `127.0.0.1` and gates every request, the page included, on its `Host` and
+`Origin`: see `src/server/gate.ts`. Each route is declared as a view or an act in
+`src/server/index.ts`. The HTML bundle is served on a unix socket of its own and proxied
+through the gate (`src/server/page.ts`), because `Bun.serve` serves a bundle without calling
+any handler.
 
 ## Checks
 

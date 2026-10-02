@@ -1,18 +1,21 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefCallback } from "react"
 
 /**
- * The Reader's **auto-scroll**: three of them, one per column, and one rule between them.
+ * The Reader's **auto-scroll**: four of them, one per column and one for the *REPL*'s
+ * *Transcript*, and one rule between them.
  *
  * A column *follows* — it sticks to the bottom, so whatever arrives is on screen the moment
- * it does — until it is *paused*, and **scrolling up is the only gesture that pauses it**.
+ * it does, and keeps it while its own height changes under it — until it is *paused*, and
+ * **scrolling up is the only gesture that pauses it**.
  * Scrolling back to the bottom resumes, silently. A paused column counts what has arrived
  * below and offers the count as a pill, which is the only other way back.
  *
- * Three of them and not one, because the three columns are read for different reasons at the
- * same time: scrolling the Console back to find a boot line has nothing to say about whether
- * the Activity table should keep following new traffic, and pinning a hanging request in the
- * Detail column has nothing to say about either. So each column owns its own state and
- * nothing here is shared but the rule.
+ * Four of them and not one, because the columns and the Transcript are read for different
+ * reasons at the same time: scrolling the Console back to find a boot line has nothing to say
+ * about whether the Activity table should keep following new traffic, pinning a hanging request
+ * in the Detail column has nothing to say about either, and rereading an old result in the
+ * Transcript has nothing to say about any of them. So each owns its own state and nothing here
+ * is shared but the rule.
  *
  * **There is no second pause state**, and that is a promise about everything this file does
  * not contain. Selecting a row does not pause the Activity table — you had to scroll up to
@@ -98,10 +101,11 @@ export function arrived(state: AutoScroll, howMany: number, evicted = 0): AutoSc
 export type ColumnAutoScroll = AutoScroll & {
   /**
    * Goes on the scrollport — the column's own body, never the window. A scrollport that
-   * unmounts and mounts again, the way the Console's does across a fold, comes back where the
-   * column was: on the bottom if it is following, and where it was left if it is paused.
+   * unmounts and mounts again, the way the Console's and the Transcript's do across a fold,
+   * comes back where the column was: on the bottom if it is following, and where it was left
+   * if it is paused.
    */
-  port: RefCallback<HTMLDivElement>
+  port: RefCallback<HTMLElement>
   onScroll: () => void
   /** The pill's click: back to the bottom, and back to following. */
   resume: () => void
@@ -146,12 +150,16 @@ type AutoScrollOptions = {
    * a relist: a tab or a chip re-derives the same stream thinned, and a reader who scrolled
    * up in it is still reading where they were.
    *
-   * The Detail column alone supplies one, and supplies *Selection* — not its own filter
-   * chip, for the same reason the other columns' chips are not `refollowsWhen` either. A new
-   * Selection is a different row's timeline, which opens at its newest activity rather than
-   * inheriting the last one's scroll position; the schema chip thins that same timeline, so
-   * it is `listing`'s concern only, exactly the "same stream thinned" case a Console chip
-   * already is.
+   * Of the columns, the Detail column alone supplies one, and supplies *Selection* — not its
+   * own filter chip, for the same reason the other columns' chips are not `refollowsWhen`
+   * either. A new Selection is a different row's timeline, which opens at its newest activity
+   * rather than inheriting the last one's scroll position; the schema chip thins that same
+   * timeline, so it is `listing`'s concern only, exactly the "same stream thinned" case a
+   * Console chip already is.
+   *
+   * The Transcript supplies one too, and the same key as its `listing`, since a change here
+   * does nothing unless `listing` changes with it: it changes on a submit from this tab, and
+   * on a Restart from any.
    */
   refollowsWhen?: string
   /**
@@ -162,10 +170,16 @@ type AutoScrollOptions = {
    * it, so it has nothing to turn into a floor.
    */
   evicted?: number
+  /**
+   * What the column is drawing, for one whose things grow after they arrive, as the
+   * Transcript's evaluations do while their output streams in. A change in it alone puts a
+   * following column back on its bottom and counts nothing: `items` is what counts.
+   */
+  content?: unknown
 }
 
-export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: AutoScrollOptions): ColumnAutoScroll {
-  const port = useRef<HTMLDivElement>(null)
+export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0, content }: AutoScrollOptions): ColumnAutoScroll {
+  const port = useRef<HTMLElement>(null)
   const [state, setState] = useState<AutoScroll>(FOLLOWING)
   const rendered = useRef({ items, listing, refollowsWhen, evicted })
   // Read by `attach`, which is stable and so cannot close over `state`.
@@ -173,17 +187,34 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
   following.current = state.following
   // Where a paused column's scrollport was when it unmounted.
   const left = useRef(0)
+  // Where the port was last put or scrolled to, so a scroll can tell moving up from the port's
+  // height changing under it.
+  const top = useRef(0)
 
-  const attach = useCallback((element: HTMLDivElement) => {
+  const pin = useCallback((element: HTMLElement | null) => {
+    if (element === null) return
+    stickToBottom(element)
+    top.current = element.scrollTop
+  }, [])
+
+  const attach = useCallback((element: HTMLElement) => {
     port.current = element
-    if (following.current) stickToBottom(element)
+    if (following.current) pin(element)
     else element.scrollTop = left.current
 
+    // The port's own height changes without a scroll or an arrival — the REPL drawer opening,
+    // its edge dragged, the window resized — and a following column keeps its bottom through it.
+    const observer = new ResizeObserver(() => {
+      if (following.current) pin(element)
+    })
+    observer.observe(element)
+
     return () => {
+      observer.disconnect()
       left.current = element.scrollTop
       port.current = null
     }
-  }, [])
+  }, [pin])
 
   // A layout effect, so the port is put back on the bottom in the same frame the thing that
   // pushed it off was added: after the DOM has the new rows and before anything is painted,
@@ -204,23 +235,35 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
     // following, and the one whose `refollowsWhen` just changed is about to be. Either way
     // the bottom is where it belongs, and the render that state change causes changes nothing
     // about that.
-    if (state.following || refollows) stickToBottom(port.current)
-  }, [items, listing, refollowsWhen, evicted, state.following])
+    if (state.following || refollows) pin(port.current)
+  }, [items, listing, refollowsWhen, evicted, content, state.following, pin])
 
   const onScroll = useCallback(() => {
     const measuring = port.current
     if (measuring === null) return
 
     const bottom = atBottom(measuring)
+    // Only moving up leaves the bottom. A following port found off it without having moved up
+    // had its height changed under it before its observer could put it back, as a drag on the
+    // REPL drawer's edge can between a pin and the scroll that pin queued.
+    if (!bottom && following.current && measuring.scrollTop >= top.current) {
+      pin(measuring)
+      return
+    }
+
+    top.current = measuring.scrollTop
+    // Now, rather than on the render this causes: the observer can fire before it, as it does
+    // when a port that just mounted is scrolled up to an entry it was asked to reveal.
+    following.current = bottom
     setState((current) => scrolled(current, bottom))
-  }, [])
+  }, [pin])
 
   const resume = useCallback(() => {
     setState(FOLLOWING)
     // Now, rather than waiting for the effect: the click changed no content, so nothing else
     // would move the port, and the pill's whole promise is that it takes you to the bottom.
-    stickToBottom(port.current)
-  }, [])
+    pin(port.current)
+  }, [pin])
 
   return { ...state, port: attach, onScroll, resume }
 }
@@ -230,7 +273,6 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0 }: Au
  * maximum, so the browser has nothing to clamp and the number the port reports back is the
  * number it was given.
  */
-function stickToBottom(port: HTMLElement | null) {
-  if (port === null) return
+function stickToBottom(port: HTMLElement) {
   port.scrollTop = port.scrollHeight - port.clientHeight
 }

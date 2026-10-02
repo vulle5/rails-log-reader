@@ -2,7 +2,7 @@ import type { ActivityRow } from "../../../../shared/activity"
 
 /**
  * The Activity table's tabs, which filter by **row kind and nothing else**: Requests, Runs,
- * All. Never by method, status or controller — v1 rules those out, and a tab that grew one
+ * All. An *Evaluation row* has no tab of its own and shows under All alone. Never by method, status or controller — v1 rules those out, and a tab that grew one
  * of them would be that exclusion returning by drift rather than by decision.
  *
  * Each carries a count of everything of its kind the Reader holds, whichever tab is showing,
@@ -19,14 +19,14 @@ import type { ActivityRow } from "../../../../shared/activity"
  */
 
 /**
- * What a tab filters to: a row's own `kind`, or the way out of both. Taken from `ActivityRow`
- * rather than spelled again, so the tabs and the rows cannot drift into two vocabularies for
- * one thing — and so a third kind of row would be a tab that fails to compile rather than one
- * that quietly filters nothing.
+ * What a tab filters to: a row's own `kind`, or the way out of all of them. Taken from
+ * `ActivityRow` rather than spelled again, so the tabs and the rows cannot drift into two
+ * vocabularies for one thing — and so a new kind of row fails to compile until it is given a
+ * tab or, as an Evaluation row is, left out of them by name.
  */
-export type RowKindFilter = ActivityRow["kind"] | "all"
+export type RowKindFilter = Exclude<ActivityRow["kind"], "evaluation"> | "all"
 
-/** The order they are read in: the two kinds, then the way out of both. */
+/** The order they are read in: the two kinds, then the way out of all of them. */
 const TABS: readonly [RowKindFilter, string][] = [
   ["request", "Requests"],
   ["run", "Runs"],
@@ -59,7 +59,7 @@ export function RowKindTabs({ rows, showing, onShow }: RowKindTabsProps) {
   // One pass for all three, rather than one filter per tab: at the Memory bound's rows this
   // is read on every fold, and three of the four passes were counting the same array again.
   const counted = { request: 0, run: 0, all: rows.length }
-  for (const row of rows) counted[row.kind] += 1
+  for (const row of rows) if (row.kind !== "evaluation") counted[row.kind] += 1
 
   return (
     <div className="flex flex-none gap-0.5" role="tablist" aria-label="Filter by row kind">

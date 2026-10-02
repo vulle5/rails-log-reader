@@ -248,4 +248,14 @@ describe("copying headers", () => {
       "content-type: application/json; charset=utf-8\nset-cookie: a=1; path=/\nset-cookie: b=2; path=/\nvary: Accept",
     )
   })
+
+  test("confirms a copy of every header", async () => {
+    const { user, panel } = await showHeaders()
+    const copyAll = within(panel).getByRole("button", { name: "Copy all headers" })
+    expect(copyAll).not.toHaveTextContent("Copied")
+
+    await user.click(copyAll)
+
+    expect(copyAll).toHaveTextContent("Copied")
+  })
 })

@@ -29,6 +29,9 @@
   /* `accent` leaning 12% toward `foreground`: darker in the light theme, lighter in the dark. */
   --color-accent-hover: #2c65d2;
   --color-selected: #e8effc;
+  /* Selected text in an input: `accent`, translucent, so the text it covers keeps its colours.
+     `selected` is opaque, and would hide them. */
+  --color-selection: rgb(47 111 235 / 28%);
   /* *Hover grouping*'s two marks: `accent` mixed 7% into `background` for the hovered group,
      and 14% for the pinned one. */
   --color-lit: #f0f5fe;
@@ -46,6 +49,8 @@
 
   --color-warn: #9a6700;
   --color-error: #cf222e;
+  /* A console process that is up and waiting for input. */
+  --color-ready: #2da44e;
 
   /* HTTP methods and status classes, coloured independently of each other and of `warn` and
      `error` above, so a 404 is never visually identical to a logged `.error` call and DELETE
@@ -78,6 +83,9 @@
   --shadow-pinned-row: inset 3px 0 0 var(--color-accent);
   /* An *Interrupted* row's edge, drawn inside its first cell so marking it moves no text. */
   --shadow-interrupted: inset 3px 0 0 var(--color-faint);
+  /* A *Transcript* evaluation's edge once it raised or lost its console process: the pinned
+     group's edge in the error colour. */
+  --shadow-failed: inset 2px 0 0 var(--color-error);
 
   /* The small labels set into a line of text: filter chips, and the tags beside a Console line. */
   --radius-chip: 3px;
@@ -124,6 +132,7 @@
     --color-accent: #6ea0ff;
     --color-accent-hover: #7ca9fd;
     --color-selected: #1c2432;
+    --color-selection: rgb(110 160 255 / 35%);
     --color-lit: #161c26;
     --color-pinned: #1c2637;
     --color-elapsed: #1c2637;
@@ -137,6 +146,7 @@
 
     --color-warn: #e3b341;
     --color-error: #ff7b72;
+    --color-ready: #3fb950;
 
     --color-method-post: #3fb950;
     --color-method-put-patch: #56d4dd;

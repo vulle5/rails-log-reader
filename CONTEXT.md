@@ -207,7 +207,8 @@ indistinguishable from a broken one.
 **Collapsed Console** — the *Console rail* folded down to a narrow vertical strip carrying its
 name and its *Unseen count*, so it takes no room while it isn't needed. Folded by its own
 collapse control, or by dragging its *Column divider* past its minimum; remembered across
-reloads. A window too narrow to keep it open without narrowing the *Detail column* folds it
+reloads. The strip reopens it at the width it had; its divider reopens it at its minimum, so a
+drag opens the edge under the pointer rather than throwing it across the Reader. A window too narrow to keep it open without narrowing the *Detail column* folds it
 too, but only for as long as the window stays that narrow: that fold is the window's, not the developer's, so it is
 never remembered and the Console reopens the moment there is room. Unfolded inside that fold,
 it opens at its minimum and the Reader scrolls sideways, until the window next has room.
@@ -252,11 +253,29 @@ exception. Only the console process dying makes it *Interrupted*.
 process: a Restart clears it, and a tab that opens later is shown it whole. It keeps only the
 latest so many, dropping the oldest first, so an *Evaluation row* can outlive its entry.
 
+An evaluation is drawn as a raised block whose left edge is the accent while it runs and once it
+returns a result, and the error colour once it raised or lost its console process. A status
+strip along the block's bottom carries all of its chrome, so the input and the result carry
+none. The strip says what the evaluation came to: its result's class, `raised`, that it lost its
+console, or `running…`. Then come its *Evaluation row*'s non-zero counts and its time, as a link
+that opens the row on its Timeline tab. The time climbs in seconds while the row is *In-flight*
+and freezes once it is *Interrupted*. Once the *Memory bound* has taken the row, the strip says
+so in place of the link. A result's Pretty | Raw and Copy come last, and Copy copies what shows.
+
 An entry's printed output and its result, as first drawn, are each cut to a fixed number of
 lines, with what's left counted under the cut. When the entry has an *Evaluation row*, the cut
 offers to open that row on its *Result* tab; when it has none, it shows the rest in place. The
 cut is the Reader's own fold, so *Search* opens it for a match inside it, and it never cuts what
 the developer opened by hand.
+
+An entry that raised is drawn as an exception is in the *Detail column*: its class and message,
+then its backtrace with gem frames collapsed. The backtrace ends at the developer's last
+`(repl):N` frame, so the eval loop's own frames under it never bury theirs, and it is empty for
+an error that came before any of their code ran, a SyntaxError. Each error behind it, through
+`cause`, is folded as "Caused by" its class and message, and opens to its own backtrace; one with
+no backtrace is that line alone. That fold is the Reader's own too, so *Search* opens it for a
+match in its backtrace. A backtrace is cut to 64 KB of frames from its far end, and only
+the nearest ten causes are kept, and the entry says so under what was cut.
 
 **Input history** — the inputs the *REPL* has submitted, kept apart from the *Transcript*
 because it outlives the console process: it survives a Restart and the Reader restarting. It is
@@ -265,15 +284,32 @@ turns on one port never share it. It is capped at the latest 200 distinct inputs
 kept once at its latest. That cap is a guess, and too many entries would bury the useful ones as
 surely as too few would starve the *History suggestion*. ↑ on the input's first line opens it as
 a list over the Transcript, newest nearest the prompt, filtered by what is typed while it is
-open. Picking an entry puts it in the input and never runs it. It is read once when the page
-loads and written only on submit, so a keystroke never touches storage.
+open, with a divider above each console process's entries and the running one's marked "this console" where earlier entries come before it. Picking an entry puts it in the input and never runs it. It is read once when the page
+loads, and again only when another tab writes it. It is written on submit, and once more when
+that evaluation finishes, to mark that it raised, and never on a keystroke.
 _Avoid_: history (alone), which already means the load-on-open Events; command history.
 
+**Completion** — what Tab offers in the *REPL*'s input: the names the word before the caret could
+be, with what kind of name each is, and what it was asked of when it follows a `.` or a `::`. One
+candidate is inserted, and several open a popover at the word that narrows as it is typed and
+closes when the word ends. The popover never offers only what is already typed: when every
+candidate left is the word itself it stays shut, or closes, and Tab on such a word does nothing.
+A candidate equal to the word stays in the list while others are beside it. It comes from IRB's own completor, run by the eval loop in the console
+process: `TypeCompletor` when `repl_type_completor` is in the Host app's bundle, and
+`RegexpCompletor` otherwise, which reads a receiver off its text and never calls a method to do
+it. The loop says which it has when it is ready, and without either there is no completion. It
+is never run beside an *Evaluation*, so while one runs Tab says it waits. A *Setting* chooses
+whether Tab opens the popover or each word typed does. See
+`docs/adr/0014-the-repl-is-a-reader-owned-eval-loop.md`.
+_Avoid_: autocomplete, intellisense.
+
 **History suggestion** — the grey text after the caret offering the newest *Input history*
-entry that starts with what has been typed; → takes it. It is computed from a deferred copy of
-the input, and drawn only while it still matches, so typing never waits on it. While the
-completion popover is open, the grey text previews the selected candidate instead: it belongs to
-whichever is showing, and never means both at once. It can be turned off in *Settings*.
+entry that starts with what has been typed, drawn only while the caret is at the end of the
+text; → or End takes it. It is computed from a deferred copy of the input, and drawn only while
+it still matches, so typing never waits on it. While the completion popover is open, the grey
+text previews the selected candidate instead, and nothing while none is selected, and → or End
+takes that: it belongs to whichever is showing, and never means both at once. It can be turned
+off in *Settings*, remembered as what is off, which leaves the popover's preview as it is.
 _Avoid_: autosuggestion, ghost text.
 
 **Unseen result** — the mark on a folded *REPL* drawer: an *Evaluation* finished since this tab
@@ -439,8 +475,8 @@ input's first line where its path goes. Its Status is its state, where a faint `
 finished without raising. Its DB time is what Rails itself counted, and Total climbs while it
 runs. Two runs of the same input are told apart by when they started, never by a number. What
 the console process emits outside any evaluation stays in its *Run row*.
-Each *Transcript* entry links to its row with its counts (`3 queries · 1 log`), which opens
-Timeline. The row's *Detail column* header shows the whole input, highlighted as Ruby the way
+Each *Transcript* entry's status strip links to its row with its counts and time
+(`3 queries · 1 log · 38ms →`), which opens Timeline. The row's *Detail column* header shows the whole input, highlighted as Ruby the way
 the Transcript's inputs are, and the class and message when it raised. The header links back to
 the entry for as long as the Transcript still holds it. An entry whose row the *Memory bound*
 took says so rather than linking to nothing.
@@ -528,8 +564,9 @@ called which. The raised frame — `backtrace[0]`, Ruby's own guarantee of where
 exception happened — stays visible whatever its Host-app status; collapsing away the raise
 site by the same rule that hides `ActiveSupport`'s dispatch chain would defeat the column
 on its most common case, a `NoMethodError` or `RecordNotFound` several frames inside a gem.
-A marker's reveal is one-way and unpersisted: clicking opens its frames for the rest of
-that render, and the next render of any exception starts fully collapsed again — no
+A `(repl):N` frame, which is what the developer's *REPL* input is called in a backtrace, is a
+Host-app frame whatever `railsRoot` is, so it is never collapsed. A marker's reveal is one-way
+and unpersisted: clicking opens its frames for the rest of that render, and the next render of any exception starts fully collapsed again — no
 toggle, nothing survives a reload. A trace with no Host-app frame at all (including while
 `railsRoot` is still unknown) is just one marker spanning everything but the raised frame;
 the exception's class and message above it are never hidden by this. *Search* reaches into
@@ -655,7 +692,8 @@ _Avoid_: using it for the *Column divider*.
 
 **Column divider** — the narrow gap between two of the Reader's columns, which is its own drag
 handle and wears a three-dot grip so it reads as one: one between the *Console* and the
-*Activity table*, one between the table and the *Detail column*.
+*Activity table*, one between the table and the *Detail column*. The *REPL* drawer's top edge
+is one turned on its side, setting the drawer's height the same way.
 Each sets the width of its outer column; the *Activity table* takes whatever is left, because it
 is the view the other two serve. A width set is a *request*, remembered across reloads, and
 what is drawn is what the window can fit: a window too narrow gives width back from the
@@ -667,11 +705,14 @@ layout. Double-clicking a divider returns its column to its default width. There
 to take you to a row.
 _Avoid_: gutter, splitter, resizer.
 
-**Auto-scroll** — a column following new activity: stuck to the bottom, so whatever arrives
-is on screen the moment it does. There are three, one per column, and they share the rule and
-nothing else — scrolling the *Console* back to find a boot line says nothing about whether the
-*Activity table* should keep following new traffic, and pinning a hanging request in the
-*Detail column* says nothing about either.
+**Auto-scroll** — a column, or the *Transcript*, following new activity: stuck to the bottom, so whatever arrives
+is on screen the moment it does. There are four, one per column and one for the *REPL*'s
+*Transcript*, and they share the rule and nothing else — scrolling the *Console* back to find a
+boot line says nothing about whether the *Activity table* should keep following new traffic,
+pinning a hanging request in the *Detail column* says nothing about either, and rereading an
+old result in the Transcript says nothing about any of them. Stuck means stuck whatever moved
+the bottom: a following one keeps it while its own height changes, as the REPL drawer opening,
+its edge dragged, the prompt growing or the window resizing change it.
 
 **Scrolling up is the only gesture that pauses one**, and reaching the bottom again is the
 only thing that resumes it — silently, because that is the gesture the developer already
@@ -711,11 +752,25 @@ quietly stopped moving — which costs nothing beyond what the seam above alread
 is the same "prompt to go and look, not a ledger" trade, admitted where it applies rather
 than worn silently.
 
-All three open pinned to the bottom of the loaded history. The *Detail column* is the one that
+The Transcript's entries grow after they arrive, so it counts what *came to* something rather
+than what was appended: an *Evaluation* finishing counts once, as a result, as `raised`, or as
+having lost its console process, and so does an entry of what the console process printed
+outside any evaluation. A running evaluation's printed output does not count as it streams,
+because the evaluation ending is what is worth stopping to read, and one evaluation started in
+another tab is never counted at its start and again at its end.
+
+All four open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
 different thing to be at the bottom of, rather than the same stream thinned. Its own SCHEMA
 chip is the same stream thinned, exactly the case a Console chip already is, so toggling it
-never refollows on its own — only a new Selection does.
+never refollows on its own — only a new Selection does. The Transcript starts following again
+whenever the *REPL* submits from this tab, because a submit asks to see its answer. Another
+tab's submit is something that arrived, and is counted when it ends. Picking an *Input history*
+entry or taking a *Completion* runs nothing, so neither refollows it. A Restart refollows it in
+every tab and drops its count, because a new console process's Transcript is a different thing
+to be at the bottom of, and a count left standing would point at entries that are gone.
+Folding the REPL drawer is never dropping: it reopens with its Auto-scroll as it was, counting
+what ended while it was folded, so the *Unseen result* on its header hands over to the pill.
 _Avoid_: follow mode, tail, live/paused toggle (there is no control to toggle — the scrollbar
 is the control).
 

@@ -332,7 +332,7 @@ describe("dragging the Console's divider past its minimum", () => {
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
   })
 
-  test("reopens it when the same drag comes back out past half its minimum", async () => {
+  test("reopens it at its minimum when the same drag comes back out past half its minimum", async () => {
     const { user } = openTheReader(TRAFFIC)
     const target = divider("Console")
 
@@ -344,7 +344,7 @@ describe("dragging the Console's divider past its minimum", () => {
     ])
 
     expect(consoleCollapsed()).toBe(false)
-    expect(divider("Console")).toHaveAttribute("aria-valuenow", "360")
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
   })
 
   test("is remembered across a reload, like a fold by the button", async () => {
@@ -384,7 +384,7 @@ describe("the keyboard on the Console's divider", () => {
     expect(consoleCollapsed()).toBe(true)
   })
 
-  test("unfolds a Collapsed Console by arrowing it outward", async () => {
+  test("unfolds a Collapsed Console at its minimum by arrowing it outward", async () => {
     const { user } = openTheReader(TRAFFIC)
     await collapseConsole(user)
 
@@ -392,7 +392,7 @@ describe("the keyboard on the Console's divider", () => {
     await user.keyboard("{ArrowRight}")
 
     expect(consoleCollapsed()).toBe(false)
-    expect(divider("Console")).toHaveAttribute("aria-valuenow", "360")
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
   })
 })
 
@@ -412,6 +412,26 @@ describe("dragging the Collapsed Console's divider outward", () => {
     await drag(user, "Console", 200)
 
     expect(consoleCollapsed()).toBe(false)
+  })
+
+  test("opens it at its minimum, however wide it was", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await drag(user, "Console", 60)
+    await collapseConsole(user)
+
+    await drag(user, "Console", 150)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "240")
+  })
+
+  test("follows the pointer once the drag is past the minimum", async () => {
+    const { user } = openTheReader(TRAFFIC)
+    await collapseConsole(user)
+
+    // From the 32px strip: 32 + 268.
+    await drag(user, "Console", 268)
+
+    expect(divider("Console")).toHaveAttribute("aria-valuenow", "300")
   })
 
   test("leaves it folded short of that", async () => {
@@ -435,15 +455,6 @@ describe("unfolding after a fold", () => {
     expect(divider("Console")).toHaveAttribute("aria-valuenow", "420")
   })
 
-  test("restores it by dragging outward", async () => {
-    const { user } = openTheReader(TRAFFIC)
-    await drag(user, "Console", 60)
-    await drag(user, "Console", -400)
-
-    await drag(user, "Console", 200)
-
-    expect(divider("Console")).toHaveAttribute("aria-valuenow", "420")
-  })
 
   test("restores the minimum a drag passed through on its way to folding", async () => {
     const { user } = openTheReader(TRAFFIC)
