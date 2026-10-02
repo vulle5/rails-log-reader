@@ -1,24 +1,77 @@
 import { useEffect, useState, type ReactNode } from "react"
 
 import { cn } from "../lib/cn"
-import { ControlButton } from "./ControlButton"
+
+/** A control's size: `sm` in a *Transcript* evaluation's status strip, `md` in the *Detail column*. */
+export type ControlSize = "sm" | "md"
 
 /**
- * A copy-to-clipboard control for a block whose whole point is "paste this somewhere else",
- * drawn as the controls beside it are. A click never copies silently: the label swaps to a
- * brief confirmation, because clicking something and seeing no reaction reads as "did that
- * work?" Anchored to the top right of the nearest positioned block; a caller moves it with
- * `className`.
+ * A copy-to-clipboard control for a block whose whole point is "paste this somewhere else": a
+ * copy icon and the word. A click never copies silently: the icon turns to a check and the word to
+ * "Copied" for a moment, because clicking something and seeing no reaction reads as "did that
+ * work?" The text is asked for on the click. A caller places it with `className`.
  */
-export function CopyButton({ text, label, className }: { text: string; label: string; className?: string }) {
+export function CopyButton({
+  text,
+  label,
+  size,
+  className,
+}: {
+  text: () => string
+  label: string
+  size: ControlSize
+  className?: string
+}) {
   const [copied, copy] = useCopy()
 
   return (
-    // Wide enough for "Copied" as well as "Copy", so the confirmation never nudges anything
-    // beside it. Bordered, so it reads as a button beside toggles that are not pressed.
-    <ControlButton className={cn("absolute top-1.5 right-2 min-w-13 border-border", className)} title={label} aria-label={label} onClick={() => copy(text)}>
-      {copied ? "Copied" : "Copy"}
-    </ControlButton>
+    <button
+      type="button"
+      className={cn(
+        "flex flex-none cursor-pointer items-center rounded font-ui text-faint hover:bg-selected hover:text-foreground",
+        size === "sm" ? "gap-1 px-1 py-0.5 text-2xs" : "gap-1.5 px-2 py-1 text-xs",
+        className,
+      )}
+      title={label}
+      aria-label={label}
+      onClick={() => copy(text())}
+    >
+      {copied ? <CheckIcon size={size} /> : <CopyIcon size={size} />}
+      {/* As wide as "Copied" whichever it says, so the confirmation never nudges anything beside it. */}
+      <span className="grid text-left after:invisible after:col-start-1 after:row-start-1 after:content-['Copied']">
+        <span className="col-start-1 row-start-1">{copied ? "Copied" : "Copy"}</span>
+      </span>
+    </button>
+  )
+}
+
+function CopyIcon({ size }: { size: ControlSize }) {
+  return (
+    <Icon size={size}>
+      <rect width="13" height="13" x="9" y="9" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </Icon>
+  )
+}
+
+function CheckIcon({ size }: { size: ControlSize }) {
+  return (
+    <Icon size={size}>
+      <path d="M20 6 9 17l-5-5" />
+    </Icon>
+  )
+}
+
+/** A stroked icon the height of its button's text. */
+function Icon({ size, children }: { size: ControlSize; children: ReactNode }) {
+  return (
+    <svg
+      className={cn("flex-none fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]", size === "sm" ? "size-3" : "size-3.5")}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
   )
 }
 
@@ -97,9 +150,9 @@ export function Copyable({
     <div className="flow-root">
       {(text !== null || controls !== undefined) && (
         // Centred on the block's first line.
-        <div className="float-right -mt-0.5 ml-3 flex gap-4">
+        <div className="float-right -mt-0.5 ml-3 flex items-center gap-3">
           {controls}
-          {text !== null && <CopyButton className="static" text={text} label={label} />}
+          {text !== null && <CopyButton size="md" text={() => text} label={label} />}
         </div>
       )}
       {children}

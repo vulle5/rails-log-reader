@@ -7,7 +7,7 @@ import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
 import { LinkButton } from "../../../components/LinkButton"
 import { Tag } from "../../../components/Tag"
-import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
+import { PrettyRawPill } from "../../../components/PrettyRawPill"
 import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Search } from "../../../hooks/search"
@@ -562,7 +562,7 @@ function Response({
       {/* Raised as the copy control is, so Pretty | Raw sit level with it. */}
       <div className="-mt-0.5 flex items-center gap-3 pb-3">
         {stripLine}
-        <BodyView hasTree={hasTree} raw={raw} onRaw={onRaw} />
+        <PrettyRawPill size="md" label="Show the body as" raw={raw} onRaw={onRaw} prettyDisabled={!hasTree} />
       </div>
       {body.cutFrom !== null ? (
         <p className="pb-3 text-faint">
@@ -655,20 +655,6 @@ function RawBody({ text }: { text: string }) {
     <pre className="font-mono text-sm leading-sql whitespace-pre-wrap wrap-anywhere">
       <Highlight text={text} />
     </pre>
-  )
-}
-
-/** Pretty | Raw, the pressed one showing. Pretty is disabled, and struck through, when the body has no tree. */
-function BodyView({ hasTree, raw, onRaw }: { hasTree: boolean; raw: boolean; onRaw: (raw: boolean) => void }) {
-  return (
-    <ToggleGroup label="Show the body as">
-      <ToggleButton pressed={!raw} disabled={!hasTree} onClick={() => onRaw(false)}>
-        Pretty
-      </ToggleButton>
-      <ToggleButton pressed={raw} onClick={() => onRaw(true)}>
-        Raw
-      </ToggleButton>
-    </ToggleGroup>
   )
 }
 
@@ -953,13 +939,13 @@ function Exception({
     // The right padding keeps the message clear of the copy button, which is anchored here and
     // not to the column.
     <section
-      className="relative border-y border-border border-t-error py-2 pr-17 pl-3"
+      className="relative border-y border-border border-t-error py-2 pr-23 pl-3"
       aria-label="Exception"
     >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
           somewhere else, so it alone gets a control for it — a query or a log line is easy
           enough to select by hand. */}
-      <CopyButton text={exceptionText(exception, cutFrom)} label="Copy exception" />
+      <CopyButton className="absolute top-1.5 right-2" size="md" text={() => exceptionText(exception, cutFrom)} label="Copy exception" />
       <ExceptionLine className="font-mono text-sm" exception={exception} />
       <Backtrace className="mt-1.5" backtrace={exception.backtrace} railsRoot={railsRoot} />
       <Cut field="backtrace" original={cutFrom ?? undefined} />

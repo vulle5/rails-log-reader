@@ -2,7 +2,7 @@ import { useState } from "react"
 
 import type { Outcome } from "../../../../shared/repl"
 import { Copyable } from "../../../components/CopyButton"
-import { ToggleButton, ToggleGroup } from "../../../components/ToggleButton"
+import { PrettyRawPill } from "../../../components/PrettyRawPill"
 import { ValueViewer } from "../../value-viewer/components/ValueViewer"
 import type { ValueSource } from "../../value-viewer/lib/value-tree"
 import { ENTRY_LINES } from "../lib/entry-cut"
@@ -79,16 +79,7 @@ function ResultView({
   note: CutNote | null
   bare: boolean
 }) {
-  const toggles = (
-    <ToggleGroup label="Show the result as">
-      <ToggleButton pressed={!raw} onClick={() => onRaw(false)}>
-        Pretty
-      </ToggleButton>
-      <ToggleButton pressed={raw} onClick={() => onRaw(true)}>
-        Raw
-      </ToggleButton>
-    </ToggleGroup>
-  )
+  const toggles = <PrettyRawPill size="md" label="Show the result as" raw={raw} onRaw={onRaw} />
 
   return (
     // The gap is a space wide, as `=> ` is before a result's text.

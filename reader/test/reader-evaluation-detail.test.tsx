@@ -256,6 +256,27 @@ describe("the Result tab", () => {
     expect(inTranscript().getByRole("button", { name: "Pretty" })).toHaveAttribute("aria-pressed", "true")
   })
 
+  test("copies what is showing, and confirms it", async () => {
+    const { run, header } = consoleRun()
+    const { user } = theReader([header, run.evaluationStart(recordedAs(1)), run.evaluationFinish(recordedAs(1))], {
+      transcript: [entry({ id: 1, outcome: result("Hash", "{a: 1,\n \"b\" => [1.0, nil, :c]}\n") })],
+    })
+    await select(user, "Post.count")
+    await showDetailTab(user, "Result")
+    const copy = () => within(detailPanel("Result")).getByRole("button", { name: "Copy result" })
+
+    await user.click(copy())
+
+    expect(await navigator.clipboard.readText()).toBe(RUBY_HASH.inspect)
+    expect(copy()).toHaveTextContent("Copied")
+
+    await user.click(within(detailPanel("Result")).getByRole("button", { name: "Raw" }))
+    await user.click(copy())
+
+    expect(await navigator.clipboard.readText()).toBe("{a: 1,\n \"b\" => [1.0, nil, :c]}\n")
+    expect(copy()).toHaveTextContent("Copied")
+  })
+
   test("shows the error an evaluation raised, with its backtrace", async () => {
     const { run, header } = consoleRun()
     const raised: Outcome = { kind: "error", className: "RuntimeError", message: "boom", backtrace: ["(repl):1:in `<main>'"], causes: [] }

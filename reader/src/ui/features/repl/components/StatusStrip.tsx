@@ -1,10 +1,9 @@
-import type { ReactNode } from "react"
-
 import type { EvaluationRow } from "../../../../shared/activity"
 import { LOAD_ON_OPEN_EVENTS } from "../../../../shared/bounds"
 import type { EntryRow, Outcome } from "../../../../shared/repl"
-import { useCopy } from "../../../components/CopyButton"
+import { CopyButton } from "../../../components/CopyButton"
 import { LinkButton } from "../../../components/LinkButton"
+import { PrettyRawPill } from "../../../components/PrettyRawPill"
 import { cn } from "../../../lib/cn"
 import { elapsed, ms } from "../../../lib/format"
 import { useClimbingElapsed } from "../../activity-table/lib/elapsed"
@@ -105,69 +104,15 @@ function RowSummary({ row }: { row: EvaluationRow }) {
  */
 function ResultControls({ result, rawView: [raw, onRaw] }: { result: Extract<Outcome, { kind: "result" }>; rawView: RawView }) {
   const source = rubySource(result.tree)
-  const [copied, copy] = useCopy()
 
   return (
     <>
-      {source !== null && (
-        <div className="inline-flex rounded-full bg-sunken p-px" role="group" aria-label="Show the result as">
-          <PillHalf pressed={!raw} onClick={() => onRaw(false)}>
-            Pretty
-          </PillHalf>
-          <PillHalf pressed={raw} onClick={() => onRaw(true)}>
-            Raw
-          </PillHalf>
-        </div>
-      )}
-      <button
-        type="button"
-        className="flex flex-none cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-faint hover:bg-selected hover:text-foreground"
-        aria-label="Copy result"
-        onClick={() => copy(source === null || raw ? result.text : source.copyText(source.tree))}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-        {copied ? "Copied" : "Copy"}
-      </button>
+      {source !== null && <PrettyRawPill size="sm" label="Show the result as" raw={raw} onRaw={onRaw} />}
+      <CopyButton
+        size="sm"
+        label="Copy result"
+        text={() => (source === null || raw ? result.text : source.copyText(source.tree))}
+      />
     </>
-  )
-}
-
-/** One half of the Pretty | Raw pill: filled while pressed, faint while not. */
-function PillHalf({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      className="cursor-pointer rounded-full px-2 leading-4 text-faint hover:text-foreground aria-pressed:bg-selected aria-pressed:text-foreground"
-      aria-pressed={pressed}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
-
-function CopyIcon() {
-  return (
-    <Icon>
-      <rect width="13" height="13" x="9" y="9" rx="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </Icon>
-  )
-}
-
-function CheckIcon() {
-  return (
-    <Icon>
-      <path d="M20 6 9 17l-5-5" />
-    </Icon>
-  )
-}
-
-/** A stroked icon the size of the strip's text. */
-function Icon({ children }: { children: ReactNode }) {
-  return (
-    <svg className="size-3 flex-none fill-none stroke-current stroke-2 [stroke-linecap:round] [stroke-linejoin:round]" viewBox="0 0 24 24" aria-hidden="true">
-      {children}
-    </svg>
   )
 }

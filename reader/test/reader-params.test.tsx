@@ -492,6 +492,16 @@ describe("copying params", () => {
     expect(await navigator.clipboard.readText()).toBe('{\n  "name": "Ada",\n  "42": "1",\n  "7": "2"\n}')
   })
 
+  test("confirms a copy of the whole params", async () => {
+    const { user } = await showParams({ pairs: [["name", "Ada"]] })
+    const copyAll = within(detailPanel("Params")).getByRole("button", { name: "Copy params" })
+    expect(copyAll).not.toHaveTextContent("Copied")
+
+    await user.click(copyAll)
+
+    expect(copyAll).toHaveTextContent("Copied")
+  })
+
   test("offers a copy of a hovered node's value, as that node's JSON", async () => {
     const { user } = openTheReader(DENSE_TRAFFIC)
     await select(user, AWKWARD_PARAMS.path)
