@@ -257,6 +257,12 @@ describe("the REPL's prompt", () => {
     expect(await within(hintRow()).findByText("Already running. Wait for it to finish.")).toBeInTheDocument()
     expect(prompt()).toHaveValue("2 + 2")
   })
+
+  test("says what to type while it is empty", async () => {
+    await openedOver({ state: READY })
+
+    expect(prompt()).toHaveAttribute("placeholder", "Type a command")
+  })
 })
 
 describe("the REPL's prompt's highlighting", () => {

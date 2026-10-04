@@ -35,10 +35,10 @@ const CARET_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", 
 
 /**
  * The *REPL*'s input: a textarea that runs what is typed on Enter and empties, drawn over its
- * own text highlighted as Ruby, and a hint row under it. Enter on an input `check` says is
- * incomplete, such as an open `do`, takes a new line at the caret instead, and Shift+Enter always
- * does. An Enter whose check answers after the input has changed, or after a later Enter, does
- * nothing.
+ * own text highlighted as Ruby, behind a prompt marker, and a hint row under it. Empty, it asks
+ * for a command. Enter on an input `check` says is incomplete, such as an open `do`, takes a new
+ * line at the caret instead, and Shift+Enter always does. An Enter whose check answers after the
+ * input has changed, or after a later Enter, does nothing.
  *
  * The row is always there at one line and one height, holding the keys that work in the input's
  * current state, or for a moment why an input was refused, with `actions` at its end. The keys
@@ -464,7 +464,7 @@ export function ReplPrompt({
           // An invisible copy of the text up to the word, wrapped as the textarea wraps it, whose
           // last span is where the word starts.
           <div
-            className="pointer-events-none invisible absolute inset-0 overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
+            className="pointer-events-none invisible absolute inset-0 overflow-hidden py-1.5 pr-3 pl-7 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
             aria-hidden="true"
           >
             {input.slice(0, open.from)}
@@ -476,7 +476,7 @@ export function ReplPrompt({
             the smaller of 12 lines and half the drawer's body, which is its container less the
             hint row's `h-6`, in whole lines, and never less than one. */}
         <div
-          className="pointer-events-none invisible max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.5rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
+          className="pointer-events-none invisible max-h-[calc(max(1lh,min(12lh,round(down,(100cqh-1.5rem)/2-0.75rem,1lh)))+0.75rem)] overflow-hidden py-1.5 pr-3 pl-7 font-mono text-sm break-words whitespace-pre-wrap [scrollbar-gutter:stable]"
           aria-hidden="true"
         >
           {input}{" "}
@@ -487,7 +487,7 @@ export function ReplPrompt({
             it one, and the stable gutter keeps the wrap width the same whether or not the
             textarea scrolls. */}
         <pre
-          className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
+          className="pointer-events-none absolute inset-0 overflow-hidden py-1.5 pr-3 pl-7 font-mono text-sm break-words whitespace-pre-wrap text-strong [scrollbar-gutter:stable]"
           ref={highlighted}
           aria-hidden="true"
         >
@@ -504,12 +504,15 @@ export function ReplPrompt({
         </pre>
         <textarea
           className={cn(
-            "absolute inset-0 resize-none overflow-y-auto bg-transparent px-3 py-1.5 font-mono text-sm break-words whitespace-pre-wrap outline-none [scrollbar-gutter:stable]",
+            "peer absolute inset-0 resize-none overflow-y-auto bg-transparent py-1.5 pr-3 pl-7 font-mono text-sm break-words whitespace-pre-wrap outline-none [scrollbar-gutter:stable]",
             // The caret and a selection's tint are the textarea's own; all of its text is drawn under it, a selection's too.
             "text-transparent caret-strong selection:bg-selection selection:text-transparent",
+            // The placeholder keeps the browser's own grey, as the search box's does, where the transparent text would hide it.
+            "placeholder:[color:revert]",
           )}
           ref={box}
           aria-label="Ruby"
+          placeholder="Type a command"
           aria-controls={browsing !== null ? listId : open !== null ? completionId : undefined}
           aria-activedescendant={
             browsing !== null ? (chosen === -1 ? undefined : rowId(listId, chosen)) : picked === -1 ? undefined : rowId(completionId, picked)
@@ -539,6 +542,10 @@ export function ReplPrompt({
             if (highlighted.current !== null) highlighted.current.scrollTop = event.currentTarget.scrollTop
           }}
         />
+        {/* The prompt marker, in the room the boxes' left padding leaves, on the first line. It lights while the input has focus. */}
+        <span className="pointer-events-none absolute top-1.5 left-3 font-mono text-sm text-faint peer-focus:text-accent" aria-hidden="true">
+          ›
+        </span>
       </div>
       <div className="flex h-6 flex-none items-center gap-3 px-3 pb-1">
         <div
