@@ -62,15 +62,20 @@ async function theReaderReads(logDirectory: string, events = LOAD_ON_OPEN_EVENTS
   // Console (#63).
   const evicted: EvictedRow[] = []
   let identity: RunIdentity = null
+  // The Sidecar announces where the history begins just before it delivers the batch it
+  // opened on, and that batch is the one `foldOpen` takes.
+  let opening = false
   const sidecar = await openSidecar(
     logDirectory,
     events,
     (envelopes) => {
-      evicted.push(...activity.fold(envelopes))
+      evicted.push(...(opening ? activity.foldOpen(envelopes) : activity.fold(envelopes)))
+      opening = false
       identity = latchRunIdentity(identity, envelopes)
     },
     (start) => {
       from = start
+      opening = true
     },
     // Never handed to `activity.fold`: a header the backward scan found outside the loaded
     // window goes straight to `identity`, exactly as `live.ts` keeps it apart from the fold.
@@ -79,6 +84,8 @@ async function theReaderReads(logDirectory: string, events = LOAD_ON_OPEN_EVENTS
     },
   )
   opened.push(sidecar)
+  // An attachment that opened on nothing leaves nothing of the open for the next batch to be.
+  opening = false
 
   // The click itself is the module the browser's live hook calls, over the server's scan
   // rather than over `fetch`: this seam tests the real click, not a copy of it.
@@ -1542,12 +1549,17 @@ describe("load-earlier", () => {
 
   test("promotes the request the history cut in half, without moving its row", async () => {
     const log = await aLogDirectory()
-    await aSidecarWithHistory(log)
-    const reader = await theReaderReads(log)
+    const server = aRun("srv-1")
+    // A request whose start lies further back than even the open's 64 MB reaches: 340 lines
+    // of about 200 KB, the first of them a query run before the rest.
+    const heavy = "x".repeat(200_000)
+    const lines = Array.from({ length: 340 }, (_, index) => server.log("req-1", `${index} ${heavy}`))
+    await appendToSidecar(log, server.start("req-1", "GET", "/posts/12"), server.sql("req-1", "SELECT 'the query before the history'"), ...lines, server.finish("req-1"))
+    const reader = await theReaderReads(log, 100)
 
     const before = reader.rows.indexOf(theOnlyRequest(reader.rows))
     expect(theOnlyRequest(reader.rows).path).toBeNull()
-    // Cut in half by the window: the fold met its finish and not its start, so it opened
+    // Cut by the open's budget: the fold met its finish and not its start, so it opened
     // Partial — the mark this test exists to watch clear.
     expect(theOnlyRequest(reader.rows).partial).toBe(true)
 
@@ -1556,8 +1568,8 @@ describe("load-earlier", () => {
     const request = theOnlyRequest(reader.rows)
     expect(request.path).toBe("/posts/12")
     // The query it ran before the history opened, in front of a timeline it was not in.
-    expect(timeline(request)).toEqual(["SELECT 'the query before the history'"])
-    expect(reader.rows.indexOf(request)).toBe(before + 1)
+    expect(timeline(request)[0]).toBe("SELECT 'the query before the history'")
+    expect(reader.rows.indexOf(request)).toBe(before)
     // The pull recovered the very `request_start` the row was missing: not lost, recovered.
     expect(request.partial).toBe(false)
   })
@@ -1697,6 +1709,88 @@ describe("a load-earlier click never splits a request or an Evaluation", () => {
     const evaluation = reader.rows.find((candidate) => candidate.kind === "evaluation")
     expect(evaluation).toMatchObject({ kind: "evaluation", partial: false, input: "Post.count" })
     expect(evaluation?.timeline).toHaveLength(100)
+  })
+})
+
+describe("the Reader opens without a split it could have avoided", () => {
+  test("opens a request the figure's cut ran through whole", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const queries = Array.from({ length: 150 }, (_, index) => server.sql("req-1", `SELECT ${index}`))
+    await appendToSidecar(log, server.header(), server.start("req-1", "GET", "/reports"), ...queries, server.finish("req-1"))
+
+    const reader = await theReaderReads(log, 100)
+
+    // 100 lines back lands inside the request's queries; the open reads on to its start.
+    expect(theOnlyRequest(reader.rows)).toMatchObject({ partial: false, path: "/reports" })
+    expect(theOnlyRequest(reader.rows).timeline).toHaveLength(150)
+  })
+
+  test("opens every request that was in flight in parallel at the cut whole", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const parallel = ["req-1", "req-2", "req-3"]
+    const interleaved = Array.from({ length: 150 }, (_, index) => server.sql(parallel[index % 3] as string, `SELECT ${index}`))
+    await appendToSidecar(log, server.header(), ...parallel.map((id) => server.start(id, "GET", `/${id}`)), ...interleaved)
+
+    const reader = await theReaderReads(log, 100)
+
+    expect(requests(reader.rows).map((request) => request.path)).toEqual(parallel.map((id) => `/${id}`))
+    expect(requests(reader.rows).map((request) => request.partial)).toEqual([false, false, false])
+  })
+
+  test("opens an Evaluation the figure's cut ran through whole", async () => {
+    const log = await aLogDirectory()
+    const repl = aRun("con-1")
+    const queries = Array.from({ length: 150 }, (_, index) => repl.sql("repl-a-1", `SELECT ${index}`))
+    await appendToSidecar(log, repl.header("console"), repl.evaluationStart("repl-a-1", "Post.count"), ...queries)
+
+    const reader = await theReaderReads(log, 100)
+
+    const evaluation = reader.rows.find((candidate) => candidate.kind === "evaluation")
+    expect(evaluation).toMatchObject({ kind: "evaluation", partial: false, input: "Post.count" })
+    expect(evaluation?.timeline).toHaveLength(150)
+  })
+})
+
+describe("what the open delivers beyond the figure", () => {
+  /** A request in flight across the cut with 150 queries, and a small one finished after its start. */
+  async function aSidecarWhoseOpenExceedsTheFigure(log: string) {
+    const server = aRun("srv-1")
+    const queries = Array.from({ length: 150 }, (_, index) => server.sql("req-1", `SELECT ${index}`))
+    await appendToSidecar(
+      log,
+      server.header(),
+      server.start("req-1", "GET", "/reports"),
+      server.start("req-2", "GET", "/posts"),
+      server.finish("req-2"),
+      ...queries,
+      server.finish("req-1"),
+    )
+    return { server }
+  }
+
+  test("evicts nothing when the Reader opens", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWhoseOpenExceedsTheFigure(log)
+
+    const reader = await theReaderReads(log, 100)
+
+    expect(requests(reader.rows).map((request) => request.path)).toEqual(["/reports", "/posts"])
+    expect(reader.evicted).toEqual([])
+  })
+
+  test("evicts the oldest rows from the open as new traffic arrives, as it does today", async () => {
+    const log = await aLogDirectory()
+    const { server } = await aSidecarWhoseOpenExceedsTheFigure(log)
+    const reader = await theReaderReads(log, 100)
+
+    await appendToSidecar(log, ...finishedRequests(server, 20, 500))
+    await reader.caughtUp()
+
+    // 40 new events on top of the 155 the open held: the oldest row, the big request, goes.
+    expect(reader.evicted).toEqual([{ id: "request req-1", requestId: "req-1" }])
+    expect(requests(reader.rows).map((request) => request.path)).toEqual(["/posts", ...Array.from({ length: 20 }, (_, index) => `/posts/${500 + index}`)])
   })
 })
 
