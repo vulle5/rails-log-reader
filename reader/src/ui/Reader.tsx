@@ -39,7 +39,7 @@ import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
 import { COMPLETION_TRIGGER, CompletionTriggerSwitch, useCompletionTrigger } from "./hooks/completion-trigger"
 import { HISTORY_SUGGESTION, HistorySuggestionSwitch, useHistorySuggestion } from "./hooks/history-suggestion"
-import { EVENTS_KEPT, EVENTS_KEPT_DESCRIPTION, EventsKeptSwitch, LoadedEventsKept, useEventsKept } from "./hooks/events-kept"
+import { ChosenEventsKept, EVENTS_KEPT, EVENTS_KEPT_DESCRIPTION, EventsKeptSwitch, useEventsKept, type EventsKept } from "./hooks/events-kept"
 import { EDITOR_SCHEME,EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
@@ -116,6 +116,11 @@ type ReaderProps = {
   railsRoot?: string | null
   /** The *REPL* session, from `useReplSession`: what it holds, and what can be asked of it. */
   repl?: ReplHandle
+  /**
+   * The *Events kept* choice, when the fold behind `rows` has to follow it — the live page
+   * hands the same one to the Sidecar hook. Left unset, `Reader` keeps one of its own.
+   */
+  eventsKept?: EventsKept
 }
 
 const NONE_EVICTED: EvictedEvaluations = new Map()
@@ -138,6 +143,7 @@ export function Reader({
   appName = null,
   railsRoot = null,
   repl = DETACHED_REPL,
+  eventsKept: chosenEventsKept,
 }: ReaderProps) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
@@ -167,7 +173,8 @@ export function Reader({
   const editorScheme = useEditorScheme()
   const completionTrigger = useCompletionTrigger()
   const historySuggestion = useHistorySuggestion()
-  const eventsKept = useEventsKept()
+  const ownEventsKept = useEventsKept()
+  const eventsKept = chosenEventsKept ?? ownEventsKept
   const settings = useRef<SettingsHandle>(null)
   const editor = useMemo(
     () => ({ scheme: editorScheme.scheme, requestScheme: () => settings.current?.open(EDITOR_SCHEME) }),
@@ -372,7 +379,7 @@ export function Reader({
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          <LoadedEventsKept value={eventsKept.loaded}>
+          <ChosenEventsKept value={eventsKept.eventsKept}>
           {/* The size the columns, the drawer and their gaps share, and the backdrop they float
               on. A window too small for the grid's `minWidth` or `minHeight` scrolls the grid in
               here rather than drawing a column or the drawer under its minimum. */}
@@ -523,7 +530,7 @@ export function Reader({
               />
             </div>
           </div>
-          </LoadedEventsKept>
+          </ChosenEventsKept>
         </EditorContext>
       </SearchContext>
     </div>

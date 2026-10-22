@@ -6,6 +6,7 @@ import { useReplSession } from "./features/repl/hooks/repl-session"
 import { useInitializerFileStatus, useInitializerRepair } from "./features/setup-status/lib/initializer-repair"
 import { useActsOnlyFrom } from "./hooks/acting"
 import { useAppNameOverride } from "./hooks/app-name"
+import { useEventsKept } from "./hooks/events-kept"
 import { useSidecar } from "./hooks/live"
 import { Reader } from "./Reader"
 
@@ -23,8 +24,9 @@ if (container === null) throw new Error("index.html is missing its #root element
  * each console process's exit to the Sidecar's fold.
  */
 function LiveReader() {
+  const eventsKept = useEventsKept()
   const { rows, lines, evictedRows, evictedEvaluations, liveWireVersion, liveRunId, identity, historyLoaded, earlier, loadEarlier, consoleExited } =
-    useSidecar()
+    useSidecar(eventsKept)
   const { status: fileStatus, markRepaired } = useInitializerFileStatus()
   const { state: repairState, repair, dismiss } = useInitializerRepair(liveRunId)
   const appNameOverride = useAppNameOverride()
@@ -59,6 +61,7 @@ function LiveReader() {
       appName={resolveAppName(appNameOverride, identity?.appName ?? null)}
       railsRoot={identity?.railsRoot ?? null}
       repl={repl}
+      eventsKept={eventsKept}
     />
   )
 }

@@ -5,7 +5,7 @@ import type { EntryRow, Outcome } from "../../../../shared/repl"
 import { CopyButton } from "../../../components/CopyButton"
 import { LinkButton } from "../../../components/LinkButton"
 import { PrettyRawPill } from "../../../components/PrettyRawPill"
-import { LoadedEventsKept } from "../../../hooks/events-kept"
+import { ChosenEventsKept } from "../../../hooks/events-kept"
 import { cn } from "../../../lib/cn"
 import { elapsed, ms } from "../../../lib/format"
 import { useClimbingElapsed } from "../../activity-table/lib/elapsed"
@@ -35,7 +35,7 @@ export function StatusStrip({
   rawView: RawView
   className?: string
 }) {
-  const eventsKept = useContext(LoadedEventsKept)
+  const eventsKept = useContext(ChosenEventsKept)
 
   return (
     // A faint hairline over it and no fill, so it reads as its block's own bottom.

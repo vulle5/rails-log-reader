@@ -20,15 +20,17 @@ export function recallEventsKept() {
 }
 
 /**
- * The figure the Reader loaded with — what its fold was built with, so what the Reader says
- * about the *Memory bound* names — for whatever is drawn below `Reader`.
+ * The figure chosen now — what the *Memory bound* holds the table to — for whatever is drawn
+ * below `Reader` and says something about it.
  */
-export const LoadedEventsKept = createContext(LOAD_ON_OPEN_EVENTS)
+export const ChosenEventsKept = createContext(LOAD_ON_OPEN_EVENTS)
 
 /**
  * The figure chosen, and a way to replace it that also remembers it; and `loaded`, the figure
  * it was when the Reader opened, which a choice does not change until the next reload.
  */
+export type EventsKept = ReturnType<typeof useEventsKept>
+
 export function useEventsKept() {
   const [loaded] = useState(recallEventsKept)
   const [eventsKept, setEventsKept] = useState(loaded)
