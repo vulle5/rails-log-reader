@@ -227,6 +227,9 @@ export function useAutoScroll({ items, listing, refollowsWhen, evicted = 0, cont
 
     if (relisted) {
       if (refollows) setState(FOLLOWING)
+      // The table's listing is the row it starts at, which the *Memory bound* changes every
+      // time it takes the oldest row. Its eviction count is still arrivals below.
+      else if (!state.following && evicted > previous.evicted) setState((current) => arrived(current, 0, evicted - previous.evicted))
     } else if (!state.following) {
       setState((current) => arrived(current, items - previous.items, evicted - previous.evicted))
     }

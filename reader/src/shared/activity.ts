@@ -360,7 +360,7 @@ export type ActivityTable = {
 
 /**
  * The fold, bounded: the *Memory bound* is a ring holding no more events than `events`, the
- * figure the Reader opened on, and evicting the oldest rows once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
+ * figure the Reader opened on until `setEventsKept` says another, and evicting the oldest rows once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
  * because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized

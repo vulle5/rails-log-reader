@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { fireEvent, render, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -7,6 +7,7 @@ import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
 import type { Envelope } from "../src/shared/wire"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { Reader } from "../src/ui/Reader"
+import { bigRequests, chooseEventsKept, fakeTheSidecar, openTheLiveReader, restoreTheSidecar } from "./live.harness"
 import {
   aFold,
   chip,
@@ -885,5 +886,55 @@ describe("a request with a very large number of children", () => {
 
     // Plus the two boot lines `HISTORY` already opened this Run row with.
     expect(detailEntries()).toHaveLength(LARGE + 2)
+  })
+})
+
+describe("the pill after Events kept changes in Settings", () => {
+  beforeEach(fakeTheSidecar)
+  afterEach(restoreTheSidecar)
+
+  test("stays an exact count up to a figure raised after the page loaded, and floors past it", async () => {
+    const { user, sidecar } = openTheLiveReader()
+    sidecar.send(...bigRequests(0, 50))
+    sidecar.say("loaded")
+    scrollUp("Activity table")
+
+    await chooseEventsKept(user, "10,000")
+    // 5,000 events held, 3,000 more: past what the page opened on, short of what is kept now.
+    sidecar.send(...bigRequests(50, 30))
+    expect(pill("Activity table")).toHaveTextContent(/^↓ 30 new$/)
+
+    // 2,000 more is 10,000 exactly, then 3,000 past it: the table takes its 30 oldest rows.
+    sidecar.send(...bigRequests(80, 20))
+    expect(pill("Activity table")).toHaveTextContent(/^↓ 50 new$/)
+    sidecar.send(...bigRequests(100, 30))
+    expect(pill("Activity table")).toHaveTextContent(/^↓ 80\+ new$/)
+  })
+
+  test("is not raised by the rows a lowered figure evicts, which arrived from nowhere", async () => {
+    localStorage.setItem("rails-log-reader.events-kept", "10000")
+    const { user, sidecar } = openTheLiveReader()
+    sidecar.send(...bigRequests(0, 100))
+    sidecar.say("loaded")
+    scrollUp("Activity table")
+    scrollUp("Console")
+
+    await chooseEventsKept(user, "5,000")
+
+    expect(pill("Activity table")).not.toBeInTheDocument()
+    expect(pill("Console")).not.toBeInTheDocument()
+  })
+
+  test("floors at the figure lowered to", async () => {
+    localStorage.setItem("rails-log-reader.events-kept", "10000")
+    const { user, sidecar } = openTheLiveReader()
+    sidecar.send(...bigRequests(0, 100))
+    sidecar.say("loaded")
+    scrollUp("Activity table")
+
+    await chooseEventsKept(user, "5,000")
+    sidecar.send(...bigRequests(100, 10))
+
+    expect(pill("Activity table")).toHaveTextContent(/^↓ 10\+ new$/)
   })
 })

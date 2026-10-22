@@ -30,7 +30,8 @@ export type WireStatus = {
    */
   lines: readonly ConsoleLine[]
   /**
-   * How many rows the *Memory bound* has evicted, ever. Cumulative rather than per-batch, so
+   * How many rows the *Memory bound* has evicted for new events, ever — a lowered *Events kept*
+   * figure's evictions are not arrivals, and are not counted. Cumulative rather than per-batch, so
    * the Activity table's and the Console's own auto-scrolls can each read it as one more thing
    * to watch grow — the signal `arrived` turns into a floor once a paused column's rendered
    * count stalls at the cap. One number for both columns, because it is one bound: the
