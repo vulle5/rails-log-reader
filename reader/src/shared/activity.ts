@@ -44,10 +44,11 @@ export type RequestRow = {
    * is no longer in the Sidecar or lies further back than a click reads. Set when the row is
    * created by anything other than a `request_start`. Cleared only by a *load-earlier* pull
    * turning up that same `request_start` — the one thing that changes what the mark records,
-   * from "the Reader has not seen this" to "the Reader does not currently hold this." A `request_start`
-   * arriving through the ordinary live fold never clears it: within one append-ordered batch a
-   * child arriving before its own start is not a recovery, it is the wire out of order, and
-   * the events emitted before the Reader attached are exactly as lost as they were.
+   * from "the Reader has not seen this" to "the Reader does not currently hold this." A
+   * `request_start` arriving through the ordinary live fold never clears it: within one
+   * append-ordered batch a child arriving before its own start is not a recovery, it is the
+   * wire out of order, and the events emitted before the Reader attached are exactly as lost
+   * as they were.
    */
   partial: boolean
   /**
@@ -344,10 +345,11 @@ export type ActivityTable = {
    * there, because that is where their earliest event sits — which is the same rule the
    * live fold keeps, read from the other end.
    *
-   * Reports how many rows the block opened, and evictions the same way `fold` does, for the same reason — ordinarily empty,
-   * because the ceiling rises by exactly what the pull brought in, but not *always* empty:
-   * a pull large enough to give the *last row standing* company can make it evictable again,
-   * and that eviction is exactly as real as one the live fold triggers.
+   * Reports how many rows the block opened, and evictions the same way `fold` does, for the
+   * same reason — ordinarily empty, because the ceiling rises by exactly what the pull brought
+   * in, but not *always* empty: a pull large enough to give the *last row standing* company
+   * can make it evictable again, and that eviction is exactly as real as one the live fold
+   * triggers.
    */
   foldEarlier: (envelopes: readonly Envelope[]) => FoldedEarlier
   /**
@@ -369,8 +371,9 @@ export type ActivityTable = {
 
 /**
  * The fold, bounded: the *Memory bound* is a ring holding no more events than `events`, the
- * figure the Reader opened on until `setEventsKept` says another, and evicting the oldest rows once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
- * because all five are one retention question rather than five.
+ * figure the Reader opened on until `setEventsKept` says another, and evicting the oldest rows
+ * once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under
+ * it, because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized
  * by: the fold opens holding exactly the history the backward scan on open delivered, and a
