@@ -260,6 +260,22 @@ describe("a Transcript entry's status strip", () => {
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
   })
 
+  test("explains the cleared queries with the Events kept figure, not a fixed one", async () => {
+    localStorage.setItem("rails-log-reader.events-kept", "10000")
+    const { run, header } = consoleRun()
+    await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)], traffic(10_000)], {
+      transcript: [entry({ id: 1, outcome: INTEGER })],
+    })
+    expect(activityRows().some((row) => within(row).queryByText("Post.count") !== null)).toBe(false)
+
+    const cleared = within(statusStrip()).getByText("queries cleared to save memory")
+
+    expect(cleared).toHaveAttribute(
+      "title",
+      "The Reader keeps only its latest 10,000 events, and let go of the queries and log lines this ran as some of the oldest",
+    )
+  })
+
   test("has no row link for an entry with no row", async () => {
     await theReader([[]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
 

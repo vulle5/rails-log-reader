@@ -293,10 +293,15 @@ function isRunHeader(envelope: Envelope): envelope is RunHeaderEnvelope {
   return envelope.type === "run_header"
 }
 
-function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null {
+function asRunHeader(line: Buffer): RunHeaderEnvelope | null {
   if (line.length === 0 || !line.includes(RUN_HEADER_NEEDLE)) return null
   const envelope = readEnvelope(line)
-  return envelope !== null && isRunHeader(envelope) && envelope.run_id === runId ? envelope : null
+  return envelope !== null && isRunHeader(envelope) ? envelope : null
+}
+
+function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null {
+  const header = asRunHeader(line)
+  return header !== null && header.run_id === runId ? header : null
 }
 
 /**
@@ -309,9 +314,13 @@ function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null 
  * request or an *Evaluation* split between the block and the history already held: while the
  * block holds an event of an owner whose start it does not hold, the scan keeps reading back
  * for that start. It stops at the top of the file, or once `budget` bytes have been read —
- * what it left split is the next click's to carry on with. Only owned events hold the scan
- * back: an unattributed event belongs to a Run row, which is never worth reading a day of
- * history for.
+ * what it left split is the next click's to carry on with.
+ *
+ * A Run row holds the scan back only when it is a `rake` task, and only a Run's `run_header`
+ * says what kind it is: when the block holds unattributed events of a Run whose header it
+ * does not, the scan looks further back for that header, parsing nothing but header lines on
+ * the way, and takes in everything down to it if it says `rake`. A header that is not found,
+ * or says anything else, leaves the cut where it was — a server runs all day.
  *
  * Nothing is remembered between calls. The offset comes in from the browser and goes back
  * out with the envelopes, so this survives the browser reconnecting, which is exactly when a
@@ -408,23 +417,79 @@ function splitOwners() {
   }
 }
 
+/**
+ * The Runs whose unattributed events the span holds and whose `run_header` it does not: the
+ * ones whose row the cut would leave without a header, and which only that header can say
+ * are a `rake` task.
+ */
+function headerlessRuns() {
+  const runs = new Set<string>()
+
+  return {
+    add(envelope: Envelope) {
+      if (envelope.type === "run_header") runs.delete(envelope.run_id)
+      else if (envelope.request_id === null && envelope.type !== "run_end") runs.add(envelope.run_id)
+    },
+    [Symbol.iterator]: () => runs.values(),
+  }
+}
+
+type BackLine = { start: number; line: Buffer }
+
 async function scanBack(handle: FileHandle, end: number, events: number, budget: number): Promise<Earlier> {
   const kept: Envelope[] = []
   const owners = splitOwners()
-  let lines = 0
+  const headerless = headerlessRuns()
+  const lines = linesBackward(handle, end)
+  /** Lines read past the cut looking for headers, newest first, awaiting a verdict on the cut. */
+  const ahead: BackLine[] = []
+  /** The headers among `ahead`, by Run: parsed alone, since nothing else past the cut is. */
+  const headersAhead = new Map<string, { start: number; rake: boolean }>()
+  let count = 0
   let from = end
+  let exhausted = false
 
-  for await (const { start, line } of linesBackward(handle, end)) {
-    if (lines >= events && !owners.any) break
-    // A ceiling, but never one that stops the scan before it has made any progress.
-    if (lines > 0 && end - start > budget) break
-
-    lines += 1
+  function take({ start, line }: BackLine) {
+    count += 1
     from = start
     const envelope = readEnvelope(line)
-    if (envelope === null) continue
+    if (envelope === null) return
     owners.add(envelope)
+    headerless.add(envelope)
     kept.push(envelope)
+  }
+
+  /** The line `ahead` would take next, read from the file when `ahead` has none left. */
+  async function next() {
+    const line = ahead.shift() ?? (await lines.next()).value
+    return line === undefined ? null : (line as BackLine)
+  }
+
+  while (!exhausted) {
+    if (count < events || owners.any) {
+      const line = await next()
+      // A ceiling, but never one that stops the scan before it has made any progress.
+      if (line === null || (count > 0 && end - line.start > budget)) break
+      take(line)
+      continue
+    }
+
+    // The span is whole as far as requests and Evaluations go. What is left to ask is whether
+    // a Run it holds events of is a `rake` task, whose header lies before it: the cut reaches
+    // back for the farthest such header, and no further for any other kind of Run.
+    const pending = [...headerless].map((runId) => headersAhead.get(runId))
+    const rakeStart = Math.min(...pending.map((header) => (header?.rake ? header.start : Infinity)))
+    if (rakeStart !== Infinity) {
+      while (ahead.length > 0 && (ahead[0] as BackLine).start >= rakeStart) take(ahead.shift() as BackLine)
+      continue
+    }
+    if (pending.every((header) => header !== undefined)) break
+
+    const line = (await lines.next()).value as BackLine | undefined
+    if (line === undefined || end - line.start > budget) break
+    ahead.push(line)
+    const header = asRunHeader(line.line)
+    if (header !== null) headersAhead.set(header.run_id, { start: line.start, rake: header.payload.kind === "rake" })
   }
 
   return { envelopes: kept.reverse(), from }

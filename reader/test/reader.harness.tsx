@@ -3,12 +3,12 @@ import { render, screen, within, type Matcher } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
 
 import { activityTable, type ActivityRow } from "../src/shared/activity"
-import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { consoleStream } from "../src/shared/console"
 import { completeRefusal, EMPTY_SNAPSHOT, submitRefusal, type Completion, type ReplSnapshot } from "../src/shared/repl"
 import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
 import type { Envelope } from "../src/shared/wire"
 import type { ReplHandle } from "../src/ui/features/repl/hooks/repl-session"
+import { recallEventsKept } from "../src/ui/hooks/events-kept"
 import { Reader } from "../src/ui/Reader"
 import { stubComplete, stubCompletion } from "./repl.fixtures"
 
@@ -26,8 +26,8 @@ export type ReaderProps = ComponentProps<typeof Reader>
  * matter wherever a test cares about the order things arrive in: the *Memory bound* only
  * evicts at the end of one.
  */
-export function aFold() {
-  const activity = activityTable(LOAD_ON_OPEN_EVENTS)
+export function aFold(events = recallEventsKept()) {
+  const activity = activityTable(events)
   const stream = consoleStream()
   // Cumulative, the way `useSidecar` counts it — `WireStatus.evictedRows`.
   let evictedRows = 0

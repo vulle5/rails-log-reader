@@ -121,7 +121,7 @@ export function NewPill({ scroll }: { scroll: ColumnAutoScroll }) {
       title="Follow new activity again"
     >
       {/* "+" while `floor`: the count is a lower bound once the Memory bound is evicting. */}
-      <span aria-hidden="true">↓</span> {scroll.unseen}
+      <span aria-hidden="true">↓</span> {scroll.unseen.toLocaleString("en")}
       {scroll.floor ? "+" : ""} new
     </button>
   )

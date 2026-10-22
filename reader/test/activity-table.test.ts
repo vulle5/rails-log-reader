@@ -1547,6 +1547,41 @@ describe("load-earlier", () => {
     expect(reader.evicted).toEqual([])
   })
 
+  test("a raised Events kept figure opens on more, and keeps more before evicting", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    await appendToSidecar(log, server.header(), ...finishedRequests(server, 3_000))
+
+    const standard = await theReaderReads(log, 5_000)
+    const raised = await theReaderReads(log, 10_000)
+
+    // Two events to a request: the figure is a count of events, not of rows.
+    expect(requests(standard.rows).length).toBeGreaterThanOrEqual(2_500)
+    expect(requests(standard.rows).length).toBeLessThan(2_600)
+    expect(requests(raised.rows)).toHaveLength(3_000)
+
+    await appendToSidecar(log, ...finishedRequests(server, 1_500, 100_000))
+    await standard.caughtUp()
+    await raised.caughtUp()
+
+    // 6,000 events to start with and 3,000 more: past what 5,000 keeps, short of 10,000.
+    expect(standard.evicted.length).toBeGreaterThan(0)
+    expect(raised.evicted).toEqual([])
+    expect(requests(raised.rows)).toHaveLength(4_500)
+  })
+
+  test("a raised Events kept figure makes each click read at least that many events", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    await appendToSidecar(log, server.header(), ...finishedRequests(server, 12_000))
+    const reader = await theReaderReads(log, 10_000)
+    const opened = requests(reader.rows).length
+
+    await reader.loadEarlier()
+
+    expect(requests(reader.rows).length - opened).toBeGreaterThanOrEqual(5_000)
+  })
+
   test("promotes the request the history cut in half, without moving its row", async () => {
     const log = await aLogDirectory()
     const server = aRun("srv-1")
@@ -1739,6 +1774,18 @@ describe("the Reader opens without a split it could have avoided", () => {
     expect(requests(reader.rows).map((request) => request.partial)).toEqual([false, false, false])
   })
 
+  test("opens a rake task the figure's cut ran through whole, with its Run identity", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    const lines = Array.from({ length: 150 }, (_, index) => rake.log(null, `record ${index}`))
+    await appendToSidecar(log, rake.header("rake"), ...lines)
+
+    const reader = await theReaderReads(log, 100)
+
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(150)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
+  })
+
   test("opens an Evaluation the figure's cut ran through whole", async () => {
     const log = await aLogDirectory()
     const repl = aRun("con-1")
@@ -1791,6 +1838,91 @@ describe("what the open delivers beyond the figure", () => {
     // 40 new events on top of the 155 the open held: the oldest row, the big request, goes.
     expect(reader.evicted).toEqual([{ id: "request req-1", requestId: "req-1" }])
     expect(requests(reader.rows).map((request) => request.path)).toEqual(["/posts", ...Array.from({ length: 20 }, (_, index) => `/posts/${500 + index}`)])
+  })
+})
+
+describe("a load-earlier click never splits a rake task", () => {
+  test("loads a long task back whole in one click, with the Run identity its header carries", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    const lines = Array.from({ length: 300 }, (_, index) => rake.log(null, `row ${index}`))
+    // A server's unattributed lines after the task, the 100 the Reader opens on: nothing in
+    // that window is the task's, so the open has no task to complete.
+    const server = aRun("srv-1")
+    const quiet = Array.from({ length: 100 }, (_, index) => server.log(null, `quiet ${index}`))
+    await appendToSidecar(log, rake.header("rake", 91_887), ...lines, ...quiet)
+    const reader = await theReaderReads(log, 100)
+    expect(runs(reader.rows).map((run) => run.runId)).toEqual(["srv-1"])
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked.reachedStart).toBe(true)
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(300)
+    expect(runRow(reader.rows, "rake-1")).toMatchObject({ runKind: "rake", pid: 91_887, railsVersion: "8.0.2" })
+  })
+
+  test("completes a task whose events are interleaved with a server's requests", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const rake = aRun("rake-1")
+    const interleaved = Array.from({ length: 150 }, (_, index) => [
+      rake.log(null, `row ${index}`),
+      server.start(`req-${index}`, "GET", `/posts/${index}`),
+      server.finish(`req-${index}`),
+    ]).flat()
+    await appendToSidecar(log, server.header(), rake.header("rake"), ...interleaved)
+    const reader = await theReaderReads(log, 100)
+
+    await reader.loadEarlier()
+
+    // Not cut at the first request the task's events were interleaved with.
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(150)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
+    expect(requests(reader.rows).filter((request) => request.partial)).toEqual([])
+  })
+
+  test("never holds a click back for a header that is not a rake task's, or is not there", async () => {
+    const log = await aLogDirectory()
+    const worker = aRun("wrk-1")
+    const console = aRun("con-1")
+    const lost = aRun("lost-1")
+    // `lost-1` wrote no header at all; the others booted as something that is never worth
+    // reading back for.
+    const lines = Array.from({ length: 100 }, (_, index) => [
+      worker.log(null, `worker ${index}`),
+      console.log(null, `console ${index}`),
+      lost.log(null, `lost ${index}`),
+    ]).flat()
+    await appendToSidecar(log, worker.header("worker"), console.header("console"), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked.reachedStart).toBe(false)
+    expect(runRow(reader.rows, "wrk-1").runKind).toBeNull()
+  })
+
+  test("leaves a task longer than the click's budget cut, and the next click carries on", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    // 440 lines of about 200 KB: the header is more than the 64 MB one click reads from the
+    // first click's start, and within it of the second's.
+    const heavy = "x".repeat(200_000)
+    const lines = Array.from({ length: 440 }, (_, index) => rake.log(null, `${index} ${heavy}`))
+    await appendToSidecar(log, rake.header("rake"), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const first = await reader.loadEarlier()
+
+    expect(first.reachedStart).toBe(false)
+    expect(runRow(reader.rows, "rake-1").runKind).toBeNull()
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(200)
+
+    const second = await reader.loadEarlier()
+
+    expect(second.reachedStart).toBe(true)
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(440)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
   })
 })
 
