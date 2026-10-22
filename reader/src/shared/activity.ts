@@ -41,10 +41,10 @@ export type RequestRow = {
   state: RequestState
   /**
    * A *Partial request*: the Reader does not currently hold this request's start, because it
-   * attached mid-flight or started after the request did. Set when the row is created by
-   * anything other than a `request_start`. Cleared only by a *load-earlier* pull turning up
-   * that same `request_start` — the one thing that changes what the mark records, from "the
-   * Reader never saw this" to "the Reader does not currently hold this." A `request_start`
+   * is no longer in the Sidecar or lies further back than a click reads. Set when the row is
+   * created by anything other than a `request_start`. Cleared only by a *load-earlier* pull
+   * turning up that same `request_start` — the one thing that changes what the mark records,
+   * from "the Reader has not seen this" to "the Reader does not currently hold this." A `request_start`
    * arriving through the ordinary live fold never clears it: within one append-ordered batch a
    * child arriving before its own start is not a recovery, it is the wire out of order, and
    * the events emitted before the Reader attached are exactly as lost as they were.
