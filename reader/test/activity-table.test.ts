@@ -1700,6 +1700,87 @@ describe("a load-earlier click never splits a request or an Evaluation", () => {
   })
 })
 
+describe("a load-earlier click never splits a rake task", () => {
+  test("loads a long task back whole in one click, with the Run identity its header carries", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    const lines = Array.from({ length: 300 }, (_, index) => rake.log(null, `row ${index}`))
+    await appendToSidecar(log, rake.header("rake", 91_887), ...lines)
+    const reader = await theReaderReads(log, 100)
+    expect(runRow(reader.rows, "rake-1")).toMatchObject({ runKind: null, pid: null, railsVersion: null })
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked.reachedStart).toBe(true)
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(300)
+    expect(runRow(reader.rows, "rake-1")).toMatchObject({ runKind: "rake", pid: 91_887, railsVersion: "8.0.2" })
+  })
+
+  test("completes a task whose events are interleaved with a server's requests", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const rake = aRun("rake-1")
+    const interleaved = Array.from({ length: 150 }, (_, index) => [
+      rake.log(null, `row ${index}`),
+      server.start(`req-${index}`, "GET", `/posts/${index}`),
+      server.finish(`req-${index}`),
+    ]).flat()
+    await appendToSidecar(log, server.header(), rake.header("rake"), ...interleaved)
+    const reader = await theReaderReads(log, 100)
+
+    await reader.loadEarlier()
+
+    // Not cut at the first request the task's events were interleaved with.
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(150)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
+    expect(requests(reader.rows).filter((request) => request.partial)).toEqual([])
+  })
+
+  test("never holds a click back for a header that is not a rake task's, or is not there", async () => {
+    const log = await aLogDirectory()
+    const worker = aRun("wrk-1")
+    const console = aRun("con-1")
+    const lost = aRun("lost-1")
+    // `lost-1` wrote no header at all; the others booted as something that is never worth
+    // reading back for.
+    const lines = Array.from({ length: 100 }, (_, index) => [
+      worker.log(null, `worker ${index}`),
+      console.log(null, `console ${index}`),
+      lost.log(null, `lost ${index}`),
+    ]).flat()
+    await appendToSidecar(log, worker.header("worker"), console.header("console"), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked.reachedStart).toBe(false)
+    expect(runRow(reader.rows, "wrk-1").runKind).toBeNull()
+  })
+
+  test("leaves a task longer than the click's budget cut, and the next click carries on", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    // 440 lines of about 200 KB: the header is more than the 64 MB one click reads from the
+    // first click's start, and within it of the second's.
+    const heavy = "x".repeat(200_000)
+    const lines = Array.from({ length: 440 }, (_, index) => rake.log(null, `${index} ${heavy}`))
+    await appendToSidecar(log, rake.header("rake"), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const first = await reader.loadEarlier()
+
+    expect(first.reachedStart).toBe(false)
+    expect(runRow(reader.rows, "rake-1").runKind).toBeNull()
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(200)
+
+    const second = await reader.loadEarlier()
+
+    expect(second.reachedStart).toBe(true)
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(440)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
+  })
+})
+
 /**
  * The shape reported directly against a real Host app: a dev server up long enough that its
  * own `run_header` sits tens of thousands of events before the load-on-open window — four
