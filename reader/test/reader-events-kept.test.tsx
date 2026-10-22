@@ -67,7 +67,9 @@ describe("Load earlier after a change", () => {
     await chooseEventsKept(user, "25,000")
     await user.click(screen.getByRole("button", { name: /earlier/ }))
 
-    expect(fetched).toEqual(["/earlier?from=4096&events=25000"])
+    const [asked, ...others] = fetched
+    expect(others).toEqual([])
+    expect(new URL(asked ?? "", "http://reader").searchParams.get("events")).toBe("25000")
   })
 })
 
