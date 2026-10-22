@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow, type EvictedEvaluations } from "../../shared/activity"
-import { LOAD_ON_OPEN_EVENTS } from "../../shared/bounds"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
 import { loadEarlier as loadEarlierBlock } from "../../shared/load-earlier"
 import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
+import { recallEventsKept } from "./events-kept"
 
-async function readEarlierOverHttp(from: number) {
-  const response = await fetch(`/earlier?from=${from}`)
+async function readEarlierOverHttp(from: number, events: number) {
+  const response = await fetch(`/earlier?from=${from}&events=${events}`)
   return (await response.json()) as Earlier
 }
 
@@ -94,7 +94,10 @@ export type EarlierState = {
  * developer had asked to see, which the server has no memory of by design.
  */
 export function useSidecar(): WireStatus {
-  const [activity] = useState(() => activityTable(LOAD_ON_OPEN_EVENTS))
+  // The *Events kept* figure the page loaded with. A change made in Settings afterwards is
+  // not read again until the next reload: the fold, the stream and every click keep this one.
+  const [eventsKept] = useState(recallEventsKept)
+  const [activity] = useState(() => activityTable(eventsKept))
   const [stream] = useState(consoleStream)
   const [status, setStatus] = useState<{
     rows: readonly ActivityRow[]
@@ -116,7 +119,7 @@ export function useSidecar(): WireStatus {
   const from = useRef<number | null>(null)
 
   useEffect(() => {
-    const sidecar = new EventSource("/events")
+    const sidecar = new EventSource(`/events?events=${eventsKept}`)
 
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
@@ -168,7 +171,7 @@ export function useSidecar(): WireStatus {
     sidecar.addEventListener("loaded", () => setHistoryLoaded(true))
 
     return () => sidecar.close()
-  }, [activity, stream])
+  }, [activity, stream, eventsKept])
 
   /**
    * One click, one continuation of the backward scan. The cursor goes out and comes back,
@@ -185,7 +188,7 @@ export function useSidecar(): WireStatus {
         activity,
         readBlock: readEarlierOverHttp,
         from: cursor,
-        events: LOAD_ON_OPEN_EVENTS,
+        events: eventsKept,
       })
 
       from.current = clicked.from
