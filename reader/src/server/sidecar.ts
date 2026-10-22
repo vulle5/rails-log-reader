@@ -1,7 +1,8 @@
 import { watch, type FSWatcher } from "node:fs"
-import { open, stat } from "node:fs/promises"
+import { open, stat, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 
+import { EARLIER_BUDGET_BYTES } from "../shared/bounds"
 import type { Earlier } from "../shared/earlier"
 import { EVENT_TYPES, isParamsHash, type Envelope } from "../shared/wire"
 
@@ -236,7 +237,7 @@ async function startOfHistory(path: string, end: number, events: number) {
 }
 
 /** How far past the load-on-open window this scan will look before giving up. */
-const MAX_HEADER_SCAN_BYTES = 64 * 1024 * 1024
+const MAX_HEADER_SCAN_BYTES = EARLIER_BUDGET_BYTES
 
 /**
  * One scan's result per Sidecar path. `inode` and `run_id` both have to match the cached
@@ -319,11 +320,24 @@ function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null 
  * silent fetch, and not a second mechanism — the only thing that makes this different from
  * opening the file is where the scan starts.
  *
+ * The block is at least `events` lines, and then as many more as it takes not to leave a
+ * request or an *Evaluation* split between the block and the history already held: while the
+ * block holds an event of an owner whose start it does not hold, the scan keeps reading back
+ * for that start. It stops at the top of the file, or once `budget` bytes have been read —
+ * what it left split is the next click's to carry on with. Only owned events hold the scan
+ * back: an unattributed event belongs to a Run row, which is never worth reading a day of
+ * history for.
+ *
  * Nothing is remembered between calls. The offset comes in from the browser and goes back
  * out with the envelopes, so this survives the browser reconnecting, which is exactly when a
  * server-side cursor would quietly have forgotten how far back the developer had read.
  */
-export async function readEarlier(logDirectory: string, before: number, events: number): Promise<Earlier> {
+export async function readEarlier(
+  logDirectory: string,
+  before: number,
+  events: number,
+  budget = EARLIER_BUDGET_BYTES,
+): Promise<Earlier> {
   const path = join(logDirectory, SIDECAR_NAME)
   if (before <= 0) return { envelopes: [], from: 0 }
 
@@ -336,19 +350,99 @@ export async function readEarlier(logDirectory: string, before: number, events: 
   // attachment is announcing where the history begins now as this returns.
   if (sidecar === null) return { envelopes: [], from: 0 }
 
-  const end = Math.min(before, sidecar.size)
-  const from = await startOfHistory(path, end, events)
   const handle = await open(path, "r")
   try {
-    const span = Buffer.alloc(end - from)
-    const { bytesRead } = await handle.read(span, 0, span.length, from)
-    const complete = span.subarray(0, bytesRead).lastIndexOf(NEWLINE)
-    if (complete === -1) return { envelopes: [], from }
-
-    return { envelopes: readEnvelopes(span.subarray(0, complete + 1)), from }
+    return await scanBack(handle, Math.min(before, sidecar.size), events, budget)
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * The lines before `end`, newest first, read a chunk at a time. `end` is the end of a line;
+ * a fragment after the last newline before it is a write still in progress, and is left out.
+ */
+async function* linesBackward(handle: FileHandle, end: number): AsyncGenerator<{ start: number; line: Buffer }> {
+  let position = end
+  /** [position, position + held.length): once trimmed, ends with the newline closing the next line to yield. */
+  let held = Buffer.alloc(0)
+  let trimmed = false
+
+  while (true) {
+    const search = trimmed ? held.length - 1 : held.length
+    const newline = search > 0 ? held.subarray(0, search).lastIndexOf(NEWLINE) : -1
+
+    if (newline !== -1 && !trimmed) {
+      held = held.subarray(0, newline + 1)
+      trimmed = true
+      continue
+    }
+
+    if (newline !== -1) {
+      yield { start: position + newline + 1, line: held.subarray(newline + 1, held.length - 1) }
+      held = held.subarray(0, newline + 1)
+      continue
+    }
+
+    if (position === 0) {
+      if (trimmed && held.length > 0) yield { start: 0, line: held.subarray(0, held.length - 1) }
+      return
+    }
+
+    const length = Math.min(SCAN_CHUNK_BYTES, position)
+    position -= length
+    const chunk = Buffer.alloc(length)
+    await handle.read(chunk, 0, length, position)
+    held = Buffer.concat([chunk, held])
+  }
+}
+
+/**
+ * Which owners the span read so far leaves split: an owner id is added by any event of it
+ * and cleared by its start, and the span is whole when none is left. Keyed by Run as well,
+ * because an id is only unique within the process that minted it.
+ */
+function splitOwners() {
+  const started = new Set<string>()
+  const missing = new Set<string>()
+
+  return {
+    add(envelope: Envelope) {
+      if (envelope.request_id === null) return
+      const owner = `${envelope.run_id}\n${envelope.request_id}`
+      if (envelope.type === "request_start" || envelope.type === "evaluation_start") {
+        started.add(owner)
+        missing.delete(owner)
+      } else if (!started.has(owner)) {
+        missing.add(owner)
+      }
+    },
+    get any() {
+      return missing.size > 0
+    },
+  }
+}
+
+async function scanBack(handle: FileHandle, end: number, events: number, budget: number): Promise<Earlier> {
+  const kept: Envelope[] = []
+  const owners = splitOwners()
+  let lines = 0
+  let from = end
+
+  for await (const { start, line } of linesBackward(handle, end)) {
+    if (lines >= events && !owners.any) break
+    // A ceiling, but never one that stops the scan before it has made any progress.
+    if (lines > 0 && end - start > budget) break
+
+    lines += 1
+    from = start
+    const envelope = readEnvelope(line)
+    if (envelope === null) continue
+    owners.add(envelope)
+    kept.push(envelope)
+  }
+
+  return { envelopes: kept.reverse(), from }
 }
 
 function readEnvelopes(lines: Buffer) {

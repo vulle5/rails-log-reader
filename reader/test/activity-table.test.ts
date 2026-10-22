@@ -954,8 +954,7 @@ describe("what the fold concludes about a request", () => {
 })
 
 /**
- * A *Partial request*: the Reader attached mid-flight, so it has the children and not the
- * parent. Stays marked through the live fold — a start arriving there is the wire out of
+ * A *Partial request*: the Reader holds the children and not the parent. Stays marked through the live fold — a start arriving there is the wire out of
  * order, not a recovery — and clears only when a *load-earlier* pull turns up the start
  * itself; see the "load-earlier" describe block below for that half.
  */
@@ -1617,6 +1616,87 @@ describe("load-earlier", () => {
     await reader.loadEarlier()
 
     expect(reader.evicted).toEqual([])
+  })
+})
+
+describe("a load-earlier click never splits a request or an Evaluation", () => {
+  test("completes every request that was in flight across the cut, not only the topmost", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const parallel = ["req-1", "req-2", "req-3", "req-4", "req-5"]
+    // Twenty queries from each of five requests, interleaved: exactly the 100 lines one click
+    // reads at least, so the cut falls on the first of them and every start lies before it.
+    const interleaved = Array.from({ length: 100 }, (_, index) =>
+      server.sql(parallel[index % 5] as string, `SELECT ${index}`),
+    )
+    const quiet = Array.from({ length: 100 }, (_, index) => server.log(null, `quiet ${index}`))
+    await appendToSidecar(log, server.header(), ...parallel.map((id) => server.start(id, "GET", `/${id}`)), ...interleaved, ...quiet)
+    const reader = await theReaderReads(log, 100)
+    expect(requests(reader.rows)).toHaveLength(0)
+
+    await reader.loadEarlier()
+
+    expect(requests(reader.rows).map((request) => request.path)).toEqual(parallel.map((id) => `/${id}`))
+    expect(requests(reader.rows).map((request) => request.partial)).toEqual([false, false, false, false, false])
+    expect(requests(reader.rows).map((request) => request.timeline.length)).toEqual([20, 20, 20, 20, 20])
+  })
+
+  test("reads no further for a server's Run row that crosses the cut", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const lines = Array.from({ length: 300 }, (_, index) => server.log(null, `line ${index}`))
+    await appendToSidecar(log, server.header(), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const clicked = await reader.loadEarlier()
+
+    // The header is 200 lines further back, and the click does not go and get it: 100 lines
+    // were the whole of what it was asked to read.
+    expect(clicked.reachedStart).toBe(false)
+    expect(runRow(reader.rows, "srv-1").timeline).toHaveLength(200)
+  })
+
+  test("stops at the budget and leaves a request partial, then completes it on the next click", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    // 340 lines of about 200 KB: more than the 64 MB one click reads, every one of them the
+    // hanging request's, whose start lies before all of them.
+    const heavy = "x".repeat(200_000)
+    const hanging = Array.from({ length: 340 }, (_, index) => server.log("req-1", `${index} ${heavy}`))
+    const quiet = Array.from({ length: 100 }, (_, index) => server.log(null, `quiet ${index}`))
+    await appendToSidecar(log, server.start("req-1", "GET", "/hanging"), ...hanging, ...quiet)
+    const reader = await theReaderReads(log, 100)
+
+    const first = await reader.loadEarlier()
+
+    expect(first.reachedStart).toBe(false)
+    expect(theOnlyRequest(reader.rows)).toMatchObject({ partial: true, path: null })
+    expect(theOnlyRequest(reader.rows).timeline.length).toBeGreaterThan(300)
+    expect(theOnlyRequest(reader.rows).timeline.length).toBeLessThan(340)
+
+    const second = await reader.loadEarlier()
+
+    expect(second.reachedStart).toBe(true)
+    expect(theOnlyRequest(reader.rows)).toMatchObject({ partial: false, path: "/hanging" })
+    expect(theOnlyRequest(reader.rows).timeline).toHaveLength(340)
+  })
+
+  test("completes an Evaluation the cut ran through", async () => {
+    const log = await aLogDirectory()
+    const repl = aRun("con-1")
+    const queries = Array.from({ length: 100 }, (_, index) => repl.sql("repl-a-1", `SELECT ${index}`))
+    const quiet = Array.from({ length: 100 }, (_, index) => repl.log(null, `quiet ${index}`))
+    const before = Array.from({ length: 10 }, (_, index) => repl.log(null, `before ${index}`))
+    await appendToSidecar(log, repl.header("console"), ...before, repl.evaluationStart("repl-a-1", "Post.count"), ...queries, ...quiet)
+    const reader = await theReaderReads(log, 100)
+
+    await reader.loadEarlier()
+
+    // Whole, and no further than whole: the click stopped at the evaluation's start.
+    expect(runRow(reader.rows, "con-1").timeline).toHaveLength(100)
+    const evaluation = reader.rows.find((candidate) => candidate.kind === "evaluation")
+    expect(evaluation).toMatchObject({ kind: "evaluation", partial: false, input: "Post.count" })
+    expect(evaluation?.timeline).toHaveLength(100)
   })
 })
 
