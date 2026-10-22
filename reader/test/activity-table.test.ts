@@ -968,9 +968,10 @@ describe("what the fold concludes about a request", () => {
 })
 
 /**
- * A *Partial request*: the Reader holds the children and not the parent. Stays marked through the live fold — a start arriving there is the wire out of
- * order, not a recovery — and clears only when a *load-earlier* pull turns up the start
- * itself; see the "load-earlier" describe block below for that half.
+ * A *Partial request*: the Reader holds the children and not the parent. Stays marked through
+ * the live fold — a start arriving there is the wire out of order, not a recovery — and clears
+ * only when a *load-earlier* pull turns up the start itself; see the "load-earlier" describe
+ * block below for that half.
  */
 describe("a request whose start the Reader never saw", () => {
   test("is a Partial request", async () => {

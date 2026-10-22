@@ -1,5 +1,5 @@
-import { act, render, screen, within } from "@testing-library/react"
-import userEvent, { type UserEvent } from "@testing-library/user-event"
+import { act, render } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import type { Earlier } from "../src/shared/earlier"
 import type { Envelope } from "../src/shared/wire"
@@ -91,14 +91,6 @@ export function bigRequests(from: number, count: number): Envelope[] {
       run.finish(id),
     ]
   }).flat()
-}
-
-/** Opens Settings, presses one of the Events kept figures (`"5,000"`), and closes it again. */
-export async function chooseEventsKept(user: UserEvent, figure: string) {
-  await user.click(screen.getByRole("button", { name: "Settings" }))
-  const dialog = screen.getByRole("dialog", { name: "Settings" })
-  await user.click(within(within(dialog).getByRole("group", { name: "Events kept" })).getByRole("button", { name: figure }))
-  await user.click(within(dialog).getByRole("button", { name: "Close" }))
 }
 
 /** `main.tsx`'s composition of the pieces this seam is about: the chosen figure, the hook, the Reader. */

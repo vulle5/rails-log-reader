@@ -8,6 +8,7 @@ import { Reader } from "../src/ui/Reader"
 import {
   activityRows,
   aReplSession,
+  chooseEventsKept,
   column,
   detailPanel,
   detailTab,
@@ -284,9 +285,7 @@ describe("a Transcript entry's status strip", () => {
     const cleared = () => within(statusStrip()).getByText("queries cleared to save memory")
     expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 5,000 events"))
 
-    await user.click(screen.getByRole("button", { name: "Settings" }))
-    const dialog = screen.getByRole("dialog", { name: "Settings" })
-    await user.click(within(within(dialog).getByRole("group", { name: "Events kept" })).getByRole("button", { name: "25,000" }))
+    await chooseEventsKept(user, "25,000")
 
     expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 25,000 events"))
   })

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 
-import { activityRows, consoleLines } from "./reader.harness"
-import { bigRequests, chooseEventsKept, fakeTheSidecar, fetched, FakeSidecar, openTheLiveReader, restoreTheSidecar } from "./live.harness"
+import { activityRows, chooseEventsKept, consoleLines } from "./reader.harness"
+import { bigRequests, fakeTheSidecar, fetched, FakeSidecar, openTheLiveReader, restoreTheSidecar } from "./live.harness"
 
 /**
  * Changing Events kept in Settings, through the rendered Reader over the live hook: the

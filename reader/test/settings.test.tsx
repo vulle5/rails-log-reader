@@ -336,11 +336,11 @@ function eventsKeptGroup(dialog: HTMLElement) {
   return within(dialog).getByRole("group", { name: "Events kept" })
 }
 
-function pressedFigure(dialog: HTMLElement) {
-  return within(eventsKeptGroup(dialog))
-    .getAllByRole("button")
-    .filter((button) => button.getAttribute("aria-pressed") === "true")
-    .map((button) => button.textContent)
+/** Exactly `figure` of the four is pressed. */
+function expectOnlyPressed(dialog: HTMLElement, figure: string) {
+  for (const button of within(eventsKeptGroup(dialog)).getAllByRole("button")) {
+    expect(button).toHaveAttribute("aria-pressed", String(button.textContent === figure))
+  }
 }
 
 describe("the Events kept setting", () => {
@@ -353,7 +353,7 @@ describe("the Events kept setting", () => {
     const buttons = within(eventsKeptGroup(dialog)).getAllByRole("button")
 
     expect(buttons.map((button) => button.textContent)).toEqual(["5,000", "10,000", "25,000", "50,000"])
-    expect(pressedFigure(dialog)).toEqual(["5,000"])
+    expectOnlyPressed(dialog, "5,000")
     expect(localStorage.getItem(EVENTS_KEPT_KEY)).toBeNull()
   })
 
@@ -374,7 +374,7 @@ describe("the Events kept setting", () => {
 
     await user.click(within(eventsKeptGroup(dialog)).getByRole("button", { name: "25,000" }))
 
-    expect(pressedFigure(dialog)).toEqual(["25,000"])
+    expectOnlyPressed(dialog, "25,000")
     expect(localStorage.getItem(EVENTS_KEPT_KEY)).toBe("25000")
   })
 
@@ -385,7 +385,7 @@ describe("the Events kept setting", () => {
     unmount()
     const { user: next } = openTheReader()
 
-    expect(pressedFigure(await openSettings(next))).toEqual(["50,000"])
+    expectOnlyPressed(await openSettings(next), "50,000")
   })
 
   test("reads a stored value that is not one of the four as 5,000", async () => {
@@ -393,7 +393,7 @@ describe("the Events kept setting", () => {
       localStorage.setItem(EVENTS_KEPT_KEY, stored)
       const { user, unmount } = openTheReader()
 
-      expect(pressedFigure(await openSettings(user))).toEqual(["5,000"])
+      expectOnlyPressed(await openSettings(user), "5,000")
       unmount()
     }
   })

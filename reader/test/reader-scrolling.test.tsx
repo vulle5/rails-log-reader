@@ -7,10 +7,11 @@ import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
 import type { Envelope } from "../src/shared/wire"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { Reader } from "../src/ui/Reader"
-import { bigRequests, chooseEventsKept, fakeTheSidecar, openTheLiveReader, restoreTheSidecar } from "./live.harness"
+import { bigRequests, fakeTheSidecar, openTheLiveReader, restoreTheSidecar } from "./live.harness"
 import {
   aFold,
   chip,
+  chooseEventsKept,
   collapseConsole,
   column,
   detailPanel,

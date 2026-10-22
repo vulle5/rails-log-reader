@@ -151,6 +151,14 @@ export function aReplSession(
 
 // ---- finding things -----------------------------------------------------------------
 
+/** Opens Settings, presses one of the Events kept figures (`"5,000"`), and closes it again. */
+export async function chooseEventsKept(user: UserEvent, figure: string) {
+  await user.click(screen.getByRole("button", { name: "Settings" }))
+  const dialog = screen.getByRole("dialog", { name: "Settings" })
+  await user.click(within(within(dialog).getByRole("group", { name: "Events kept" })).getByRole("button", { name: figure }))
+  await user.click(within(dialog).getByRole("button", { name: "Close" }))
+}
+
 export function column(name: "Console" | "Activity table" | "Detail column") {
   return screen.getByRole("region", { name })
 }
