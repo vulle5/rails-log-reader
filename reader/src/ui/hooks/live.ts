@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow, type EvictedEvaluations } from "../../shared/activity"
-import { LOAD_ON_OPEN_EVENTS } from "../../shared/bounds"
+import { EARLIER_BUDGET_BYTES, LOAD_ON_OPEN_EVENTS } from "../../shared/bounds"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
 import { loadEarlier as loadEarlierBlock } from "../../shared/load-earlier"
 import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
 
-async function readEarlierOverHttp(from: number) {
-  const response = await fetch(`/earlier?from=${from}`)
+async function readEarlierOverHttp(from: number, _events: number, budget: number) {
+  const response = await fetch(`/earlier?from=${from}&budget=${budget}`)
   return (await response.json()) as Earlier
 }
 
@@ -186,6 +186,7 @@ export function useSidecar(): WireStatus {
         readBlock: readEarlierOverHttp,
         from: cursor,
         events: LOAD_ON_OPEN_EVENTS,
+        budget: EARLIER_BUDGET_BYTES,
       })
 
       from.current = clicked.from
