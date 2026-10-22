@@ -492,7 +492,7 @@ describe("the Memory bound's cap (#64)", () => {
     // Short of the cap: nothing has been evicted, so nothing here has to be a floor.
     arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 - 20, 100))
 
-    expect(pill("Activity table")).toHaveTextContent(/^↓ \d+ new$/)
+    expect(pill("Activity table")).toHaveTextContent(/^↓ [\d,]+ new$/)
   })
 
   test("switches to a floor once the table is at the cap and evicting", async () => {
@@ -506,7 +506,29 @@ describe("the Memory bound's cap (#64)", () => {
     arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 20, 100))
     arrive(...finishedRequests(run, 2, 100_000))
 
-    expect(pill("Activity table")).toHaveTextContent(/^↓ \d+\+ new$/)
+    expect(pill("Activity table")).toHaveTextContent(/^↓ [\d,]+\+ new$/)
+  })
+
+  test("holds its count exact, with a thousands separator, up to the Events kept figure chosen", async () => {
+    localStorage.setItem("rails-log-reader.events-kept", "10000")
+    const { arrive } = openTheReader(...HISTORY)
+    scrollUp("Activity table")
+
+    arrive(...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 20, 100))
+    arrive(...finishedRequests(run, 2, 100_000))
+
+    expect(pill("Activity table")).toHaveTextContent(/^↓ \d,\d{3} new$/)
+  })
+
+  test("switches to a floor once the table is past the Events kept figure chosen", async () => {
+    localStorage.setItem("rails-log-reader.events-kept", "10000")
+    const { arrive } = openTheReader(...HISTORY)
+    scrollUp("Activity table")
+
+    arrive(...finishedRequests(run, 10_000 / 2 + 20, 100))
+    arrive(...finishedRequests(run, 2, 100_000))
+
+    expect(pill("Activity table")).toHaveTextContent(/^↓ [\d,]+\+ new$/)
   })
 
   test("shows the floor on the Console too, since #63 ties its retention to the same eviction", async () => {
