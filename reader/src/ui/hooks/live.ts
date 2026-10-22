@@ -124,13 +124,19 @@ export function useSidecar(): WireStatus {
    * attached to yet, so there is nothing to be earlier *than*.
    */
   const from = useRef<number | null>(null)
+  /**
+   * Whether the next batch is the one the Reader opened on: the server announces where the
+   * history begins just before it sends that batch, and says it is `loaded` after.
+   */
+  const opening = useRef(false)
 
   useEffect(() => {
     const sidecar = new EventSource(`/events?events=${eventsKept}`)
 
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
-      const evicted = activity.fold(envelopes)
+      const evicted = opening.current ? activity.foldOpen(envelopes) : activity.fold(envelopes)
+      opening.current = false
       stream.fold(envelopes)
       // The Console's retention borrows from the fold's own eviction: whatever rows this
       // batch's fold just took, the Console lets go of what belonged to them.
@@ -159,6 +165,7 @@ export function useSidecar(): WireStatus {
     sidecar.addEventListener("history", (message) => {
       const history = JSON.parse((message as MessageEvent).data) as { from: number }
       from.current = history.from
+      opening.current = true
       setEarlier((current) => ({ ...current, available: history.from > 0, atStart: history.from === 0 }))
     })
 
@@ -175,7 +182,10 @@ export function useSidecar(): WireStatus {
 
     // Sent once the history's envelopes have been, which is what makes it the moment an
     // empty fold means an empty Sidecar.
-    sidecar.addEventListener("loaded", () => setHistoryLoaded(true))
+    sidecar.addEventListener("loaded", () => {
+      opening.current = false
+      setHistoryLoaded(true)
+    })
 
     return () => sidecar.close()
   }, [activity, stream, eventsKept])

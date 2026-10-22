@@ -330,6 +330,15 @@ export type ActivityTable = {
    */
   fold: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
   /**
+   * Fold the batch the Reader opened on. Like `fold`, except the ceiling is first raised to
+   * everything the fold then holds when that is more than the figure: the open reads past the
+   * figure to complete the requests, *Evaluations* and tasks its cut would have split, and
+   * evicting those rows to get back to the figure would undo the read. They are not exempt
+   * the way a *load-earlier* block is — the next events to arrive evict them as they would
+   * any other rows.
+   */
+  foldOpen: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
+  /**
    * Fold a block of envelopes that sits *before* everything the fold holds: what the
    * *load-earlier* control went and got. The rows it opens go in above the rows already
    * there, because that is where their earliest event sits — which is the same rule the
@@ -692,6 +701,12 @@ export function activityTable(events: number): ActivityTable {
     return evictToBound()
   }
 
+  function foldOpen(envelopes: readonly Envelope[]) {
+    for (const envelope of envelopes) foldOne(envelope)
+    ceiling = Math.max(ceiling, held)
+    return evictToBound()
+  }
+
   /**
    * The same fold, run over a block that precedes everything held: the rows it opens are
    * spliced in above the rows already there, and its events go in front of the timelines
@@ -1028,7 +1043,7 @@ export function activityTable(events: number): ActivityTable {
     return folding?.events ?? 0
   }
 
-  return { rows, evictedEvaluations, fold, foldEarlier, consoleExited }
+  return { rows, evictedEvaluations, fold, foldOpen, foldEarlier, consoleExited }
 }
 
 function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {

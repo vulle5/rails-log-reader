@@ -359,6 +359,10 @@ the table holds more, the oldest rows are evicted. It counts events but evicts w
 rows, because a row that lost part of what it holds would show a count of 24 queries over
 a timeline of three.
 
+The open reads on past the figure, as a click does, until its cut splits no request,
+*Evaluation* or `rake` task. The events that adds are held from the start, so completing a
+row at open evicts nothing, and they evict as the oldest rows do once new events arrive.
+
 Three kinds of row are never evicted:
 - **A row still *In-flight*.** A request is never given a timeout, and evicting it after
   enough other traffic would be one. An *Interrupted* row evicts like any other. One gap

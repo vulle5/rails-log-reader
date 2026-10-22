@@ -203,34 +203,19 @@ export async function openSidecar(
 }
 
 /**
- * Where the history before `end` begins: the start of the line `events` lines
- * back from it, found by scanning backwards over the same offset the Reader tracks. `end` is the
- * end of a line — EOF, or the start of the line the Reader already has — so the newline the
- * count runs one past closes the line before the history, and the byte after it opens it.
+ * Where the history before `end` begins: the same split-aware backward scan a *Load earlier*
+ * click makes, so the Reader never opens on a request or an *Evaluation* it could have
+ * completed. `end` is the end of a line, or EOF, whose trailing write in progress the scan
+ * leaves out.
  *
- * Called with EOF when a Sidecar is attached to, and with the history's own start when the
- * *load-earlier* control continues the scan: one function, because it is one scan.
+ * A file with no complete line at all is one write in progress: it begins at the top, so
+ * the line is read whole once it is finished.
  */
 async function startOfHistory(path: string, end: number, events: number) {
   const handle = await open(path, "r")
   try {
-    const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, end))
-    let position = end
-    let lines = 0
-
-    while (position > 0) {
-      const length = Math.min(chunk.length, position)
-      position -= length
-      await handle.read(chunk, 0, length, position)
-
-      for (let index = length - 1; index >= 0; index--) {
-        if (chunk[index] !== NEWLINE) continue
-        lines += 1
-        if (lines > events) return position + index + 1
-      }
-    }
-
-    return 0
+    const { from } = await scanBack(handle, end, events, EARLIER_BUDGET_BYTES)
+    return from === end ? 0 : from
   } finally {
     await handle.close()
   }
