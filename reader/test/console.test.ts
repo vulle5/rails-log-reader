@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
+import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { consoleStream } from "../src/shared/console"
 import { activityTable, requestRowId, runRowId, type EvictedRow } from "../src/shared/activity"
 
@@ -80,7 +81,7 @@ describe("the Console stream", () => {
   test("names a row the Activity fold actually holds, for every line of a dense stream", () => {
     // The two folds read the same file and must agree about what a row is called: a Console
     // click that named a row nothing holds would select nothing at all.
-    const activity = activityTable()
+    const activity = activityTable(LOAD_ON_OPEN_EVENTS)
     activity.fold(DENSE_TRAFFIC)
     const stream = theConsole(...DENSE_TRAFFIC)
     const held = new Set(activity.rows.map((row) => row.id))

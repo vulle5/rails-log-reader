@@ -1,4 +1,3 @@
-import { LOAD_ON_OPEN_EVENTS } from "./bounds"
 import {
   eventIdentity,
   type AppLogEvent,
@@ -304,6 +303,13 @@ export type EvictedRow = {
 /** *Evaluation rows* the *Memory bound* has taken, by `evaluationId`, each with its console process's pid. */
 export type EvictedEvaluations = ReadonlyMap<string, number | null>
 
+/** What `foldEarlier` did: the rows a block opened above the existing ones, and what that evicted. */
+export type FoldedEarlier = {
+  /** How many rows the block opened. A block that only extended rows already held opens none. */
+  opened: number
+  evicted: readonly EvictedRow[]
+}
+
 export type ActivityTable = {
   /** The same array throughout, mutated in place: rows are appended and never reordered. */
   readonly rows: readonly ActivityRow[]
@@ -329,12 +335,12 @@ export type ActivityTable = {
    * there, because that is where their earliest event sits — which is the same rule the
    * live fold keeps, read from the other end.
    *
-   * Reports evictions the same way `fold` does, for the same reason — ordinarily empty,
+   * Reports how many rows the block opened, and evictions the same way `fold` does, for the same reason — ordinarily empty,
    * because the ceiling rises by exactly what the pull brought in, but not *always* empty:
    * a pull large enough to give the *last row standing* company can make it evictable again,
    * and that eviction is exactly as real as one the live fold triggers.
    */
-  foldEarlier: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
+  foldEarlier: (envelopes: readonly Envelope[]) => FoldedEarlier
   /**
    * The console process `pid` exited: the latest `console` Run whose `run_header` carried it
    * ended, as its `run_end` would say, though one killed too hard wrote none. Its in-flight rows
@@ -344,9 +350,8 @@ export type ActivityTable = {
 }
 
 /**
- * The fold, bounded: the *Memory bound* is a ring holding no more events than the Reader
- * opened on — `LOAD_ON_OPEN_EVENTS`, the one number — and evicting the oldest rows once it
- * holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
+ * The fold, bounded: the *Memory bound* is a ring holding no more events than `events`, the
+ * figure the Reader opened on, and evicting the oldest rows once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
  * because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized
@@ -360,7 +365,7 @@ export type ActivityTable = {
  * unattributed. That is one rule rather than two, and it needs no timer — which is what lets
  * "no timeout, ever" survive a feature about time.
  */
-export function activityTable(): ActivityTable {
+export function activityTable(events: number): ActivityTable {
   const rows: ActivityRow[] = []
   const byRequest = new Map<string, Folding>()
   const byRun = new Map<string, Running>()
@@ -406,7 +411,7 @@ export function activityTable(): ActivityTable {
    * arrive would make the control useless, and there is no traffic that can raise this on
    * its own.
    */
-  let ceiling = LOAD_ON_OPEN_EVENTS
+  let ceiling = events
   /** How many rows at the front a load-earlier pulled in. Never evicted, for the same reason. */
   let pulled = 0
   /** The load-earlier block being folded, if one is: `null` in the ordinary live fold. */
@@ -710,7 +715,7 @@ export function activityTable(): ActivityTable {
     rows.splice(0, 0, ...block.opened.map((owner) => owner.row))
     pulled += block.opened.length
     ceiling += held - heldBefore
-    return evictToBound()
+    return { opened: block.opened.length, evicted: evictToBound() }
   }
 
   function foldOne(envelope: Envelope) {

@@ -45,6 +45,7 @@ async function theReaderReads(logDirectory: string) {
   let historyStart = 0
   const sidecar = await openSidecar(
     logDirectory,
+    LOAD_ON_OPEN_EVENTS,
     (envelopes) => delivered.push(...envelopes),
     (from) => {
       historyStart = from
@@ -251,7 +252,7 @@ describe("load-earlier", () => {
     await appendToSidecar(log, ...events)
     const reader = await theReaderReads(log)
 
-    const earlier = await readEarlier(log, reader.historyStart())
+    const earlier = await readEarlier(log, reader.historyStart(), LOAD_ON_OPEN_EVENTS)
 
     // The ten the load-on-open window left behind, and nothing the Reader already holds:
     // one scan continued from an earlier point, rather than a second mechanism.
@@ -269,7 +270,7 @@ describe("load-earlier", () => {
 
     expect(reader.historyStart()).toBe(0)
 
-    const earlier = await readEarlier(log, reader.historyStart())
+    const earlier = await readEarlier(log, reader.historyStart(), LOAD_ON_OPEN_EVENTS)
 
     expect(earlier.envelopes).toEqual([])
     expect(earlier.from).toBe(0)
@@ -278,7 +279,7 @@ describe("load-earlier", () => {
   test("asks the Sidecar that is there now, not the one the offset was taken from", async () => {
     const log = await aLogDirectoryThatDoesNotExistYet()
 
-    const earlier = await readEarlier(log, 4_096)
+    const earlier = await readEarlier(log, 4_096, LOAD_ON_OPEN_EVENTS)
 
     expect(earlier.envelopes).toEqual([])
     expect(earlier.from).toBe(0)

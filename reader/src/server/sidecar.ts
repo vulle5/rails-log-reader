@@ -2,7 +2,6 @@ import { watch, type FSWatcher } from "node:fs"
 import { open, stat } from "node:fs/promises"
 import { join } from "node:path"
 
-import { LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
 import type { Earlier } from "../shared/earlier"
 import { EVENT_TYPES, isParamsHash, type Envelope } from "../shared/wire"
 
@@ -52,6 +51,8 @@ export type Sidecar = {
  */
 export async function openSidecar(
   logDirectory: string,
+  /** How many events the load-on-open history reads at least. */
+  events: number,
   onEnvelopes: (envelopes: Envelope[]) => void,
   onHistoryStart: (from: number) => void,
   /**
@@ -120,7 +121,7 @@ export async function openSidecar(
     let attached = false
     if (inode !== sidecar.ino || sidecar.size < offset) {
       inode = sidecar.ino
-      offset = await startOfHistory(path, sidecar.size)
+      offset = await startOfHistory(path, sidecar.size, events)
       // Announced on every attachment and every reset, not once at open: a truncation moves
       // the whole history, and a load-earlier cursor taken before it points into bytes that
       // are no longer the ones it was taken from.
@@ -201,15 +202,15 @@ export async function openSidecar(
 }
 
 /**
- * Where the load-on-open history before `end` begins: the start of the ~5,000th line back
- * from it, found by scanning backwards over the same offset the Reader tracks. `end` is the
+ * Where the history before `end` begins: the start of the line `events` lines
+ * back from it, found by scanning backwards over the same offset the Reader tracks. `end` is the
  * end of a line — EOF, or the start of the line the Reader already has — so the newline the
  * count runs one past closes the line before the history, and the byte after it opens it.
  *
  * Called with EOF when a Sidecar is attached to, and with the history's own start when the
  * *load-earlier* control continues the scan: one function, because it is one scan.
  */
-async function startOfHistory(path: string, end: number) {
+async function startOfHistory(path: string, end: number, events: number) {
   const handle = await open(path, "r")
   try {
     const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, end))
@@ -224,7 +225,7 @@ async function startOfHistory(path: string, end: number) {
       for (let index = length - 1; index >= 0; index--) {
         if (chunk[index] !== NEWLINE) continue
         lines += 1
-        if (lines > LOAD_ON_OPEN_EVENTS) return position + index + 1
+        if (lines > events) return position + index + 1
       }
     }
 
@@ -322,7 +323,7 @@ function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null 
  * out with the envelopes, so this survives the browser reconnecting, which is exactly when a
  * server-side cursor would quietly have forgotten how far back the developer had read.
  */
-export async function readEarlier(logDirectory: string, before: number): Promise<Earlier> {
+export async function readEarlier(logDirectory: string, before: number, events: number): Promise<Earlier> {
   const path = join(logDirectory, SIDECAR_NAME)
   if (before <= 0) return { envelopes: [], from: 0 }
 
@@ -336,7 +337,7 @@ export async function readEarlier(logDirectory: string, before: number): Promise
   if (sidecar === null) return { envelopes: [], from: 0 }
 
   const end = Math.min(before, sidecar.size)
-  const from = await startOfHistory(path, end)
+  const from = await startOfHistory(path, end, events)
   const handle = await open(path, "r")
   try {
     const span = Buffer.alloc(end - from)

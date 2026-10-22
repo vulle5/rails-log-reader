@@ -1,5 +1,6 @@
 import { join } from "node:path"
 
+import { LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
 import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "./allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "./app-name"
 import { refusal, type RouteKind } from "./gate"
@@ -91,6 +92,7 @@ function envelopeStream() {
 
       attached = await openSidecar(
         logDirectory,
+        LOAD_ON_OPEN_EVENTS,
         (batch) => send(`data: ${JSON.stringify(batch)}\n\n`),
         // Where the load-on-open history this attachment opened on begins — an event of its
         // own, because it is not envelopes and because it is sent again whenever a truncation
@@ -139,7 +141,7 @@ async function earlier(request: Request) {
     return Response.json({ error: "from must be a byte offset into the Sidecar" }, { status: 400 })
   }
 
-  return Response.json(await readEarlier(logDirectory, from))
+  return Response.json(await readEarlier(logDirectory, from, LOAD_ON_OPEN_EVENTS))
 }
 
 /**

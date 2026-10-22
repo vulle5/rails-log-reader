@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow, type EvictedEvaluations } from "../../shared/activity"
+import { LOAD_ON_OPEN_EVENTS } from "../../shared/bounds"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
+import { loadEarlier as loadEarlierBlock } from "../../shared/load-earlier"
 import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
+
+async function readEarlierOverHttp(from: number) {
+  const response = await fetch(`/earlier?from=${from}`)
+  return (await response.json()) as Earlier
+}
 
 /**
  * What the live wire is saying about itself, apart from the rows folded out of it: the `v`
@@ -87,7 +94,7 @@ export type EarlierState = {
  * developer had asked to see, which the server has no memory of by design.
  */
 export function useSidecar(): WireStatus {
-  const [activity] = useState(activityTable)
+  const [activity] = useState(() => activityTable(LOAD_ON_OPEN_EVENTS))
   const [stream] = useState(consoleStream)
   const [status, setStatus] = useState<{
     rows: readonly ActivityRow[]
@@ -174,16 +181,20 @@ export function useSidecar(): WireStatus {
 
     setEarlier({ available: true, loading: true })
     try {
-      const response = await fetch(`/earlier?from=${cursor}`)
-      const block = (await response.json()) as Earlier
+      const clicked = await loadEarlierBlock({
+        activity,
+        readBlock: readEarlierOverHttp,
+        from: cursor,
+        events: LOAD_ON_OPEN_EVENTS,
+      })
 
-      from.current = block.from
+      from.current = clicked.from
       // The Activity fold only — the *Console* is append order, and this block belongs before
       // every line it holds rather than after them, so appending it there would put the
       // oldest lines of the session at the bottom of the rail, under the newest. But a pull
       // this large can still evict: it can give the *last row standing* company and make it
       // evictable again, so the Console still has to hear about whatever that takes.
-      const evicted = activity.foldEarlier(block.envelopes)
+      const evicted = clicked.evicted
       stream.evict(evicted)
       setStatus((previous) => ({
         ...previous,
@@ -193,9 +204,9 @@ export function useSidecar(): WireStatus {
         evictedEvaluations: evicted.length === 0 ? previous.evictedEvaluations : new Map(activity.evictedEvaluations),
         // A pull that reaches back far enough can turn up an earlier Run's own `run_header`
         // — this is latched exactly as the live stream's is, not only reached from it.
-        identity: latchRunIdentity(previous.identity, block.envelopes),
+        identity: latchRunIdentity(previous.identity, clicked.envelopes),
       }))
-      setEarlier({ available: block.from > 0, loading: false })
+      setEarlier({ available: !clicked.reachedStart, loading: false })
     } catch {
       // The read failed and the cursor has not moved, so the control stays exactly as it
       // was: clicking again asks the same question, which is the only useful thing to do

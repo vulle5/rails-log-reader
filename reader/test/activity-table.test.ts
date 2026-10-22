@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import { openSidecar, readEarlier, type Sidecar } from "../src/server/sidecar"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
+import { loadEarlier as click } from "../src/shared/load-earlier"
 import {
   activityTable,
   type ActivityRow,
@@ -50,8 +51,8 @@ afterEach(async () => {
  * The Reader with the wire between its halves taken out: `src/server/index.ts` reads the
  * Sidecar and `src/ui/live.ts` folds what it sends, and here the two are joined directly.
  */
-async function theReaderReads(logDirectory: string) {
-  const activity = activityTable()
+async function theReaderReads(logDirectory: string, events = LOAD_ON_OPEN_EVENTS) {
+  const activity = activityTable(events)
   // The offset the history the Reader was given begins at, kept exactly as the browser keeps
   // it: the Sidecar announces it on attaching, and a load-earlier continues the scan from
   // there and hands back where the history begins now.
@@ -63,6 +64,7 @@ async function theReaderReads(logDirectory: string) {
   let identity: RunIdentity = null
   const sidecar = await openSidecar(
     logDirectory,
+    events,
     (envelopes) => {
       evicted.push(...activity.fold(envelopes))
       identity = latchRunIdentity(identity, envelopes)
@@ -78,11 +80,19 @@ async function theReaderReads(logDirectory: string) {
   )
   opened.push(sidecar)
 
+  // The click itself is the module the browser's live hook calls, over the server's scan
+  // rather than over `fetch`: this seam tests the real click, not a copy of it.
   async function loadEarlier() {
-    const earlier = await readEarlier(logDirectory, from)
-    from = earlier.from
-    evicted.push(...activity.foldEarlier(earlier.envelopes))
-    identity = latchRunIdentity(identity, earlier.envelopes)
+    const clicked = await click({
+      activity,
+      readBlock: (before, events) => readEarlier(logDirectory, before, events),
+      from,
+      events,
+    })
+    from = clicked.from
+    evicted.push(...clicked.evicted)
+    identity = latchRunIdentity(identity, clicked.envelopes)
+    return clicked
   }
 
   return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, evicted, identity: () => identity }
@@ -1502,6 +1512,33 @@ describe("load-earlier", () => {
     // rows that were already there, because that is where its earliest event sits.
     expect(reader.rows.at(0)?.id).toBe("run rake-1")
     expect(timeline(runRow(reader.rows, "rake-1"))).toEqual(["rake-1 counted the posts"])
+  })
+
+  test("reports how many rows the click opened above the table, and that it reached the top of the file", async () => {
+    const log = await aLogDirectory()
+    await aSidecarWithHistory(log)
+    const reader = await theReaderReads(log)
+
+    const clicked = await reader.loadEarlier()
+
+    // The request the window cut in half was already a row, so only the rake Run's is new.
+    expect(clicked.opened).toBe(1)
+    expect(clicked.reachedStart).toBe(true)
+  })
+
+  test("opens on the figure it is given, and each click reads that many events more", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), ...finishedRequests(run, 150))
+    const reader = await theReaderReads(log, 100)
+
+    // 100 events are two to a request: the window opens on the latest 50 requests.
+    expect(requests(reader.rows)).toHaveLength(50)
+
+    await reader.loadEarlier()
+
+    expect(requests(reader.rows)).toHaveLength(100)
+    expect(reader.evicted).toEqual([])
   })
 
   test("promotes the request the history cut in half, without moving its row", async () => {
