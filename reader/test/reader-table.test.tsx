@@ -246,6 +246,14 @@ describe("what a row says it is", () => {
     expect(cells()[9]).toBe("13ms")
   })
 
+  test("explains a Partial request as one whose start the Reader does not hold", () => {
+    const run = aRun("srv-1")
+    theActivityTable(run.sql("req-1"))
+
+    const mark = within(cellUnder(firstRow(), "Started")).getByText("partial")
+    expect(mark).toHaveAccessibleDescription("The Reader does not hold this request's start")
+  })
+
   // #62: the last row standing, over the Memory bound's usual ceiling because taking it too
   // would leave the table empty rather than bounded.
   test("marks the last row standing over bound, never as trimmed", () => {
