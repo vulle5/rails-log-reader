@@ -11,7 +11,7 @@ import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
 import { EMPTY_SNAPSHOT, type ReplCommand, type ReplMessage } from "../src/shared/repl"
 import type { Envelope } from "../src/shared/wire"
 import { stubConsoleHeard, stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
-import { aRun, appendToSidecar } from "./sidecar.fixtures"
+import { aRun, appendToSidecar, sidecarPath } from "./sidecar.fixtures"
 
 const SERVER = Bun.fileURLToPath(new URL("../src/server/index.ts", import.meta.url))
 const LAUNCHER = Bun.fileURLToPath(new URL("../bin/rails-log-reader.ts", import.meta.url))
@@ -312,6 +312,63 @@ describe("starting the Reader", () => {
     // Asked from the top of the file, which is where this one's history already begins:
     // nothing earlier, and the same offset back, rather than the file over again.
     expect(await answered.json()).toEqual({ envelopes: [], from: 0 })
+  })
+
+  test("opens the history on the Events kept figure the stream is asked for, each of the four choices", async () => {
+    const root = await railsRoot()
+    const rails = aRun("srv-1")
+    // 6,000 events: more than the default figure opens on, fewer than the next choice.
+    await appendToSidecar(join(root, "log"), rails.header(), ...Array.from({ length: 5_999 }, (_, index) => rails.log(null, `line ${index}`)))
+    const url = await readerUrl(run(root))
+
+    const opened: Record<string, number> = {}
+    for (const events of [5_000, 10_000, 25_000, 50_000]) {
+      const response = await Bun.fetch(new URL(`events?events=${events}`, url))
+      expect(response.status).toBe(200)
+      opened[events] = (await firstMessage<{ from: number }>(response, "history")).from
+    }
+
+    expect(opened[5_000]).toBeGreaterThan(0)
+    expect(opened[10_000]).toBe(0)
+    expect(opened[25_000]).toBe(0)
+    expect(opened[50_000]).toBe(0)
+  })
+
+  test("refuses an Events kept figure that is not one of the four choices on the stream", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    for (const events of ["7", "5000.5", "100000", "-5000", "lots", ""]) {
+      expect((await Bun.fetch(new URL(`events?events=${events}`, url))).status).toBe(400)
+    }
+  })
+
+  test("GET /earlier takes each of the four Events kept figures and reads at least that many events", async () => {
+    const root = await railsRoot()
+    const rails = aRun("srv-1")
+    await appendToSidecar(join(root, "log"), rails.header(), ...Array.from({ length: 11_999 }, (_, index) => rails.log(null, `line ${index}`)))
+    const url = await readerUrl(run(root))
+    const eof = (await Bun.file(sidecarPath(join(root, "log"))).stat()).size
+
+    const read: Record<string, number> = {}
+    for (const events of [5_000, 10_000, 25_000, 50_000]) {
+      const answered = await Bun.fetch(new URL(`earlier?from=${eof}&events=${events}`, url))
+      expect(answered.status).toBe(200)
+      read[events] = ((await answered.json()) as { envelopes: unknown[] }).envelopes.length
+    }
+
+    expect(read[5_000]).toBeGreaterThanOrEqual(5_000)
+    expect(read[5_000]).toBeLessThan(10_000)
+    expect(read[10_000]).toBeGreaterThanOrEqual(10_000)
+    expect(read[25_000]).toBe(12_000)
+    expect(read[50_000]).toBe(12_000)
+  })
+
+  test("refuses an Events kept figure that is not one of the four choices on GET /earlier", async () => {
+    const url = await readerUrl(run(await railsRoot()))
+
+    for (const events of ["7", "100000", "lots", ""]) {
+      expect((await Bun.fetch(new URL(`earlier?from=0&events=${events}`, url))).status).toBe(400)
+    }
   })
 
   test("refuses a load-earlier cursor that is not an offset into the Sidecar", async () => {

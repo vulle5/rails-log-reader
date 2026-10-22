@@ -1540,6 +1540,41 @@ describe("load-earlier", () => {
     expect(reader.evicted).toEqual([])
   })
 
+  test("a raised Events kept figure opens on more, and keeps more before evicting", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    await appendToSidecar(log, server.header(), ...finishedRequests(server, 3_000))
+
+    const standard = await theReaderReads(log, 5_000)
+    const raised = await theReaderReads(log, 10_000)
+
+    // Two events to a request: the figure is a count of events, not of rows.
+    expect(requests(standard.rows).length).toBeGreaterThanOrEqual(2_500)
+    expect(requests(standard.rows).length).toBeLessThan(2_600)
+    expect(requests(raised.rows)).toHaveLength(3_000)
+
+    await appendToSidecar(log, ...finishedRequests(server, 1_500, 100_000))
+    await standard.caughtUp()
+    await raised.caughtUp()
+
+    // 6,000 events to start with and 3,000 more: past what 5,000 keeps, short of 10,000.
+    expect(standard.evicted.length).toBeGreaterThan(0)
+    expect(raised.evicted).toEqual([])
+    expect(requests(raised.rows)).toHaveLength(4_500)
+  })
+
+  test("a raised Events kept figure makes each click read at least that many events", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    await appendToSidecar(log, server.header(), ...finishedRequests(server, 12_000))
+    const reader = await theReaderReads(log, 10_000)
+    const opened = requests(reader.rows).length
+
+    await reader.loadEarlier()
+
+    expect(requests(reader.rows).length - opened).toBeGreaterThanOrEqual(5_000)
+  })
+
   test("promotes the request the history cut in half, without moving its row", async () => {
     const log = await aLogDirectory()
     await aSidecarWithHistory(log)
