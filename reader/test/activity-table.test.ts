@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { openSidecar, readEarlier, type Sidecar } from "../src/server/sidecar"
-import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
+import { EARLIER_BUDGET_BYTES, LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import { loadEarlier as click } from "../src/shared/load-earlier"
 import {
   activityTable,
@@ -85,9 +85,10 @@ async function theReaderReads(logDirectory: string, events = LOAD_ON_OPEN_EVENTS
   async function loadEarlier() {
     const clicked = await click({
       activity,
-      readBlock: (before, events) => readEarlier(logDirectory, before, events),
+      readBlock: (before, atLeast, budget) => readEarlier(logDirectory, before, atLeast, budget),
       from,
       events,
+      budget: EARLIER_BUDGET_BYTES,
     })
     from = clicked.from
     evicted.push(...clicked.evicted)
@@ -1786,16 +1787,18 @@ describe("a load-earlier click never splits a request or an Evaluation", () => {
   test("reads no further for a server's Run row that crosses the cut", async () => {
     const log = await aLogDirectory()
     const server = aRun("srv-1")
-    const lines = Array.from({ length: 300 }, (_, index) => server.log(null, `line ${index}`))
-    await appendToSidecar(log, server.header(), ...lines)
+    const far = Array.from({ length: 300 }, (_, index) => server.log(null, `far ${index}`))
+    const near = Array.from({ length: 150 }, (_, index) => server.log(null, `near ${index}`))
+    await appendToSidecar(log, server.header(), ...far, ...finishedRequests(server, 1), ...near)
     const reader = await theReaderReads(log, 100)
 
     const clicked = await reader.loadEarlier()
 
-    // The header is 200 lines further back, and the click does not go and get it: 100 lines
-    // were the whole of what it was asked to read.
+    // The header is 300 lines further back, and the click does not go and get it: the block
+    // it read opened a row, and 100 lines were the whole of what it was asked to read.
     expect(clicked.reachedStart).toBe(false)
-    expect(runRow(reader.rows, "srv-1").timeline).toHaveLength(200)
+    expect(requests(reader.rows)).toHaveLength(1)
+    expect(runRow(reader.rows, "srv-1").timeline).toHaveLength(198)
   })
 
   test("stops at the budget and leaves a request partial, then completes it on the next click", async () => {
@@ -1839,6 +1842,167 @@ describe("a load-earlier click never splits a request or an Evaluation", () => {
     const evaluation = reader.rows.find((candidate) => candidate.kind === "evaluation")
     expect(evaluation).toMatchObject({ kind: "evaluation", partial: false, input: "Post.count" })
     expect(evaluation?.timeline).toHaveLength(100)
+  })
+})
+
+describe("a load-earlier click never splits a rake task", () => {
+  test("loads a long task back whole in one click, with the Run identity its header carries", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    const lines = Array.from({ length: 300 }, (_, index) => rake.log(null, `row ${index}`))
+    await appendToSidecar(log, rake.header("rake", 91_887), ...lines)
+    const reader = await theReaderReads(log, 100)
+    expect(runRow(reader.rows, "rake-1")).toMatchObject({ runKind: null, pid: null, railsVersion: null })
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked.reachedStart).toBe(true)
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(300)
+    expect(runRow(reader.rows, "rake-1")).toMatchObject({ runKind: "rake", pid: 91_887, railsVersion: "8.0.2" })
+  })
+
+  test("completes a task whose events are interleaved with a server's requests", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const rake = aRun("rake-1")
+    const interleaved = Array.from({ length: 150 }, (_, index) => [
+      rake.log(null, `row ${index}`),
+      server.start(`req-${index}`, "GET", `/posts/${index}`),
+      server.finish(`req-${index}`),
+    ]).flat()
+    await appendToSidecar(log, server.header(), rake.header("rake"), ...interleaved)
+    const reader = await theReaderReads(log, 100)
+
+    await reader.loadEarlier()
+
+    // Not cut at the first request the task's events were interleaved with.
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(150)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
+    expect(requests(reader.rows).filter((request) => request.partial)).toEqual([])
+  })
+
+  test("never holds a click back for a header that is not a rake task's, or is not there", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const worker = aRun("wrk-1")
+    const console = aRun("con-1")
+    const lost = aRun("lost-1")
+    // `lost-1` wrote no header at all; the others booted as something that is never worth
+    // reading back for. The one request that opens a new row lies halfway down, so a click
+    // held back for any of the headers would carry on past it, to the top of the file.
+    const chatter = (from: number, to: number) =>
+      Array.from({ length: to - from }, (_, index) => [
+        worker.log(null, `worker ${from + index}`),
+        console.log(null, `console ${from + index}`),
+        lost.log(null, `lost ${from + index}`),
+      ]).flat()
+    await appendToSidecar(
+      log,
+      server.header(),
+      worker.header("worker"),
+      console.header("console"),
+      ...chatter(0, 60),
+      ...finishedRequests(server, 1),
+      ...chatter(60, 100),
+    )
+    const reader = await theReaderReads(log, 100)
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked).toMatchObject({ opened: 1, reachedStart: false })
+    expect(runRow(reader.rows, "wrk-1").runKind).toBeNull()
+  })
+
+  test("leaves a task longer than the click's budget cut, and the next click carries on", async () => {
+    const log = await aLogDirectory()
+    const rake = aRun("rake-1")
+    // 440 lines of about 200 KB: the header is more than the 64 MB one click reads from the
+    // first click's start (which spends the whole budget, no row opening), and within it of
+    // the second's.
+    const heavy = "x".repeat(200_000)
+    const lines = Array.from({ length: 440 }, (_, index) => rake.log(null, `${index} ${heavy}`))
+    await appendToSidecar(log, rake.header("rake"), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const first = await reader.loadEarlier()
+
+    expect(first.reachedStart).toBe(false)
+    expect(runRow(reader.rows, "rake-1").runKind).toBeNull()
+    expect(runRow(reader.rows, "rake-1").timeline.length).toBeGreaterThan(300)
+    expect(runRow(reader.rows, "rake-1").timeline.length).toBeLessThan(440)
+
+    const second = await reader.loadEarlier()
+
+    expect(second.reachedStart).toBe(true)
+    expect(runRow(reader.rows, "rake-1").timeline).toHaveLength(440)
+    expect(runRow(reader.rows, "rake-1").runKind).toBe("rake")
+  })
+})
+
+describe("a load-earlier click always opens a new row, or says why it could not", () => {
+  test("keeps reading past a block that only extends a row already shown, and opens the new rows above it", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const extending = Array.from({ length: 250 }, (_, index) => server.log(null, `line ${index}`))
+    await appendToSidecar(log, server.header(), ...finishedRequests(server, 3), ...extending)
+    const reader = await theReaderReads(log, 100)
+    const serverRow = runRow(reader.rows, "srv-1")
+    expect(requests(reader.rows)).toHaveLength(0)
+
+    const clicked = await reader.loadEarlier()
+
+    // The first two blocks are the server's own Run row and nothing else; the click goes on
+    // until the requests before it open, and they go above the row it extended.
+    expect(clicked.opened).toBe(3)
+    expect(clicked.reachedStart).toBe(true)
+    expect(requests(reader.rows).map((request) => request.path)).toEqual(["/posts/0", "/posts/1", "/posts/2"])
+    expect(reader.rows.slice(0, 3).every((candidate) => candidate.kind === "request")).toBe(true)
+    // Stays where it was, which is now below the three: rows never move relative to each other.
+    expect(reader.rows.at(-1)).toBe(serverRow)
+    expect(serverRow.timeline).toHaveLength(250)
+  })
+})
+
+describe("a load-earlier click's budget", () => {
+  async function aTaskLongerThanTheBudget(log: string) {
+    const server = aRun("srv-1")
+    const heavy = "x".repeat(200_000)
+    // More than the 64 MB one click reads, all of it the server's own Run row; the only
+    // request in the file lies before every line of it.
+    const task = Array.from({ length: 340 }, (_, index) => server.log(null, `${index} ${heavy}`))
+    const quiet = Array.from({ length: 100 }, (_, index) => server.log(null, `quiet ${index}`))
+    await appendToSidecar(log, server.header(), ...finishedRequests(server, 1), ...task, ...quiet)
+  }
+
+  test("a click that spends it on rows already shown reports no new row, and the next click carries on", async () => {
+    const log = await aLogDirectory()
+    await aTaskLongerThanTheBudget(log)
+    const reader = await theReaderReads(log, 100)
+    expect(requests(reader.rows)).toHaveLength(0)
+
+    const first = await reader.loadEarlier()
+
+    expect(first).toMatchObject({ opened: 0, reachedStart: false })
+    expect(requests(reader.rows)).toHaveLength(0)
+    expect(runRow(reader.rows, "srv-1").timeline.length).toBeGreaterThan(300)
+
+    const second = await reader.loadEarlier()
+
+    expect(second).toMatchObject({ opened: 1, reachedStart: true })
+    expect(requests(reader.rows).map((request) => request.path)).toEqual(["/posts/0"])
+    expect(reader.rows.at(0)?.kind).toBe("request")
+  })
+
+  test("a click that finds nothing new before the top of the file reports it has reached the top", async () => {
+    const log = await aLogDirectory()
+    const server = aRun("srv-1")
+    const lines = Array.from({ length: 250 }, (_, index) => server.log(null, `line ${index}`))
+    await appendToSidecar(log, server.header(), ...lines)
+    const reader = await theReaderReads(log, 100)
+
+    const clicked = await reader.loadEarlier()
+
+    expect(clicked).toMatchObject({ opened: 0, reachedStart: true })
   })
 })
 

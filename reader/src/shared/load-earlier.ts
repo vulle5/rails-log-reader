@@ -3,10 +3,11 @@ import type { Earlier } from "./earlier"
 import type { Envelope } from "./wire"
 
 /**
- * Reads the block of history before `from`, at least `events` events of it. The browser's
- * is a `fetch` of `GET /earlier`; a test's is the server's backward scan itself.
+ * Reads the block of history before `from`, at least `events` events of it, and no more
+ * than `budget` bytes of the file when it would take more to finish what it left split. The
+ * browser's is a `fetch` of `GET /earlier`; a test's is the server's backward scan itself.
  */
-export type ReadBlock = (from: number, events: number) => Promise<Earlier>
+export type ReadBlock = (from: number, events: number, budget: number) => Promise<Earlier>
 
 export type LoadEarlierOptions = {
   /** The fold the block is folded into. */
@@ -16,6 +17,8 @@ export type LoadEarlierOptions = {
   from: number
   /** The *Memory bound*'s figure: how many events a block reads at least. */
   events: number
+  /** How many bytes of the file the whole click may read, across every block it reads. */
+  budget: number
 }
 
 export type LoadedEarlier = {
@@ -25,7 +28,10 @@ export type LoadedEarlier = {
   envelopes: readonly Envelope[]
   /** Every row the click evicted, which the *Console* has to let go of the lines of. */
   evicted: readonly EvictedRow[]
-  /** How many rows the click opened above the table's oldest. */
+  /**
+   * How many rows the click opened above the table's oldest. `0` with `reachedStart` false
+   * means the budget ran out first: everything the click read only extended rows already shown.
+   */
   opened: number
   /** Whether the history now begins at the top of the file: there is nothing earlier left. */
   reachedStart: boolean
@@ -34,18 +40,26 @@ export type LoadedEarlier = {
 /**
  * One *Load earlier* click: reads the block before `from` and folds it as what it is —
  * everything in it happened before everything the fold holds, so its rows open above them.
- * The browser's live hook and the Sidecar-to-table test harness both run this, so what the
- * tests exercise is the click itself.
+ * A block that only extended rows already shown is not a result, so the click reads on from
+ * where that block began until a row opens, the top of the file is reached or the budget is
+ * spent. The browser's live hook and the Sidecar-to-table test harness both run this, so what
+ * the tests exercise is the click itself.
  */
-export async function loadEarlier({ activity, readBlock, from, events }: LoadEarlierOptions): Promise<LoadedEarlier> {
-  const block = await readBlock(from, events)
-  const folded = activity.foldEarlier(block.envelopes)
+export async function loadEarlier({ activity, readBlock, from, events, budget }: LoadEarlierOptions): Promise<LoadedEarlier> {
+  const envelopes: Envelope[] = []
+  const evicted: EvictedRow[] = []
+  let opened = 0
+  let position = from
 
-  return {
-    from: block.from,
-    envelopes: block.envelopes,
-    evicted: folded.evicted,
-    opened: folded.opened,
-    reachedStart: block.from === 0,
-  }
+  do {
+    const block = await readBlock(position, events, budget - (from - position))
+    const folded = activity.foldEarlier(block.envelopes)
+
+    envelopes.push(...block.envelopes)
+    evicted.push(...folded.evicted)
+    opened += folded.opened
+    position = block.from
+  } while (opened === 0 && position > 0 && from - position < budget)
+
+  return { from: position, envelopes, evicted, opened, reachedStart: position === 0 }
 }
