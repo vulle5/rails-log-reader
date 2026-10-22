@@ -351,6 +351,15 @@ export type ActivityTable = {
    */
   foldEarlier: (envelopes: readonly Envelope[]) => FoldedEarlier
   /**
+   * The developer chose another *Events kept* figure. It moves the ceiling's base to `events`
+   * and keeps whatever *Load earlier* clicks added on top of it: a higher figure stops
+   * eviction until the table holds that many, a lower one evicts down to it now, under the
+   * three exemptions every eviction has. Nothing is read: the fold holds what it holds.
+   *
+   * Returns what it evicted, the way `fold` does, so the *Console* lets go of the same rows.
+   */
+  setEventsKept: (events: number) => readonly EvictedRow[]
+  /**
    * The console process `pid` exited: the latest `console` Run whose `run_header` carried it
    * ended, as its `run_end` would say, though one killed too hard wrote none. Its in-flight rows
    * become *Interrupted*, their elapsed frozen where they left it.
@@ -360,7 +369,7 @@ export type ActivityTable = {
 
 /**
  * The fold, bounded: the *Memory bound* is a ring holding no more events than `events`, the
- * figure the Reader opened on, and evicting the oldest rows once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
+ * figure the Reader opened on until `setEventsKept` says another, and evicting the oldest rows once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
  * because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized
@@ -421,6 +430,8 @@ export function activityTable(events: number): ActivityTable {
    * its own.
    */
   let ceiling = events
+  /** The figure `ceiling` is built on: what *Events kept* says now. */
+  let figure = events
   /** How many rows at the front a load-earlier pulled in. Never evicted, for the same reason. */
   let pulled = 0
   /** The load-earlier block being folded, if one is: `null` in the ordinary live fold. */
@@ -733,6 +744,12 @@ export function activityTable(events: number): ActivityTable {
     return { opened: block.opened.length, evicted: evictToBound() }
   }
 
+  function setEventsKept(next: number) {
+    ceiling += next - figure
+    figure = next
+    return evictToBound()
+  }
+
   function foldOne(envelope: Envelope) {
     if (alreadyFolded(envelope)) return
 
@@ -1043,7 +1060,7 @@ export function activityTable(events: number): ActivityTable {
     return folding?.events ?? 0
   }
 
-  return { rows, evictedEvaluations, fold, foldOpen, foldEarlier, consoleExited }
+  return { rows, evictedEvaluations, fold, foldOpen, foldEarlier, setEventsKept, consoleExited }
 }
 
 function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {

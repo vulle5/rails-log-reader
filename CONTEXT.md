@@ -747,10 +747,12 @@ wrong way. Under the *Memory bound* the number would otherwise be a silent under
 fold at its cap evicts a row for every row it takes, so the length it is read from stands
 still while traffic keeps running past underneath — a paused reader told nothing is
 arriving. Rather than let an exact-looking count freeze (#44), the pill switches from a
-count to a floor once the column is at the cap — "5,000+ new" rather than a number that has
+count to a floor once the column is at the cap — "12+ new" rather than a number that has
 quietly stopped moving — which costs nothing beyond what the seam above already costs: it
 is the same "prompt to go and look, not a ledger" trade, admitted where it applies rather
-than worn silently.
+than worn silently. The cap is the *Memory bound*'s figure as it stands, so the switch to a
+floor moves with **Events kept** the moment it changes; the rows a lowered figure evicts
+are not arrivals, and are not counted.
 
 The Transcript's entries grow after they arrive, so it counts what *came to* something rather
 than what was appended: an *Evaluation* finishing counts once, as a result, as `raised`, or as

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { EvaluationEntry, Outcome, ReplSnapshot, ReplState, RubyNode, StartedConsole, TranscriptEntry } from "../src/shared/repl"
@@ -274,6 +274,21 @@ describe("a Transcript entry's status strip", () => {
       "title",
       "The Reader keeps only its latest 10,000 events, and let go of the queries and log lines this ran as some of the oldest",
     )
+  })
+
+  test("names a figure chosen in Settings at once, without a reload", async () => {
+    const { run, header } = consoleRun()
+    const { user } = await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)], traffic(LOAD_ON_OPEN_EVENTS)], {
+      transcript: [entry({ id: 1, outcome: INTEGER })],
+    })
+    const cleared = () => within(statusStrip()).getByText("queries cleared to save memory")
+    expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 5,000 events"))
+
+    await user.click(screen.getByRole("button", { name: "Settings" }))
+    const dialog = screen.getByRole("dialog", { name: "Settings" })
+    await user.click(within(within(dialog).getByRole("group", { name: "Events kept" })).getByRole("button", { name: "25,000" }))
+
+    expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 25,000 events"))
   })
 
   test("has no row link for an entry with no row", async () => {

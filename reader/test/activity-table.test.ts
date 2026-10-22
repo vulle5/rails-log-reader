@@ -103,7 +103,13 @@ async function theReaderReads(logDirectory: string, events = LOAD_ON_OPEN_EVENTS
     return clicked
   }
 
-  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, evicted, identity: () => identity }
+  // Settings changed the figure while the Reader was open: the fold takes it at once, and
+  // what it lets go of is reported like any other eviction.
+  function keepEvents(figure: number) {
+    evicted.push(...activity.setEventsKept(figure))
+  }
+
+  return { rows: activity.rows, caughtUp: () => sidecar.catchUp(), loadEarlier, keepEvents, evicted, identity: () => identity }
 }
 
 /** What a timeline event is, in one string: the query it ran or the line it printed. */
@@ -1481,6 +1487,107 @@ describe("the Memory bound", () => {
 
     expect(runs(reader.rows).map((candidate) => candidate.runId)).toEqual(["rake-2"])
     expect(runRow(reader.rows, "rake-2").overBound).toBe(true)
+  })
+})
+
+describe("changing Events kept while the Reader is open", () => {
+  test("a raised figure stops eviction at once, until the table reaches it", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), ...finishedRequests(run, 50))
+    const reader = await theReaderReads(log, 100)
+    const opened = requests(reader.rows).length
+
+    reader.keepEvents(200)
+    // Thirty requests are sixty events: past the 100 it opened on, short of the 200 now kept.
+    await appendToSidecar(log, ...finishedRequests(run, 30, 1_000))
+    await reader.caughtUp()
+
+    expect(requests(reader.rows)).toHaveLength(opened + 30)
+    expect(reader.evicted).toEqual([])
+  })
+
+  test("a lowered figure evicts down to it at once, oldest first, and reports what it took", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), ...finishedRequests(run, 49))
+    const reader = await theReaderReads(log, 100)
+    const before = reader.rows.map((candidate) => candidate.id)
+    expect(requests(reader.rows)).toHaveLength(49)
+
+    reader.keepEvents(60)
+
+    // 99 events held and 60 kept: the table gives up its oldest rows until it holds no more
+    // than 60 — the Run row's one event, then the 19 oldest requests' two each.
+    expect(requests(reader.rows)).toHaveLength(30)
+    expect(reader.rows.map((candidate) => candidate.id)).toEqual(before.slice(-reader.rows.length))
+    expect(reader.evicted.map((taken) => taken.id)).toEqual(before.slice(0, before.length - reader.rows.length))
+    expect(reader.evicted.length).toBeGreaterThan(0)
+  })
+
+  test("a lowered figure still spares a request that is in flight", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.start("req-hanging", "GET", "/reports"), ...finishedRequests(run, 49))
+    const reader = await theReaderReads(log, 100)
+
+    reader.keepEvents(20)
+
+    expect(row(reader.rows, "/reports").state).toBe("in-flight")
+    expect(reader.rows.at(0)?.id).toBe("request req-hanging")
+    expect(reader.evicted.map((taken) => taken.requestId)).not.toContain("req-hanging")
+  })
+
+  test("a lowered figure keeps what Load earlier clicks added on top of the figure", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), ...finishedRequests(run, 150))
+    const reader = await theReaderReads(log, 100)
+    await reader.loadEarlier()
+    const clicked = reader.rows.slice(0, 50).map((candidate) => candidate.id)
+    const held = requests(reader.rows).length
+
+    reader.keepEvents(60)
+
+    // The table held the click's history on top of the figure it opened on: lowering the
+    // figure takes rows from what arrived by itself, and the clicked history stays.
+    expect(reader.rows.slice(0, 50).map((candidate) => candidate.id)).toEqual(clicked)
+    expect(reader.evicted.length).toBeGreaterThan(0)
+    expect(reader.evicted.every((taken) => !clicked.includes(taken.id))).toBe(true)
+    expect(requests(reader.rows).length).toBeLessThan(held)
+  })
+
+  test("a lowered figure leaves the last row standing, marked over the bound", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), ...finishedRequests(run, 49))
+    const reader = await theReaderReads(log, 100)
+
+    reader.keepEvents(1)
+
+    expect(reader.rows).toHaveLength(1)
+    expect(reader.rows.at(0)?.id).toBe("request req-48")
+    expect(reader.rows.at(0)?.overBound).toBe(true)
+  })
+
+  test("a figure changed twice keeps the clicked history on top of the latest one", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log, run.header(), ...finishedRequests(run, 150))
+    const reader = await theReaderReads(log, 100)
+    await reader.loadEarlier()
+    const clicked = reader.rows.slice(0, 50).map((candidate) => candidate.id)
+
+    reader.keepEvents(60)
+    reader.keepEvents(100)
+    const afterwards = requests(reader.rows).length
+    await appendToSidecar(log, ...finishedRequests(run, 5, 1_000))
+    await reader.caughtUp()
+
+    // Back where it opened, the ceiling is again the opening figure plus the click's history:
+    // the clicked rows are still there and five more requests fit under it.
+    expect(reader.rows.slice(0, 50).map((candidate) => candidate.id)).toEqual(clicked)
+    expect(requests(reader.rows).length).toBeGreaterThanOrEqual(afterwards)
   })
 })
 

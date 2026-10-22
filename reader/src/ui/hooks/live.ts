@@ -7,7 +7,7 @@ import type { Earlier } from "../../shared/earlier"
 import { loadEarlier as loadEarlierBlock } from "../../shared/load-earlier"
 import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
-import { recallEventsKept } from "./events-kept"
+import type { EventsKept } from "./events-kept"
 
 async function readEarlierOverHttp(from: number, events: number, budget: number) {
   const response = await fetch(`/earlier?from=${from}&events=${events}&budget=${budget}`)
@@ -31,7 +31,8 @@ export type WireStatus = {
    */
   lines: readonly ConsoleLine[]
   /**
-   * How many rows the *Memory bound* has evicted, ever. Cumulative rather than per-batch, so
+   * How many rows the *Memory bound* has evicted for new events, ever — a lowered *Events kept*
+   * figure's evictions are not arrivals, and are not counted. Cumulative rather than per-batch, so
    * the Activity table's and the Console's own auto-scrolls can each read it as one more thing
    * to watch grow — the signal `arrived` turns into a floor once a paused column's rendered
    * count stalls at the cap. One number for both columns, because it is one bound: the
@@ -100,11 +101,11 @@ export type EarlierState = {
  * whatever a *load-earlier* went and got — survives it, and so does how far back the
  * developer had asked to see, which the server has no memory of by design.
  */
-export function useSidecar(): WireStatus {
-  // The *Events kept* figure the page loaded with. A change made in Settings afterwards is
-  // not read again until the next reload: the fold, the stream and every click keep this one.
-  const [eventsKept] = useState(recallEventsKept)
-  const [activity] = useState(() => activityTable(eventsKept))
+export function useSidecar({ eventsKept, loaded }: Pick<EventsKept, "eventsKept" | "loaded">): WireStatus {
+  // The stream opens with the figure the page loaded with, and keeps it: a change made in
+  // Settings afterwards reaches the fold and every click at once, but what the server reads
+  // on attaching waits for the next reload.
+  const [activity] = useState(() => activityTable(loaded))
   const [stream] = useState(consoleStream)
   const [status, setStatus] = useState<{
     rows: readonly ActivityRow[]
@@ -131,7 +132,7 @@ export function useSidecar(): WireStatus {
   const opening = useRef(false)
 
   useEffect(() => {
-    const sidecar = new EventSource(`/events?events=${eventsKept}`)
+    const sidecar = new EventSource(`/events?events=${loaded}`)
 
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
@@ -188,6 +189,25 @@ export function useSidecar(): WireStatus {
     })
 
     return () => sidecar.close()
+  }, [activity, stream, loaded])
+
+  // The figure last handed to the fold, so an effect re-run for any other reason hands over
+  // nothing.
+  const applied = useRef(loaded)
+  useEffect(() => {
+    if (applied.current === eventsKept) return
+    applied.current = eventsKept
+
+    // Evictions a new figure causes are not arrivals, so `evictedRows` — what the auto-scrolls
+    // read as the bound taking rows for new traffic — does not count them. The Console still
+    // lets go of their lines.
+    stream.evict(activity.setEventsKept(eventsKept))
+    setStatus((previous) => ({
+      ...previous,
+      rows: [...activity.rows],
+      lines: [...stream.lines],
+      evictedEvaluations: new Map(activity.evictedEvaluations),
+    }))
   }, [activity, stream, eventsKept])
 
   /**
