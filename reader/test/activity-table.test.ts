@@ -1592,6 +1592,135 @@ describe("changing Events kept while the Reader is open", () => {
 })
 
 /**
+ * What the *Memory bound* remembers of the rows it took is sized by the figure in force, not
+ * by the one the Reader opened on or a default: a Trailing event for a request evicted within
+ * the last `figure` evictions is still unattributed, and a Run evicted within that many is
+ * still marked reopened when it speaks again. Past that the fold has forgotten, and reads the
+ * event as a first meeting. The figures here are small, so a handful of rows is "past".
+ */
+describe("what the Memory bound remembers of what it took", () => {
+  type Reader = Awaited<ReturnType<typeof theReaderReads>>
+
+  /**
+   * A Reader attached to a Sidecar that already holds one small finished request, so what is
+   * appended next is read as it arrives, by the in-memory ring, and not trimmed on disk by
+   * the load-on-open scan first.
+   */
+  async function attachedWith(log: string, figure: number) {
+    await appendToSidecar(log, ...finishedRequests(aRun("attach"), 1, 9_999))
+    const reader = await theReaderReads(log, figure)
+    await reader.caughtUp()
+    return reader
+  }
+
+  /** Whether a Trailing event for `requestId` opened a row of its own, rather than being left unattributed. */
+  async function opensARow(reader: Reader, log: string, run: ReturnType<typeof aRun>, requestId: string) {
+    await appendToSidecar(log, run.sql(requestId, "SELECT 'trailing'"))
+    await reader.caughtUp()
+    return requests(reader.rows).some((candidate) => candidate.requestId === requestId)
+  }
+
+  /** `count` Runs that each say one unattributed thing: a Run row of one event each. */
+  function manyRuns(count: number) {
+    const said = Array.from({ length: count }, (_, index) => aRun(`run-${index}`))
+    return { said, envelopes: said.map((run) => run.log(null, "hello")) }
+  }
+
+  /** Whether run `index` of those `said`, speaking again, got a row marked reopened. */
+  async function reopened(reader: Reader, log: string, said: ReturnType<typeof manyRuns>["said"], index: number) {
+    await appendToSidecar(log, said[index]!.log(null, "again"))
+    await reader.caughtUp()
+    return runRow(reader.rows, `run-${index}`).reopened
+  }
+
+  describe("evicted requests", () => {
+    test("follow a figure other than the default", async () => {
+      const log = await aLogDirectory()
+      const run = aRun("srv-1")
+      const reader = await attachedWith(log, 20)
+
+      // Ten rows held and thirty evicted: twenty remembered, req-10 on.
+      await appendToSidecar(log, ...finishedRequests(run, 40))
+      await reader.caughtUp()
+
+      expect(await opensARow(reader, log, run, "req-25")).toBe(false)
+      expect(await opensARow(reader, log, run, "req-5")).toBe(true)
+    })
+
+    test("follow a figure raised in Settings", async () => {
+      const log = await aLogDirectory()
+      const run = aRun("srv-1")
+      const reader = await attachedWith(log, 20)
+      reader.keepEvents(40)
+
+      // Twenty rows held and forty-five evicted: forty remembered, req-5 on.
+      await appendToSidecar(log, ...finishedRequests(run, 65))
+      await reader.caughtUp()
+
+      expect(await opensARow(reader, log, run, "req-10")).toBe(false)
+      expect(await opensARow(reader, log, run, "req-3")).toBe(true)
+    })
+
+    test("follow a figure lowered in Settings, forgetting what no longer fits", async () => {
+      const log = await aLogDirectory()
+      const run = aRun("srv-1")
+      const reader = await attachedWith(log, 40)
+      await appendToSidecar(log, ...finishedRequests(run, 70))
+      await reader.caughtUp()
+
+      reader.keepEvents(20)
+
+      // Ten rows held and sixty evicted: twenty remembered, req-40 on.
+      expect(await opensARow(reader, log, run, "req-55")).toBe(false)
+      expect(await opensARow(reader, log, run, "req-30")).toBe(true)
+    })
+  })
+
+  describe("evicted Runs", () => {
+    test("follow a figure other than the default", async () => {
+      const log = await aLogDirectory()
+      const reader = await attachedWith(log, 20)
+
+      // Twenty rows held and forty-one evicted: twenty remembered, run-21 on.
+      const { said, envelopes } = manyRuns(61)
+      await appendToSidecar(log, ...envelopes)
+      await reader.caughtUp()
+
+      expect(await reopened(reader, log, said, 35)).toBe(true)
+      expect(await reopened(reader, log, said, 5)).toBe(false)
+    })
+
+    test("follow a figure raised in Settings", async () => {
+      const log = await aLogDirectory()
+      const reader = await attachedWith(log, 20)
+      reader.keepEvents(40)
+
+      // Forty rows held and sixty evicted: forty remembered, run-20 on.
+      const { said, envelopes } = manyRuns(100)
+      await appendToSidecar(log, ...envelopes)
+      await reader.caughtUp()
+
+      expect(await reopened(reader, log, said, 30)).toBe(true)
+      expect(await reopened(reader, log, said, 10)).toBe(false)
+    })
+
+    test("follow a figure lowered in Settings, forgetting what no longer fits", async () => {
+      const log = await aLogDirectory()
+      const reader = await attachedWith(log, 40)
+      const { said, envelopes } = manyRuns(100)
+      await appendToSidecar(log, ...envelopes)
+      await reader.caughtUp()
+
+      reader.keepEvents(20)
+
+      // Twenty rows held and eighty evicted: twenty remembered, run-60 on.
+      expect(await reopened(reader, log, said, 70)).toBe(true)
+      expect(await reopened(reader, log, said, 50)).toBe(false)
+    })
+  })
+})
+
+/**
  * Load-earlier: the same backward scan the Reader opened on, continued from an earlier
  * point when the developer asks for it. A file with more than the load-on-open figure in it
  * is the whole apparatus — what the load-on-open figure leaves behind is what the control goes and gets.
