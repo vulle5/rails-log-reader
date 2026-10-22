@@ -39,7 +39,8 @@ import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
 import { COMPLETION_TRIGGER, CompletionTriggerSwitch, useCompletionTrigger } from "./hooks/completion-trigger"
 import { HISTORY_SUGGESTION, HistorySuggestionSwitch, useHistorySuggestion } from "./hooks/history-suggestion"
-import { EDITOR_SCHEME, EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
+import { EVENTS_KEPT, EVENTS_KEPT_DESCRIPTION, EventsKeptSwitch, LoadedEventsKept, useEventsKept } from "./hooks/events-kept"
+import { EDITOR_SCHEME,EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
 /**
@@ -166,6 +167,7 @@ export function Reader({
   const editorScheme = useEditorScheme()
   const completionTrigger = useCompletionTrigger()
   const historySuggestion = useHistorySuggestion()
+  const eventsKept = useEventsKept()
   const settings = useRef<SettingsHandle>(null)
   const editor = useMemo(
     () => ({ scheme: editorScheme.scheme, requestScheme: () => settings.current?.open(EDITOR_SCHEME) }),
@@ -362,11 +364,15 @@ export function Reader({
             >
               <HistorySuggestionSwitch on={historySuggestion.on} onChoose={historySuggestion.choose} />
             </Setting>
+            <Setting label={EVENTS_KEPT} description={EVENTS_KEPT_DESCRIPTION}>
+              <EventsKeptSwitch eventsKept={eventsKept.eventsKept} onChoose={eventsKept.choose} />
+            </Setting>
           </Settings>
         </div>
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
+          <LoadedEventsKept value={eventsKept.loaded}>
           {/* The size the columns, the drawer and their gaps share, and the backdrop they float
               on. A window too small for the grid's `minWidth` or `minHeight` scrolls the grid in
               here rather than drawing a column or the drawer under its minimum. */}
@@ -517,6 +523,7 @@ export function Reader({
               />
             </div>
           </div>
+          </LoadedEventsKept>
         </EditorContext>
       </SearchContext>
     </div>
