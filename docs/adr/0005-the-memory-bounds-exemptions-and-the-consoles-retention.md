@@ -66,5 +66,6 @@ consequence rather than as a second fix — a line can no longer outlive the row
 - The Console's definition changes from "everything the session ever saw" to "everything
   its rows still hold" — a real narrowing, traded for a Console that never points at a row
   that is gone.
-- The "↓ N new" pill switches from a count to a floor ("5,000+ new") once its column is
-  paused at the cap, rather than silently freezing while traffic runs past underneath.
+- The "↓ N new" pill switches from a count to a floor ("12+ new", the unseen arrivals so
+  far) once its column is paused at the cap, rather than silently freezing while traffic
+  runs past underneath.
