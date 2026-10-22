@@ -1,6 +1,6 @@
 import { join } from "node:path"
 
-import { eventsKeptFrom, LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
+import { EARLIER_BUDGET_BYTES, eventsKeptFrom, LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
 import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "./allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "./app-name"
 import { refusal, type RouteKind } from "./gate"
@@ -135,16 +135,23 @@ function envelopeStream(events: number) {
  * request — the server is the Sidecar and nothing else, and holds no history of its own.
  */
 async function earlier(request: Request) {
-  const from = Number(new URL(request.url).searchParams.get("from"))
+  const params = new URL(request.url).searchParams
+  const from = Number(params.get("from"))
+  // What is left of the click's one budget, which only ever shrinks from the full figure.
+  const budget = params.has("budget") ? Number(params.get("budget")) : EARLIER_BUDGET_BYTES
 
   if (!Number.isSafeInteger(from) || from < 0) {
     return Response.json({ error: "from must be a byte offset into the Sidecar" }, { status: 400 })
   }
 
+  if (!Number.isSafeInteger(budget) || budget < 0 || budget > EARLIER_BUDGET_BYTES) {
+    return Response.json({ error: `budget must be a number of bytes, at most ${EARLIER_BUDGET_BYTES}` }, { status: 400 })
+  }
+
   const events = eventsKeptOf(request)
   if (events === null) return refusedEventsKept()
 
-  return Response.json(await readEarlier(logDirectory, from, events))
+  return Response.json(await readEarlier(logDirectory, from, events, budget))
 }
 
 /**

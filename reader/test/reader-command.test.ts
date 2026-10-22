@@ -8,6 +8,7 @@ import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "../src/server/allowed-
 import { APP_NAME_VARIABLE, readAppNameOverride } from "../src/server/app-name"
 import { INITIALIZER_RELATIVE_PATH, MARKER_RELATIVE_PATH } from "../src/server/initializer-file"
 import { DEFAULT_PORT, PORT_VARIABLE, readPort } from "../src/server/port"
+import { EARLIER_BUDGET_BYTES } from "../src/shared/bounds"
 import { EMPTY_SNAPSHOT, type ReplCommand, type ReplMessage } from "../src/shared/repl"
 import type { Envelope } from "../src/shared/wire"
 import { stubConsoleHeard, stubConsoleRoot, stubConsoleStarts } from "./repl.fixtures"
@@ -377,6 +378,21 @@ describe("starting the Reader", () => {
     const answered = await Bun.fetch(new URL("earlier?from=halfway", url))
 
     expect(answered.status).toBe(400)
+  })
+
+  test("GET /earlier takes the click's remaining byte budget, and refuses one over 64 MB", async () => {
+    const root = await railsRoot()
+    const rails = aRun("srv-1")
+    await appendToSidecar(join(root, "log"), rails.header(), rails.start("req-1"))
+    const url = await readerUrl(run(root))
+
+    const atTheLimit = await Bun.fetch(new URL(`earlier?from=0&budget=${EARLIER_BUDGET_BYTES}`, url))
+    const overTheLimit = await Bun.fetch(new URL(`earlier?from=0&budget=${EARLIER_BUDGET_BYTES + 1}`, url))
+    const notABudget = await Bun.fetch(new URL("earlier?from=0&budget=plenty", url))
+
+    expect(atTheLimit.status).toBe(200)
+    expect(overTheLimit.status).toBe(400)
+    expect(notABudget.status).toBe(400)
   })
 })
 

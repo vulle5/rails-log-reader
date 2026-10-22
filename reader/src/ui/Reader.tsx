@@ -131,7 +131,7 @@ export function Reader({
   onRepair = () => {},
   onDismissRepair = () => {},
   actsOnlyFrom = null,
-  earlier = { available: false, loading: false },
+  earlier = { available: false, loading: false, atStart: false, onlyExtended: false },
   onLoadEarlier = () => {},
   historyLoaded = true,
   emptyState = null,
@@ -447,7 +447,7 @@ export function Reader({
                   </div>
                 }
               >
-                <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
+                <LoadEarlier state={earlier} hasRows={rows.length > 0} onLoad={onLoadEarlier} />
                 <ActivityTable
                   rows={showingRows}
                   selected={selected}

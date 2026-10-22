@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow, type EvictedEvaluations } from "../../shared/activity"
+import { EARLIER_BUDGET_BYTES } from "../../shared/bounds"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
 import { loadEarlier as loadEarlierBlock } from "../../shared/load-earlier"
@@ -8,8 +9,8 @@ import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
 import { recallEventsKept } from "./events-kept"
 
-async function readEarlierOverHttp(from: number, events: number) {
-  const response = await fetch(`/earlier?from=${from}&events=${events}`)
+async function readEarlierOverHttp(from: number, events: number, budget: number) {
+  const response = await fetch(`/earlier?from=${from}&events=${events}&budget=${budget}`)
   return (await response.json()) as Earlier
 }
 
@@ -62,13 +63,19 @@ export type WireStatus = {
 }
 
 /**
- * Whether the Sidecar holds anything before the history the Reader has, and whether a scan
- * for it is in flight. Lives here rather than with the control it draws, because it is the
- * shape of what this hook knows: the control renders it and nothing more.
+ * Where the history stands, and whether a click is in flight. Lives here rather than with the
+ * control it draws, because it is the shape of what this hook knows: the control renders it
+ * and nothing more.
  */
 export type EarlierState = {
+  /** There is something before the history the Reader has. */
   available: boolean
+  /** A click is reading, every read of it included. */
   loading: boolean
+  /** The history reaches the top of the file. `false` as well while the server has not said. */
+  atStart: boolean
+  /** The last click ran out of budget having only added to rows already shown. */
+  onlyExtended: boolean
 }
 
 /**
@@ -108,7 +115,7 @@ export function useSidecar(): WireStatus {
     liveRunId: string | null
     identity: RunIdentity
   }>({ rows: [], lines: [], evictedRows: 0, evictedEvaluations: new Map(), liveWireVersion: null, liveRunId: null, identity: null })
-  const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
+  const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false, atStart: false, onlyExtended: false })
   // Never set back: a reconnection re-reads a history the folds already hold, so what it
   // would be waiting for is already on screen.
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -152,7 +159,7 @@ export function useSidecar(): WireStatus {
     sidecar.addEventListener("history", (message) => {
       const history = JSON.parse((message as MessageEvent).data) as { from: number }
       from.current = history.from
-      setEarlier((current) => ({ ...current, available: history.from > 0 }))
+      setEarlier((current) => ({ ...current, available: history.from > 0, atStart: history.from === 0 }))
     })
 
     // The live Run's own `run_header`, when the server's capped backward scan found it
@@ -182,13 +189,14 @@ export function useSidecar(): WireStatus {
     const cursor = from.current
     if (cursor === null || cursor <= 0) return
 
-    setEarlier({ available: true, loading: true })
+    setEarlier({ available: true, loading: true, atStart: false, onlyExtended: false })
     try {
       const clicked = await loadEarlierBlock({
         activity,
         readBlock: readEarlierOverHttp,
         from: cursor,
         events: eventsKept,
+        budget: EARLIER_BUDGET_BYTES,
       })
 
       from.current = clicked.from
@@ -209,12 +217,17 @@ export function useSidecar(): WireStatus {
         // — this is latched exactly as the live stream's is, not only reached from it.
         identity: latchRunIdentity(previous.identity, clicked.envelopes),
       }))
-      setEarlier({ available: !clicked.reachedStart, loading: false })
+      setEarlier({
+        available: !clicked.reachedStart,
+        loading: false,
+        atStart: clicked.reachedStart,
+        onlyExtended: clicked.opened === 0 && !clicked.reachedStart,
+      })
     } catch {
       // The read failed and the cursor has not moved, so the control stays exactly as it
       // was: clicking again asks the same question, which is the only useful thing to do
       // with a file read that did not answer.
-      setEarlier({ available: true, loading: false })
+      setEarlier({ available: true, loading: false, atStart: false, onlyExtended: false })
     }
   }
 
