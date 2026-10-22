@@ -108,16 +108,14 @@ cannot do this. Exact *within* a Run and meaningless across Runs — it restarts
 every process — so it orders a request's own timeline and nothing wider. See *append
 order* for what orders the rest.
 
-**Partial request** — a Request event the Reader pieced together without having observed
-its start, because the Reader attached mid-flight or started after the request did. It is
-promoted as its finish arrives, gaining method, path, status and duration — and stays
-Partial until its own **load-earlier** pull turns up the `request_start` it missed, because
-that is the one thing that changes what the mark actually records: not "the Reader never
-saw this," but "the Reader does not currently hold this." A pull that reaches back far
-enough clears it outright — the events are recovered, not lost, and a mark that kept saying
-otherwise would be false in the one direction this project never allows itself, even the
-safe one. Distinct from *unattributed*: a Partial request's children are correctly
-correlated; it is the parent that was missed.
+**Partial request** — a Request event the Reader holds without its start. The mark means
+"the Reader does not hold this request's start", not "it was never written". It has two
+causes: the start is no longer in the Sidecar, as for a request that was already running
+when the file was emptied at boot, or the start lies further back than the 64 MB one
+*Load earlier* click reads. A click that loads the start clears the mark, because the request is then
+whole. It gains method, path, status and duration when its finish arrives either way.
+Distinct from *unattributed*: a Partial request's own events are correctly attributed; it
+is the start that is missing.
 _Avoid_: orphan, stub, inferred.
 
 **Interrupted request** — a Request event whose Run ended before it finished: the process
@@ -351,60 +349,56 @@ file the product creates. Rails' generated `.gitignore` already covers it. Never
 with `log/development.log`, which the Reader only ever leaves alone. See
 `docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md`.
 
-**Memory bound** — the Reader's bounded in-memory fold of *Activity table* rows: a ring
-buffer that evicts the oldest rows once exceeded, sized to match the load-on-open figure
-(the last ~5,000 events, read backward from EOF over the file offset the Reader already
-tracks) so there is one number, not two. Counted in **events** and evicted by whole
-**rows**, which is what makes it match the figure it is named by: the fold opens holding
-exactly the history that backward scan delivered, and one Run row carrying an all-day
-worker's output is bounded by the same number a table full of requests is — while a row
-that had half its queries taken away would be a count of 24 beside a timeline showing
-three, so a row leaves whole or it stays.
+**Memory bound** — how many events the *Activity table* holds: 5,000 by default, and
+raised to 10,000, 25,000 or 50,000 in *Settings* as **Events kept**, for every Host app
+alike. A change applies to the bound at once and to how much the Reader opens on at the
+next reload; it never loads anything by itself. It is the Reader's one figure for how much history to keep, and it
+is used three ways: as how much the Reader loads on open, as how much the table keeps
+while new events arrive, and as how much each *Load earlier* click reads at least. When
+the table holds more, the oldest rows are evicted. It counts events but evicts whole
+rows, because a row that lost part of what it holds would show a count of 24 queries over
+a timeline of three.
 
-Three things this bound will not take, settled by #44 as three separate refusals rather
-than one leaky rule. A request still *in flight* is never evicted — there is no timeout,
-ever, and a bound that took the hanging request away once five thousand events had gone
-past it would be one, measured in other people's traffic; an *Interrupted* row evicts like
-any other, having been concluded. (The one gap this leaves: a forked Puma worker writes no
-`run_header` of its own and so can never be *Interrupted*, so a request stuck inside a
-worker that was killed without a clean restart stays unevictable forever. Known, named, and
-left alone rather than given a timer of its own — a timer here is the rule this bound exists
-to refuse, wearing a different name.) What a **load-earlier** pull brought in is never
-evicted either, and the ceiling it raises never comes back down — the bound is on what the
-Reader accumulates by itself, and history the developer went and asked for that evaporated
-under the next request to arrive would make the control useless; a developer clicking it
-often enough for that to matter is its own natural limit, so nothing further bounds it. Nor
-is the one row left standing, and that is where this bound stops being one: a `rake` burst
-larger than the figure lands in a single Run row — the ordinary way here, though a lone
-Request row with more queries than the figure earns the same mark the same way — and
-emptying the table is worse than exceeding the number, so the row stays whole, however far
-over the figure it runs, and says so rather than going quiet about it: the row standing over
-the bound carries a visible mark that it is holding more than the usual bound, never the
-word "trimmed," because nothing in it was.
+Three kinds of row are never evicted:
+- **A row still *In-flight*.** A request is never given a timeout, and evicting it after
+  enough other traffic would be one. An *Interrupted* row evicts like any other. One gap
+  is known and left alone: a request stuck in a forked Puma worker that was killed can
+  never be Interrupted, so its row stays for good. A timer to clear it would be the
+  timeout under another name.
+- **What a *Load earlier* click brought in.** Each click raises the bound by what it
+  loaded, and the bound never comes back down. The developer asked for that history, and
+  losing it to the next request would make the click pointless.
+- **The last row standing.** A row bigger than the bound, usually a long `rake` task's
+  *Run row*, stays whole rather than leave the table empty, and is marked as holding more
+  than the bound. It is never called "trimmed", because nothing in it was.
 
-Forgetting is bounded too, on both sides of it. The bound remembers which requests it has
-evicted — kept to the same figure — so a *Trailing event* arriving for one reads as
-*unattributed* rather than opening a bogus *Partial request*; that memory is itself capped
-to the figure, so a Trailing event arriving five thousand evictions later **does** open a
-fresh row, honestly rather than by accident. See *Run row* for the mirror case on the Run
-side, which is not remembered as evicted at all.
+A finished request takes *Trailing events* only while its row is held. After eviction,
+the Reader still remembers the request, up to the same figure, so a Trailing event for it
+reads as *unattributed* rather than opening a false *Partial request*. A Run is not
+remembered this way: see *Run row*.
 
-Doubles as the attribution horizon: a finished request stops accepting *Trailing events*
-the instant its row is evicted. Reachable past load-on-open only through the explicit
-**load-earlier** control above, which continues the same backward scan — no infinite
-scroll, no silent fetch. A live request reset mid-Run by boot-time truncation gets no extra
-signal; it surfaces as an ordinary *Partial request*, which already reads honestly on its
-own.
+It counts events, not bytes, so a response body weighs the same as a log line. Every
+field is capped at 64 KB, which puts the worst case at the figure times that cap: about
+80 MB at the default, for a session of full JSON responses. Counting bytes would make a
+second figure, so the heavier table is accepted.
 
-Counting events rather than bytes stays true once *Response events* carry bodies. It becomes
-visible there, because a body can weigh as much as two hundred log lines. The bound is still
-a bound: no field is over 64 KB, so the worst case is the figure times that cap, about 80 MB
-for an API-only session where every response is full. A byte-counting bound would be the
-second number this bound exists to refuse, so a heavier fold is accepted by name.
-
-The *Console* is bounded by this too, and by nothing of its own — see that entry. See
-`docs/adr/0003-a-sidecar-jsonl-file-is-the-transport.md` and
+The *Console* has no bound of its own: a line is held exactly as long as its row. See
 `docs/adr/0005-the-memory-bounds-exemptions-and-the-consoles-retention.md`.
+_Avoid_: buffer, cache, limit.
+
+**Load earlier** — the control at the top of the *Activity table* that loads the history
+just before what the Reader holds. Only ever a click: never infinite scroll, never a
+silent fetch. A click reads at least the *Memory bound*'s figure of events back, then
+keeps reading while either is true: stopping would split a request, an *Evaluation* or a
+`rake` task between what is loaded and what is not, or the click has turned up no new row
+at the top of the table yet. Any other *Run row* never holds a click back: a server or a
+worker runs all day, and every click would split it. The Reader opens by the same rule,
+so it never opens on a split it could have avoided. A click stops after reading 64 MB
+even when it would keep going, and leaves whatever it split marked *partial*; the next
+click carries on from there, and a click that turned up no new row says so beside the
+control until the next one. Where nothing is left to read, the control is replaced by
+"Nothing earlier to load".
+_Avoid_: load more, pagination, infinite scroll.
 
 **Trailing event** — an SQL or App log event whose `seq` places it *after* its request's
 `request_finish`, or after its *Evaluation*'s end. Attribution is not in doubt — the `request_id` is right there — only the
@@ -433,9 +427,11 @@ _Avoid_: arrival order, wire order (the wire has no order of its own).
 
 **Activity table** — the middle of the Reader's three columns, one row per thing that
 owns events: a *Request row*, an *Evaluation row* or a *Run row*. A row sits at the append position of the
-earliest Event the Reader observed for it, so a new row is always an append at the bottom
-and never an insert — including a *Partial request*, which has no start to be positioned
-by. Rows mutate in place and never move. Tabs filter by **row kind only** — Requests,
+earliest Event the Reader held when the row opened, so a live row is always an append at the
+bottom and never an insert — including a *Partial request*, which has no start to be
+positioned by — and a *Load earlier* click's rows go in above everything. Rows mutate in
+place and never move: a row a click extends further back stays where it is, under the
+click's own rows even when they started after it. Tabs filter by **row kind only** — Requests,
 Runs, All, each carrying a count, with Evaluation rows under All alone because the *Transcript*
 already lists them — never by method, status or controller, which v1 rules out; a tab that grows one of those is that exclusion returning and must be decided, not
 drifted into.
