@@ -1,6 +1,6 @@
 import { join } from "node:path"
 
-import { LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
+import { eventsKeptFrom, LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
 import { ALLOWED_HOSTS_VARIABLE, readAllowedHosts } from "./allowed-hosts"
 import { APP_NAME_VARIABLE, readAppNameOverride } from "./app-name"
 import { refusal, type RouteKind } from "./gate"
@@ -68,7 +68,7 @@ const appNameOverride = readAppNameOverride(process.env[APP_NAME_VARIABLE])
  * following the file from there. `(run_id, seq)` makes a reconnection free: the browser
  * folds what it already has for a second time and nothing doubles.
  */
-function envelopeStream() {
+function envelopeStream(events: number) {
   let attached: Sidecar | null = null
 
   const envelopes = new ReadableStream<string>({
@@ -92,7 +92,7 @@ function envelopeStream() {
 
       attached = await openSidecar(
         logDirectory,
-        LOAD_ON_OPEN_EVENTS,
+        events,
         (batch) => send(`data: ${JSON.stringify(batch)}\n\n`),
         // Where the load-on-open history this attachment opened on begins — an event of its
         // own, because it is not envelopes and because it is sent again whenever a truncation
@@ -141,7 +141,24 @@ async function earlier(request: Request) {
     return Response.json({ error: "from must be a byte offset into the Sidecar" }, { status: 400 })
   }
 
-  return Response.json(await readEarlier(logDirectory, from, LOAD_ON_OPEN_EVENTS))
+  const events = eventsKeptOf(request)
+  if (events === null) return refusedEventsKept()
+
+  return Response.json(await readEarlier(logDirectory, from, events))
+}
+
+/**
+ * The *Events kept* figure a request names in `events`: the default when it names none, and
+ * `null` when it names anything but one of the choices — a hand-edited URL must not make the
+ * scan read without bound.
+ */
+function eventsKeptOf(request: Request) {
+  const named = new URL(request.url).searchParams.get("events")
+  return named === null ? LOAD_ON_OPEN_EVENTS : eventsKeptFrom(named)
+}
+
+function refusedEventsKept() {
+  return Response.json({ error: "events must be one of the Events kept choices" }, { status: 400 })
 }
 
 /**
@@ -268,8 +285,11 @@ function serveOrSaySo(port: number) {
         // There's no test for this, because Bun's default timeout is 10 s and the test
         // would have to wait that long to fail.
         "/events": view((request, server) => {
+          const events = eventsKeptOf(request)
+          if (events === null) return refusedEventsKept()
+
           server.timeout(request, 0)
-          return envelopeStream()
+          return envelopeStream(events)
         }),
         "/earlier": { GET: view(earlier) },
         "/app-name-override": { GET: view(appNameOverrideRoute) },
