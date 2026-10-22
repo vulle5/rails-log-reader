@@ -214,8 +214,7 @@ export async function openSidecar(
 async function startOfHistory(path: string, end: number, events: number) {
   const handle = await open(path, "r")
   try {
-    const { from } = await scanBack(handle, end, events, EARLIER_BUDGET_BYTES)
-    return from === end ? 0 : from
+    return (await scanBack(handle, end, events, EARLIER_BUDGET_BYTES)).from
   } finally {
     await handle.close()
   }
@@ -447,7 +446,6 @@ async function scanBack(handle: FileHandle, end: number, events: number, budget:
   const headersAhead = new Map<string, { start: number; rake: boolean }>()
   let count = 0
   let from = end
-  let exhausted = false
 
   function take({ start, line }: BackLine) {
     count += 1
@@ -465,7 +463,7 @@ async function scanBack(handle: FileHandle, end: number, events: number, budget:
     return line === undefined ? null : (line as BackLine)
   }
 
-  while (!exhausted) {
+  while (true) {
     if (count < events || owners.any) {
       const line = await next()
       // A ceiling, but never one that stops the scan before it has made any progress.
@@ -492,7 +490,8 @@ async function scanBack(handle: FileHandle, end: number, events: number, budget:
     if (header !== null) headersAhead.set(header.run_id, { start: line.start, rake: header.payload.kind === "rake" })
   }
 
-  return { envelopes: kept.reverse(), from }
+  // No complete line before `end` is no history before it: the top of the file, not `end` again.
+  return { envelopes: kept.reverse(), from: count === 0 ? 0 : from }
 }
 
 function readEnvelopes(lines: Buffer) {

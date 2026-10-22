@@ -276,6 +276,18 @@ describe("load-earlier", () => {
     expect(earlier.from).toBe(0)
   })
 
+  test("has nothing earlier once the Sidecar was truncated to a write still in progress", async () => {
+    const log = await aLogDirectory()
+    await appendFile(sidecarPath(log), '{"v":1,"run_id":"srv-1"')
+
+    const earlier = await readEarlier(log, 4_096, LOAD_ON_OPEN_EVENTS)
+
+    // The offset lies past the file and what is there has no complete line: the same answer
+    // as the top of the file, so a click never gets back the offset it asked from.
+    expect(earlier.envelopes).toEqual([])
+    expect(earlier.from).toBe(0)
+  })
+
   test("asks the Sidecar that is there now, not the one the offset was taken from", async () => {
     const log = await aLogDirectoryThatDoesNotExistYet()
 

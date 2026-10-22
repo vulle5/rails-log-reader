@@ -137,3 +137,15 @@ describe("a click whose later read fails", () => {
     expect(asked()).toEqual([`${OPENED_AT}`, `${OPENED_AT}`])
   })
 })
+
+describe("a click whose read makes no progress", () => {
+  test("stops rather than asking from the same offset again", async () => {
+    earlierAnswers.push(extendsTheRun(OPENED_AT), extendsTheRun(OPENED_AT))
+    const { user } = aReaderWithAHistoryBehindIt()
+
+    await user.click(control())
+    await waitFor(() => expect(control()).toBeEnabled())
+
+    expect(asked()).toEqual([`${OPENED_AT}`])
+  })
+})
