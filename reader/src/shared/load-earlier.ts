@@ -35,6 +35,12 @@ export type LoadedEarlier = {
   opened: number
   /** Whether the history now begins at the top of the file: there is nothing earlier left. */
   reachedStart: boolean
+  /**
+   * A read failed before the click was done. Everything above is still true of the blocks read
+   * before it: they are folded, `from` is where the last of them began, and a retry asks for
+   * what comes before that.
+   */
+  failed: boolean
 }
 
 /**
@@ -42,7 +48,9 @@ export type LoadedEarlier = {
  * everything in it happened before everything the fold holds, so its rows open above them.
  * A block that only extended rows already shown is not a result, so the click reads on from
  * where that block began until a row opens, the top of the file is reached or the budget is
- * spent. The browser's live hook and the Sidecar-to-table test harness both run this, so what
+ * spent. A block that begins no earlier than the one before it has nothing left to give, and
+ * ends the click too. A read that fails ends the click with `failed`, having kept whatever the
+ * reads before it folded. The browser's live hook and the Sidecar-to-table test harness both run this, so what
  * the tests exercise is the click itself.
  */
 export async function loadEarlier({ activity, readBlock, from, events, budget }: LoadEarlierOptions): Promise<LoadedEarlier> {
@@ -50,16 +58,26 @@ export async function loadEarlier({ activity, readBlock, from, events, budget }:
   const evicted: EvictedRow[] = []
   let opened = 0
   let position = from
+  let failed = false
 
   do {
-    const block = await readBlock(position, events, budget - (from - position))
+    let block: Earlier
+    try {
+      block = await readBlock(position, events, budget - (from - position))
+    } catch {
+      failed = true
+      break
+    }
+
     const folded = activity.foldEarlier(block.envelopes)
 
     envelopes.push(...block.envelopes)
     evicted.push(...folded.evicted)
     opened += folded.opened
-    position = block.from
+    const progressed = block.from < position
+    position = Math.min(position, block.from)
+    if (!progressed) break
   } while (opened === 0 && position > 0 && from - position < budget)
 
-  return { from: position, envelopes, evicted, opened, reachedStart: position === 0 }
+  return { from: position, envelopes, evicted, opened, reachedStart: position === 0, failed }
 }

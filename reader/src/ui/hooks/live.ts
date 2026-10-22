@@ -219,7 +219,9 @@ export function useSidecar({ eventsKept, loaded }: Pick<EventsKept, "eventsKept"
     const cursor = from.current
     if (cursor === null || cursor <= 0) return
 
-    setEarlier({ available: true, loading: true, atStart: false, onlyExtended: false })
+    // The standing note is not cleared here: the strip hides it while a click is in flight, and
+    // a click that fails brings it back.
+    setEarlier((current) => ({ ...current, loading: true }))
     try {
       const clicked = await loadEarlierBlock({
         activity,
@@ -247,17 +249,21 @@ export function useSidecar({ eventsKept, loaded }: Pick<EventsKept, "eventsKept"
         // — this is latched exactly as the live stream's is, not only reached from it.
         identity: latchRunIdentity(previous.identity, clicked.envelopes),
       }))
-      setEarlier({
-        available: !clicked.reachedStart,
-        loading: false,
-        atStart: clicked.reachedStart,
-        onlyExtended: clicked.opened === 0 && !clicked.reachedStart,
-      })
-    } catch {
-      // The read failed and the cursor has not moved, so the control stays exactly as it
-      // was: clicking again asks the same question, which is the only useful thing to do
-      // with a file read that did not answer.
-      setEarlier({ available: true, loading: false, atStart: false, onlyExtended: false })
+      // A click that failed part-way has folded and accounted for what it read, and leaves the
+      // strip as it found it: clicking again asks for what comes before that.
+      setEarlier((current) =>
+        clicked.failed
+          ? { ...current, loading: false }
+          : {
+              available: !clicked.reachedStart,
+              loading: false,
+              atStart: clicked.reachedStart,
+              onlyExtended: clicked.opened === 0 && !clicked.reachedStart,
+            },
+      )
+    } catch (failure) {
+      setEarlier((current) => ({ ...current, loading: false }))
+      throw failure
     }
   }
 

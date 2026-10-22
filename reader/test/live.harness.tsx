@@ -1,6 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react"
 import userEvent, { type UserEvent } from "@testing-library/user-event"
 
+import type { Earlier } from "../src/shared/earlier"
 import type { Envelope } from "../src/shared/wire"
 import { aRun } from "./sidecar.fixtures"
 import { useEventsKept } from "../src/ui/hooks/events-kept"
@@ -49,13 +50,22 @@ const real = { EventSource: globalThis.EventSource, fetch: globalThis.fetch }
 /** Every URL the Reader fetched while a sidecar was faked. */
 export const fetched: string[] = []
 
+/**
+ * What the next `/earlier` fetches answer, one entry each and in order: a block, a failure, or
+ * a promise a test settles itself. A fetch with none left answers an empty block at the top.
+ */
+export const earlierAnswers: (Earlier | Error | Promise<Earlier>)[] = []
+
 export function fakeTheSidecar() {
   FakeSidecar.opened = []
   fetched.length = 0
+  earlierAnswers.length = 0
   globalThis.EventSource = FakeSidecar as unknown as typeof EventSource
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     fetched.push(String(input))
-    return new Response(JSON.stringify({ envelopes: [], from: 0 }))
+    const answer = earlierAnswers.shift() ?? { envelopes: [], from: 0 }
+    if (answer instanceof Error) throw answer
+    return new Response(JSON.stringify(await answer))
   }) as typeof fetch
 }
 
@@ -94,7 +104,7 @@ export async function chooseEventsKept(user: UserEvent, figure: string) {
 /** `main.tsx`'s composition of the pieces this seam is about: the chosen figure, the hook, the Reader. */
 function Live() {
   const eventsKept = useEventsKept()
-  const { rows, lines, evictedRows, evictedEvaluations, historyLoaded, earlier, loadEarlier } = useSidecar(eventsKept)
+  const { rows, lines, evictedRows, evictedEvaluations, historyLoaded, earlier, loadEarlier, identity } = useSidecar(eventsKept)
 
   return (
     <Reader
@@ -106,6 +116,7 @@ function Live() {
       onLoadEarlier={loadEarlier}
       historyLoaded={historyLoaded}
       eventsKept={eventsKept}
+      appName={identity?.appName ?? null}
     />
   )
 }
