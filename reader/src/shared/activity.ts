@@ -1,4 +1,3 @@
-import { LOAD_ON_OPEN_EVENTS } from "./bounds"
 import {
   eventIdentity,
   type AppLogEvent,
@@ -42,13 +41,14 @@ export type RequestRow = {
   state: RequestState
   /**
    * A *Partial request*: the Reader does not currently hold this request's start, because it
-   * attached mid-flight or started after the request did. Set when the row is created by
-   * anything other than a `request_start`. Cleared only by a *load-earlier* pull turning up
-   * that same `request_start` — the one thing that changes what the mark records, from "the
-   * Reader never saw this" to "the Reader does not currently hold this." A `request_start`
-   * arriving through the ordinary live fold never clears it: within one append-ordered batch a
-   * child arriving before its own start is not a recovery, it is the wire out of order, and
-   * the events emitted before the Reader attached are exactly as lost as they were.
+   * is no longer in the Sidecar or lies further back than a click reads. Set when the row is
+   * created by anything other than a `request_start`. Cleared only by a *load-earlier* pull
+   * turning up that same `request_start` — the one thing that changes what the mark records,
+   * from "the Reader has not seen this" to "the Reader does not currently hold this." A
+   * `request_start` arriving through the ordinary live fold never clears it: within one
+   * append-ordered batch a child arriving before its own start is not a recovery, it is the
+   * wire out of order, and the events emitted before the Reader attached are exactly as lost
+   * as they were.
    */
   partial: boolean
   /**
@@ -304,6 +304,13 @@ export type EvictedRow = {
 /** *Evaluation rows* the *Memory bound* has taken, by `evaluationId`, each with its console process's pid. */
 export type EvictedEvaluations = ReadonlyMap<string, number | null>
 
+/** What `foldEarlier` did: the rows a block opened above the existing ones, and what that evicted. */
+export type FoldedEarlier = {
+  /** How many rows the block opened. A block that only extended rows already held opens none. */
+  opened: number
+  evicted: readonly EvictedRow[]
+}
+
 export type ActivityTable = {
   /** The same array throughout, mutated in place: rows are appended and never reordered. */
   readonly rows: readonly ActivityRow[]
@@ -324,17 +331,36 @@ export type ActivityTable = {
    */
   fold: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
   /**
+   * Fold the batch the Reader opened on. Like `fold`, except the ceiling is first raised to
+   * everything the fold then holds when that is more than the figure: the open reads past the
+   * figure to complete the requests, *Evaluations* and tasks its cut would have split, and
+   * evicting those rows to get back to the figure would undo the read. They are not exempt
+   * the way a *load-earlier* block is — the next events to arrive evict them as they would
+   * any other rows.
+   */
+  foldOpen: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
+  /**
    * Fold a block of envelopes that sits *before* everything the fold holds: what the
    * *load-earlier* control went and got. The rows it opens go in above the rows already
    * there, because that is where their earliest event sits — which is the same rule the
    * live fold keeps, read from the other end.
    *
-   * Reports evictions the same way `fold` does, for the same reason — ordinarily empty,
-   * because the ceiling rises by exactly what the pull brought in, but not *always* empty:
-   * a pull large enough to give the *last row standing* company can make it evictable again,
-   * and that eviction is exactly as real as one the live fold triggers.
+   * Reports how many rows the block opened, and evictions the same way `fold` does, for the
+   * same reason — ordinarily empty, because the ceiling rises by exactly what the pull brought
+   * in, but not *always* empty: a pull large enough to give the *last row standing* company
+   * can make it evictable again, and that eviction is exactly as real as one the live fold
+   * triggers.
    */
-  foldEarlier: (envelopes: readonly Envelope[]) => readonly EvictedRow[]
+  foldEarlier: (envelopes: readonly Envelope[]) => FoldedEarlier
+  /**
+   * The developer chose another *Events kept* figure. It moves the ceiling's base to `events`
+   * and keeps whatever *Load earlier* clicks added on top of it: a higher figure stops
+   * eviction until the table holds that many, a lower one evicts down to it now, under the
+   * three exemptions every eviction has. Nothing is read: the fold holds what it holds.
+   *
+   * Returns what it evicted, the way `fold` does, so the *Console* lets go of the same rows.
+   */
+  setEventsKept: (events: number) => readonly EvictedRow[]
   /**
    * The console process `pid` exited: the latest `console` Run whose `run_header` carried it
    * ended, as its `run_end` would say, though one killed too hard wrote none. Its in-flight rows
@@ -344,10 +370,10 @@ export type ActivityTable = {
 }
 
 /**
- * The fold, bounded: the *Memory bound* is a ring holding no more events than the Reader
- * opened on — `LOAD_ON_OPEN_EVENTS`, the one number — and evicting the oldest rows once it
- * holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under it,
- * because all five are one retention question rather than five.
+ * The fold, bounded: the *Memory bound* is a ring holding no more events than `events`, the
+ * figure the Reader opened on until `setEventsKept` says another, and evicting the oldest rows
+ * once it holds more. `rows`, `byRequest`, `byRun`, `folded` and `evicted` go together under
+ * it, because all five are one retention question rather than five.
  *
  * Counted in *events* and not in rows, which is what makes it match the figure it is sized
  * by: the fold opens holding exactly the history the backward scan on open delivered, and a
@@ -360,7 +386,7 @@ export type ActivityTable = {
  * unattributed. That is one rule rather than two, and it needs no timer — which is what lets
  * "no timeout, ever" survive a feature about time.
  */
-export function activityTable(): ActivityTable {
+export function activityTable(events: number): ActivityTable {
   const rows: ActivityRow[] = []
   const byRequest = new Map<string, Folding>()
   const byRun = new Map<string, Running>()
@@ -406,7 +432,9 @@ export function activityTable(): ActivityTable {
    * arrive would make the control useless, and there is no traffic that can raise this on
    * its own.
    */
-  let ceiling = LOAD_ON_OPEN_EVENTS
+  let ceiling = events
+  /** The figure `ceiling` is built on: what *Events kept* says now. */
+  let figure = events
   /** How many rows at the front a load-earlier pulled in. Never evicted, for the same reason. */
   let pulled = 0
   /** The load-earlier block being folded, if one is: `null` in the ordinary live fold. */
@@ -687,6 +715,12 @@ export function activityTable(): ActivityTable {
     return evictToBound()
   }
 
+  function foldOpen(envelopes: readonly Envelope[]) {
+    for (const envelope of envelopes) foldOne(envelope)
+    ceiling = Math.max(ceiling, held)
+    return evictToBound()
+  }
+
   /**
    * The same fold, run over a block that precedes everything held: the rows it opens are
    * spliced in above the rows already there, and its events go in front of the timelines
@@ -710,6 +744,12 @@ export function activityTable(): ActivityTable {
     rows.splice(0, 0, ...block.opened.map((owner) => owner.row))
     pulled += block.opened.length
     ceiling += held - heldBefore
+    return { opened: block.opened.length, evicted: evictToBound() }
+  }
+
+  function setEventsKept(next: number) {
+    ceiling += next - figure
+    figure = next
     return evictToBound()
   }
 
@@ -1023,7 +1063,7 @@ export function activityTable(): ActivityTable {
     return folding?.events ?? 0
   }
 
-  return { rows, evictedEvaluations, fold, foldEarlier, consoleExited }
+  return { rows, evictedEvaluations, fold, foldOpen, foldEarlier, setEventsKept, consoleExited }
 }
 
 function isEvaluationEvent(envelope: Envelope): envelope is EvaluationStartEvent | EvaluationFinishEvent {

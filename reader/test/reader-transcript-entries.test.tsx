@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { act, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { EvaluationEntry, Outcome, ReplSnapshot, ReplState, RubyNode, StartedConsole, TranscriptEntry } from "../src/shared/repl"
@@ -8,6 +8,7 @@ import { Reader } from "../src/ui/Reader"
 import {
   activityRows,
   aReplSession,
+  chooseEventsKept,
   column,
   detailPanel,
   detailTab,
@@ -84,6 +85,12 @@ function recorded(run: ReturnType<typeof aRun>, id: number, input: string, sql =
     run.evaluationFinish(recordedAs(id)),
   ]
 }
+
+/**
+ * A test's time limit when it fills the Activity table to the Memory bound: thousands of rows,
+ * which take up to 2 s to render on a quiet machine, and several times that on a busy one.
+ */
+const FILLS_THE_BOUND_MS = 15_000
 
 /** Enough finished requests to push the fold past its ceiling on their own. */
 function traffic(count: number) {
@@ -258,7 +265,36 @@ describe("a Transcript entry's status strip", () => {
 
     expect(within(statusStrip()).getByText("queries cleared to save memory")).toBeInTheDocument()
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
-  })
+  }, FILLS_THE_BOUND_MS)
+
+  test("explains the cleared queries with the Events kept figure, not a fixed one", async () => {
+    localStorage.setItem("rails-log-reader.events-kept", "10000")
+    const { run, header } = consoleRun()
+    await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)], traffic(10_000)], {
+      transcript: [entry({ id: 1, outcome: INTEGER })],
+    })
+    expect(activityRows().some((row) => within(row).queryByText("Post.count") !== null)).toBe(false)
+
+    const cleared = within(statusStrip()).getByText("queries cleared to save memory")
+
+    expect(cleared).toHaveAttribute(
+      "title",
+      "The Reader keeps only its latest 10,000 events, and let go of the queries and log lines this ran as some of the oldest",
+    )
+  }, FILLS_THE_BOUND_MS)
+
+  test("names a figure chosen in Settings at once, without a reload", async () => {
+    const { run, header } = consoleRun()
+    const { user } = await theReader([[header, ...recorded(run, 1, "Post.count", 3, 1)], traffic(LOAD_ON_OPEN_EVENTS)], {
+      transcript: [entry({ id: 1, outcome: INTEGER })],
+    })
+    const cleared = () => within(statusStrip()).getByText("queries cleared to save memory")
+    expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 5,000 events"))
+
+    await chooseEventsKept(user, "25,000")
+
+    expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 25,000 events"))
+  }, FILLS_THE_BOUND_MS)
 
   test("has no row link for an entry with no row", async () => {
     await theReader([[]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
@@ -437,7 +473,7 @@ describe("a Transcript entry's cut", () => {
     })
 
     expect(theEntry()).toHaveTextContent("…5 more lines · show all")
-  })
+  }, FILLS_THE_BOUND_MS)
 
   test("cuts what was printed outside any evaluation, shown in place", async () => {
     const { user } = await theReader([[]], { transcript: [{ kind: "output", id: 1, output: lines(21), outputCut: false }] })

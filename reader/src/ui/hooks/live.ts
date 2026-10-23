@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from "react"
 
 import { activityTable, type ActivityRow, type EvictedEvaluations } from "../../shared/activity"
+import { EARLIER_BUDGET_BYTES } from "../../shared/bounds"
 import { consoleStream, type ConsoleLine } from "../../shared/console"
 import type { Earlier } from "../../shared/earlier"
+import { loadEarlier as loadEarlierBlock } from "../../shared/load-earlier"
 import { latchRunIdentity, type RunIdentity } from "../../shared/run-identity"
 import type { Envelope } from "../../shared/wire"
+import type { EventsKept } from "./events-kept"
+
+async function readEarlierOverHttp(from: number, events: number, budget: number) {
+  const response = await fetch(`/earlier?from=${from}&events=${events}&budget=${budget}`)
+  return (await response.json()) as Earlier
+}
 
 /**
  * What the live wire is saying about itself, apart from the rows folded out of it: the `v`
@@ -23,7 +31,8 @@ export type WireStatus = {
    */
   lines: readonly ConsoleLine[]
   /**
-   * How many rows the *Memory bound* has evicted, ever. Cumulative rather than per-batch, so
+   * How many rows the *Memory bound* has evicted for new events, ever — a lowered *Events kept*
+   * figure's evictions are not arrivals, and are not counted. Cumulative rather than per-batch, so
    * the Activity table's and the Console's own auto-scrolls can each read it as one more thing
    * to watch grow — the signal `arrived` turns into a floor once a paused column's rendered
    * count stalls at the cap. One number for both columns, because it is one bound: the
@@ -55,13 +64,19 @@ export type WireStatus = {
 }
 
 /**
- * Whether the Sidecar holds anything before the history the Reader has, and whether a scan
- * for it is in flight. Lives here rather than with the control it draws, because it is the
- * shape of what this hook knows: the control renders it and nothing more.
+ * Where the history stands, and whether a click is in flight. Lives here rather than with the
+ * control it draws, because it is the shape of what this hook knows: the control renders it
+ * and nothing more.
  */
 export type EarlierState = {
+  /** There is something before the history the Reader has. */
   available: boolean
+  /** A click is reading, every read of it included. */
   loading: boolean
+  /** The history reaches the top of the file. `false` as well while the server has not said. */
+  atStart: boolean
+  /** The last click ran out of budget having only added to rows already shown. */
+  onlyExtended: boolean
 }
 
 /**
@@ -86,8 +101,11 @@ export type EarlierState = {
  * whatever a *load-earlier* went and got — survives it, and so does how far back the
  * developer had asked to see, which the server has no memory of by design.
  */
-export function useSidecar(): WireStatus {
-  const [activity] = useState(activityTable)
+export function useSidecar({ eventsKept, loaded }: Pick<EventsKept, "eventsKept" | "loaded">): WireStatus {
+  // The stream opens with the figure the page loaded with, and keeps it: a change made in
+  // Settings afterwards reaches the fold and every click at once, but what the server reads
+  // on attaching waits for the next reload.
+  const [activity] = useState(() => activityTable(loaded))
   const [stream] = useState(consoleStream)
   const [status, setStatus] = useState<{
     rows: readonly ActivityRow[]
@@ -98,7 +116,7 @@ export function useSidecar(): WireStatus {
     liveRunId: string | null
     identity: RunIdentity
   }>({ rows: [], lines: [], evictedRows: 0, evictedEvaluations: new Map(), liveWireVersion: null, liveRunId: null, identity: null })
-  const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false })
+  const [earlier, setEarlier] = useState<EarlierState>({ available: false, loading: false, atStart: false, onlyExtended: false })
   // Never set back: a reconnection re-reads a history the folds already hold, so what it
   // would be waiting for is already on screen.
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -107,13 +125,19 @@ export function useSidecar(): WireStatus {
    * attached to yet, so there is nothing to be earlier *than*.
    */
   const from = useRef<number | null>(null)
+  /**
+   * Whether the next batch is the one the Reader opened on: the server announces where the
+   * history begins just before it sends that batch, and says it is `loaded` after.
+   */
+  const opening = useRef(false)
 
   useEffect(() => {
-    const sidecar = new EventSource("/events")
+    const sidecar = new EventSource(`/events?events=${loaded}`)
 
     sidecar.onmessage = (message) => {
       const envelopes = JSON.parse(message.data) as Envelope[]
-      const evicted = activity.fold(envelopes)
+      const evicted = opening.current ? activity.foldOpen(envelopes) : activity.fold(envelopes)
+      opening.current = false
       stream.fold(envelopes)
       // The Console's retention borrows from the fold's own eviction: whatever rows this
       // batch's fold just took, the Console lets go of what belonged to them.
@@ -142,7 +166,8 @@ export function useSidecar(): WireStatus {
     sidecar.addEventListener("history", (message) => {
       const history = JSON.parse((message as MessageEvent).data) as { from: number }
       from.current = history.from
-      setEarlier((current) => ({ ...current, available: history.from > 0 }))
+      opening.current = true
+      setEarlier((current) => ({ ...current, available: history.from > 0, atStart: history.from === 0 }))
     })
 
     // The live Run's own `run_header`, when the server's capped backward scan found it
@@ -158,10 +183,32 @@ export function useSidecar(): WireStatus {
 
     // Sent once the history's envelopes have been, which is what makes it the moment an
     // empty fold means an empty Sidecar.
-    sidecar.addEventListener("loaded", () => setHistoryLoaded(true))
+    sidecar.addEventListener("loaded", () => {
+      opening.current = false
+      setHistoryLoaded(true)
+    })
 
     return () => sidecar.close()
-  }, [activity, stream])
+  }, [activity, stream, loaded])
+
+  // The figure last handed to the fold, so an effect re-run for any other reason hands over
+  // nothing.
+  const applied = useRef(loaded)
+  useEffect(() => {
+    if (applied.current === eventsKept) return
+    applied.current = eventsKept
+
+    // Evictions a new figure causes are not arrivals, so `evictedRows` — what the auto-scrolls
+    // read as the bound taking rows for new traffic — does not count them. The Console still
+    // lets go of their lines.
+    stream.evict(activity.setEventsKept(eventsKept))
+    setStatus((previous) => ({
+      ...previous,
+      rows: [...activity.rows],
+      lines: [...stream.lines],
+      evictedEvaluations: new Map(activity.evictedEvaluations),
+    }))
+  }, [activity, stream, eventsKept])
 
   /**
    * One click, one continuation of the backward scan. The cursor goes out and comes back,
@@ -172,18 +219,25 @@ export function useSidecar(): WireStatus {
     const cursor = from.current
     if (cursor === null || cursor <= 0) return
 
-    setEarlier({ available: true, loading: true })
+    // The standing note is not cleared here: the strip hides it while a click is in flight, and
+    // a click that fails brings it back.
+    setEarlier((current) => ({ ...current, loading: true }))
     try {
-      const response = await fetch(`/earlier?from=${cursor}`)
-      const block = (await response.json()) as Earlier
+      const clicked = await loadEarlierBlock({
+        activity,
+        readBlock: readEarlierOverHttp,
+        from: cursor,
+        events: eventsKept,
+        budget: EARLIER_BUDGET_BYTES,
+      })
 
-      from.current = block.from
+      from.current = clicked.from
       // The Activity fold only — the *Console* is append order, and this block belongs before
       // every line it holds rather than after them, so appending it there would put the
       // oldest lines of the session at the bottom of the rail, under the newest. But a pull
       // this large can still evict: it can give the *last row standing* company and make it
       // evictable again, so the Console still has to hear about whatever that takes.
-      const evicted = activity.foldEarlier(block.envelopes)
+      const evicted = clicked.evicted
       stream.evict(evicted)
       setStatus((previous) => ({
         ...previous,
@@ -193,14 +247,23 @@ export function useSidecar(): WireStatus {
         evictedEvaluations: evicted.length === 0 ? previous.evictedEvaluations : new Map(activity.evictedEvaluations),
         // A pull that reaches back far enough can turn up an earlier Run's own `run_header`
         // — this is latched exactly as the live stream's is, not only reached from it.
-        identity: latchRunIdentity(previous.identity, block.envelopes),
+        identity: latchRunIdentity(previous.identity, clicked.envelopes),
       }))
-      setEarlier({ available: block.from > 0, loading: false })
-    } catch {
-      // The read failed and the cursor has not moved, so the control stays exactly as it
-      // was: clicking again asks the same question, which is the only useful thing to do
-      // with a file read that did not answer.
-      setEarlier({ available: true, loading: false })
+      // A click that failed part-way has folded and accounted for what it read, and leaves the
+      // strip as it found it: clicking again asks for what comes before that.
+      setEarlier((current) =>
+        clicked.failed
+          ? { ...current, loading: false }
+          : {
+              available: !clicked.reachedStart,
+              loading: false,
+              atStart: clicked.reachedStart,
+              onlyExtended: clicked.opened === 0 && !clicked.reachedStart,
+            },
+      )
+    } catch (failure) {
+      setEarlier((current) => ({ ...current, loading: false }))
+      throw failure
     }
   }
 

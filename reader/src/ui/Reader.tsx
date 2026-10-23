@@ -39,6 +39,7 @@ import { SearchBox, SearchContext, useSearch } from "./hooks/search"
 import { ThemeSwitch, useTheme } from "./hooks/theme"
 import { COMPLETION_TRIGGER, CompletionTriggerSwitch, useCompletionTrigger } from "./hooks/completion-trigger"
 import { HISTORY_SUGGESTION, HistorySuggestionSwitch, useHistorySuggestion } from "./hooks/history-suggestion"
+import { ChosenEventsKept, EVENTS_KEPT, EVENTS_KEPT_DESCRIPTION, EventsKeptSwitch, useEventsKept, type EventsKept } from "./hooks/events-kept"
 import { EDITOR_SCHEME, EDITOR_SCHEME_EXAMPLE, EditorContext, EditorSchemeField, useEditorScheme } from "./hooks/editor-scheme"
 import { openModifier } from "./lib/platform"
 
@@ -115,11 +116,28 @@ type ReaderProps = {
   railsRoot?: string | null
   /** The *REPL* session, from `useReplSession`: what it holds, and what can be asked of it. */
   repl?: ReplHandle
+  /**
+   * The *Events kept* choice, when the fold behind `rows` has to follow it — the live page
+   * hands the same one to the Sidecar hook. Left unset, `Reader` keeps one of its own.
+   */
+  eventsKept?: EventsKept
 }
 
 const NONE_EVICTED: EvictedEvaluations = new Map()
 
-export function Reader({
+/**
+ * The Reader. It keeps an *Events kept* choice of its own unless the page hands it the one
+ * the Sidecar hook follows, so the choice is read from storage once either way.
+ */
+export function Reader(props: ReaderProps) {
+  return props.eventsKept === undefined ? <ReaderKeepingEvents {...props} /> : <ReaderView {...props} eventsKept={props.eventsKept} />
+}
+
+function ReaderKeepingEvents(props: ReaderProps) {
+  return <ReaderView {...props} eventsKept={useEventsKept()} />
+}
+
+function ReaderView({
   rows = [],
   lines = [],
   evictedRows = 0,
@@ -130,14 +148,15 @@ export function Reader({
   onRepair = () => {},
   onDismissRepair = () => {},
   actsOnlyFrom = null,
-  earlier = { available: false, loading: false },
+  earlier = { available: false, loading: false, atStart: false, onlyExtended: false },
   onLoadEarlier = () => {},
   historyLoaded = true,
   emptyState = null,
   appName = null,
   railsRoot = null,
   repl = DETACHED_REPL,
-}: ReaderProps) {
+  eventsKept,
+}: ReaderProps & { eventsKept: EventsKept }) {
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
   // it named, and shows the placeholder again if that row is ever no longer there.
@@ -362,161 +381,166 @@ export function Reader({
             >
               <HistorySuggestionSwitch on={historySuggestion.on} onChoose={historySuggestion.choose} />
             </Setting>
+            <Setting label={EVENTS_KEPT} description={EVENTS_KEPT_DESCRIPTION}>
+              <EventsKeptSwitch eventsKept={eventsKept.eventsKept} onChoose={eventsKept.choose} />
+            </Setting>
           </Settings>
         </div>
       </header>
       <SearchContext value={search}>
         <EditorContext value={editor}>
-          {/* The size the columns, the drawer and their gaps share, and the backdrop they float
-              on. A window too small for the grid's `minWidth` or `minHeight` scrolls the grid in
-              here rather than drawing a column or the drawer under its minimum. */}
-          <div className="min-h-0 flex-auto overflow-auto bg-sunken" ref={viewport}>
-            {/* The outer two column tracks are the widths the Column dividers set, or the
-                Collapsed Console's strip in place of the Console's, so a column that fills
-                scrolls inside its own track and never widens, narrows or displaces its neighbours;
-                the Activity table takes the rest. Between each two is a divider's track, and
-                `p-1` is the gap around all three — the `GAP`s the widths are fitted around.
+          <ChosenEventsKept value={eventsKept.eventsKept}>
+            {/* The size the columns, the drawer and their gaps share, and the backdrop they float
+                on. A window too small for the grid's `minWidth` or `minHeight` scrolls the grid in
+                here rather than drawing a column or the drawer under its minimum. */}
+            <div className="min-h-0 flex-auto overflow-auto bg-sunken" ref={viewport}>
+              {/* The outer two column tracks are the widths the Column dividers set, or the
+                  Collapsed Console's strip in place of the Console's, so a column that fills
+                  scrolls inside its own track and never widens, narrows or displaces its neighbours;
+                  the Activity table takes the rest. Between each two is a divider's track, and
+                  `p-1` is the gap around all three — the `GAP`s the widths are fitted around.
 
-                The rows are the columns', the REPL drawer's top edge, and the drawer, which spans
-                the Console's and the Activity table's tracks while the Detail column and its
-                divider span all three rows. The columns' row has its minimum pinned to 0 because
-                an `auto` row grows to the tallest column and never shrinks to fit, which would
-                hand the scroll to the window instead of to each column. Relative, for Hover
-                grouping's overlay. */}
-            <div
-              className="relative grid h-full overflow-hidden p-1"
-              style={{
-                gridTemplateColumns: widths.template,
-                gridTemplateRows: drawer.template,
-                minWidth: `${widths.minWidth}px`,
-                minHeight: `${drawer.minHeight}px`,
-              }}
-              ref={reader}
-            >
-              {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
-                  the lines themselves are all held up here and open exactly as they were. Search
-                  never unfolds it. */}
-              {widths.console.collapsed ? (
-                <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
-              ) : (
-                <Column
-                  place="console"
+                  The rows are the columns', the REPL drawer's top edge, and the drawer, which spans
+                  the Console's and the Activity table's tracks while the Detail column and its
+                  divider span all three rows. The columns' row has its minimum pinned to 0 because
+                  an `auto` row grows to the tallest column and never shrinks to fit, which would
+                  hand the scroll to the window instead of to each column. Relative, for Hover
+                  grouping's overlay. */}
+              <div
+                className="relative grid h-full overflow-hidden p-1"
+                style={{
+                  gridTemplateColumns: widths.template,
+                  gridTemplateRows: drawer.template,
+                  minWidth: `${widths.minWidth}px`,
+                  minHeight: `${drawer.minHeight}px`,
+                }}
+                ref={reader}
+              >
+                {/* Folded, the Console renders none of its lines, but its chips, its auto-scroll and
+                    the lines themselves are all held up here and open exactly as they were. Search
+                    never unfolds it. */}
+                {widths.console.collapsed ? (
+                  <CollapsedConsole unseen={unseen} onExpand={widths.console.expand} />
+                ) : (
+                  <Column
+                    place="console"
+                    name="Console"
+                    scroll={consoleScroll}
+                    controls={
+                      <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+                    }
+                    action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
+                  >
+                    <ConsoleRail
+                      lines={showingLines}
+                      pinned={pinned?.owner ?? null}
+                      hovered={hovered?.owner ?? null}
+                      onHover={setHovered}
+                      onPick={pick}
+                    />
+                  </Column>
+                )}
+                {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
+                <ColumnDivider
                   name="Console"
-                  scroll={consoleScroll}
+                  edge="right"
+                  size={widths.console.width}
+                  column={widths.console}
+                  folds={{
+                    folded: widths.console.collapsed,
+                    fold: widths.console.collapse,
+                    unfold: widths.console.expand,
+                    foldedSize: COLLAPSED,
+                  }}
+                />
+                <Column
+                  place="activity"
+                  name="Activity table"
+                  scroll={activityScroll}
                   controls={
-                    <ConsoleFilters filter={filter} onToggleLevel={toggleLevel} onToggleRails={toggleRails} />
+                    <div className="flex items-center gap-2">
+                      <RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />
+                      <TableColumnSelect hidden={tableColumns.hidden} onToggle={tableColumns.toggle} />
+                    </div>
                   }
-                  action={<CollapseConsoleButton onCollapse={widths.console.collapse} />}
                 >
-                  <ConsoleRail
-                    lines={showingLines}
+                  <LoadEarlier state={earlier} hasRows={rows.length > 0} onLoad={onLoadEarlier} />
+                  <ActivityTable
+                    rows={showingRows}
+                    selected={selected}
                     pinned={pinned?.owner ?? null}
-                    hovered={hovered?.owner ?? null}
-                    onHover={setHovered}
-                    onPick={pick}
+                    lit={hovered?.owner ?? null}
+                    onSelect={selectRow}
+                    hidden={tableColumns.hidden}
+                  />
+                  {/* Under the headings rather than in place of the table, so the first row of the
+                      session replaces this and moves nothing else. Empty means the Reader holds no
+                      rows — not that a tab is showing none of the ones it holds. */}
+                  {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
+                </Column>
+                <ColumnDivider
+                  name="Detail column"
+                  edge="left"
+                  size={widths.detail.width}
+                  column={widths.detail}
+                  className="row-span-3"
+                />
+                <Column
+                  place="detail"
+                  name="Detail column"
+                  scroll={detailScroll}
+                  bodyScrolls={false}
+                  className="row-span-3"
+                  controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
+                >
+                  <DetailColumn
+                    row={showing}
+                    filter={detailFilter}
+                    railsRoot={railsRoot}
+                    tab={detailTab}
+                    onTab={setDetailTab}
+                    scroll={detailScroll}
+                    repl={repl}
+                    actsOnlyFrom={actsOnlyFrom}
+                    onShowInRepl={showInRepl}
                   />
                 </Column>
-              )}
-              {/* Outside the fold, so a drag that folds the Console carries on over the strip. */}
-              <ColumnDivider
-                name="Console"
-                edge="right"
-                size={widths.console.width}
-                column={widths.console}
-                folds={{
-                  folded: widths.console.collapsed,
-                  fold: widths.console.collapse,
-                  unfold: widths.console.expand,
-                  foldedSize: COLLAPSED,
-                }}
-              />
-              <Column
-                place="activity"
-                name="Activity table"
-                scroll={activityScroll}
-                controls={
-                  <div className="flex items-center gap-2">
-                    <RowKindTabs rows={rows} showing={showingKind} onShow={setShowingKind} />
-                    <TableColumnSelect hidden={tableColumns.hidden} onToggle={tableColumns.toggle} />
-                  </div>
-                }
-              >
-                <LoadEarlier state={earlier} onLoad={onLoadEarlier} />
-                <ActivityTable
-                  rows={showingRows}
-                  selected={selected}
-                  pinned={pinned?.owner ?? null}
-                  lit={hovered?.owner ?? null}
-                  onSelect={selectRow}
-                  hidden={tableColumns.hidden}
+                {/* Outside the drawer, so a drag that folds it carries on over its header. */}
+                <ColumnDivider
+                  name="REPL"
+                  edge="top"
+                  size={drawer.height}
+                  column={drawer}
+                  folds={{ ...drawer, foldedSize: FOLDED }}
+                  className="col-span-3 row-start-2"
                 />
-                {/* Under the headings rather than in place of the table, so the first row of the
-                    session replaces this and moves nothing else. Empty means the Reader holds no
-                    rows — not that a tab is showing none of the ones it holds. */}
-                {rows.length === 0 && emptyState !== null && <EmptyReader state={emptyState} />}
-              </Column>
-              <ColumnDivider
-                name="Detail column"
-                edge="left"
-                size={widths.detail.width}
-                column={widths.detail}
-                className="row-span-3"
-              />
-              <Column
-                place="detail"
-                name="Detail column"
-                scroll={detailScroll}
-                bodyScrolls={false}
-                className="row-span-3"
-                controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
-              >
-                <DetailColumn
-                  row={showing}
-                  filter={detailFilter}
-                  railsRoot={railsRoot}
-                  tab={detailTab}
-                  onTab={setDetailTab}
-                  scroll={detailScroll}
+                <ReplDrawer
+                  folded={drawer.folded}
+                  onFold={drawer.fold}
+                  onUnfold={drawer.unfold}
                   repl={repl}
+                  railsRoot={railsRoot}
                   actsOnlyFrom={actsOnlyFrom}
-                  onShowInRepl={showInRepl}
+                  completionTrigger={completionTrigger.trigger}
+                  historySuggestion={historySuggestion.on}
+                  reveal={reveal}
+                  onRevealed={revealed}
+                  entryRows={transcriptRows}
+                  onShowRow={showRow}
+                  className="col-span-3 row-start-3"
                 />
-              </Column>
-              {/* Outside the drawer, so a drag that folds it carries on over its header. */}
-              <ColumnDivider
-                name="REPL"
-                edge="top"
-                size={drawer.height}
-                column={drawer}
-                folds={{ ...drawer, foldedSize: FOLDED }}
-                className="col-span-3 row-start-2"
-              />
-              <ReplDrawer
-                folded={drawer.folded}
-                onFold={drawer.fold}
-                onUnfold={drawer.unfold}
-                repl={repl}
-                railsRoot={railsRoot}
-                actsOnlyFrom={actsOnlyFrom}
-                completionTrigger={completionTrigger.trigger}
-                historySuggestion={historySuggestion.on}
-                reveal={reveal}
-                onRevealed={revealed}
-                entryRows={transcriptRows}
-                onShowRow={showRow}
-                className="col-span-3 row-start-3"
-              />
-              {/* Over all three, because the rule belongs to none of them: it leaves the Console's
-                  gutter and lands on a row in the table beside it. `layoutKey` is everything that
-                  could have moved an end without changing which two ends they are. */}
-              <HoverGrouping
-                reader={reader}
-                line={drawnFrom?.id ?? null}
-                row={drawnFrom?.owner ?? null}
-                layoutKey={`${widths.template} ${drawer.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
-              />
+                {/* Over all three, because the rule belongs to none of them: it leaves the Console's
+                    gutter and lands on a row in the table beside it. `layoutKey` is everything that
+                    could have moved an end without changing which two ends they are. */}
+                <HoverGrouping
+                  reader={reader}
+                  line={drawnFrom?.id ?? null}
+                  row={drawnFrom?.owner ?? null}
+                  layoutKey={`${widths.template} ${drawer.template} ${showingKind} ${showingRows.length} ${showingLines.length}`}
+                />
+              </div>
             </div>
-          </div>
+          </ChosenEventsKept>
         </EditorContext>
       </SearchContext>
     </div>

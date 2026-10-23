@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { ComponentProps } from "react"
 import { screen, within } from "@testing-library/react"
 
 import { aRun } from "./sidecar.fixtures"
@@ -244,6 +245,14 @@ describe("what a row says it is", () => {
     expect(within(cellUnder(firstRow(), "Started")).getByText("partial")).toBeInTheDocument()
     expect(cells()[1]).toBe("200")
     expect(cells()[9]).toBe("13ms")
+  })
+
+  test("explains a Partial request as one whose start the Reader does not hold", () => {
+    const run = aRun("srv-1")
+    theActivityTable(run.sql("req-1"))
+
+    const mark = within(cellUnder(firstRow(), "Started")).getByText("partial")
+    expect(mark).toHaveAccessibleDescription("The Reader does not hold this request's start")
   })
 
   // #62: the last row standing, over the Memory bound's usual ceiling because taking it too
@@ -552,31 +561,45 @@ describe("the row-kind tabs", () => {
 })
 
 /**
- * The *load-earlier* control. Reaching further back is a thing the developer asks for, so
- * what is tested here is the asking: that there is a control to click when there is
- * something to go and get, that clicking it says so once, and that it is gone rather than
- * dead when the scan has reached the top of the Sidecar.
+ * The *load-earlier* strip. Reaching further back is a thing the developer asks for, so what
+ * is tested here is the asking and the answer: a button while there is more to read, a note
+ * beside it when a click found nothing new, and a plain statement once the top of the file
+ * is reached.
  */
 describe("load-earlier", () => {
-  function theReaderReaching(earlier: { available: boolean; loading: boolean }, onLoadEarlier = () => {}) {
-    return openTheReader([], { earlier, onLoadEarlier })
+  type Earlier = NonNullable<ComponentProps<typeof Reader>["earlier"]>
+  const MORE: Earlier = { available: true, loading: false, atStart: false, onlyExtended: false }
+  const AT_THE_TOP: Earlier = { available: false, loading: false, atStart: true, onlyExtended: false }
+  const NOT_HERE_YET: Earlier = { available: false, loading: false, atStart: false, onlyExtended: false }
+
+  function aTableWithARow() {
+    const run = aRun("srv-1")
+    return [run.start("req-1"), run.finish("req-1")]
+  }
+
+  function theReaderReaching(earlier: Earlier, onLoadEarlier = () => {}, envelopes: Envelope[] = aTableWithARow()) {
+    return openTheReader(envelopes, { earlier, onLoadEarlier })
   }
 
   function control() {
     return within(column("Activity table")).queryByRole("button", { name: /earlier/ })
   }
 
-  test("offers the control above the oldest row, where what it gets will appear", () => {
-    theReaderReaching({ available: true, loading: false })
+  function strip() {
+    return within(column("Activity table"))
+  }
 
-    const table = within(column("Activity table")).getByRole("grid")
+  test("offers the control above the oldest row, where what it gets will appear", () => {
+    theReaderReaching(MORE)
+
+    const table = strip().getByRole("grid")
     expect(control()).toHaveTextContent(/^Load earlier$/)
     expect(control()!.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   test("asks once per click, and says the scan is running while it is", async () => {
     let asked = 0
-    const { user, unmount } = theReaderReaching({ available: true, loading: false }, () => {
+    const { user, unmount } = theReaderReaching(MORE, () => {
       asked += 1
     })
 
@@ -585,14 +608,52 @@ describe("load-earlier", () => {
     expect(asked).toBe(1)
 
     unmount()
-    theReaderReaching({ available: true, loading: true })
+    theReaderReaching({ ...MORE, loading: true })
     expect(control()).toHaveTextContent(/^Loading earlier…$/)
     expect(control()).toBeDisabled()
   })
 
-  test("is absent, rather than dead, once the scan has reached the top of the Sidecar", () => {
-    theReaderReaching({ available: false, loading: false })
+  test("says why nothing new appeared beside the button, which keeps its title", () => {
+    theReaderReaching({ ...MORE, onlyExtended: true })
+
+    expect(strip().getByText("Only added to rows already shown")).toBeInTheDocument()
+    expect(control()).toHaveAccessibleName("Load earlier")
+  })
+
+  test("shows no note on a strip that has none to give", () => {
+    theReaderReaching(MORE)
+
+    expect(strip().queryByText("Only added to rows already shown")).not.toBeInTheDocument()
+  })
+
+  test("clears the note as the next click starts", () => {
+    const { rerender, fold } = theReaderReaching({ ...MORE, onlyExtended: true })
+    expect(strip().getByText("Only added to rows already shown")).toBeInTheDocument()
+
+    rerender(<Reader {...fold.props} earlier={{ ...MORE, loading: true }} />)
+
+    expect(strip().queryByText("Only added to rows already shown")).not.toBeInTheDocument()
+    expect(control()).toHaveTextContent(/^Loading earlier…$/)
+  })
+
+  test("replaces the control with a plain statement at the top of the file", () => {
+    theReaderReaching(AT_THE_TOP)
 
     expect(control()).not.toBeInTheDocument()
+    expect(strip().getByText("Nothing earlier to load")).toBeInTheDocument()
+  })
+
+  test("says nothing at the top of the file while the table is empty, for the Empty state to speak", () => {
+    theReaderReaching(AT_THE_TOP, () => {}, [])
+
+    expect(control()).not.toBeInTheDocument()
+    expect(strip().queryByText("Nothing earlier to load")).not.toBeInTheDocument()
+  })
+
+  test("shows neither before the history has arrived", () => {
+    theReaderReaching(NOT_HERE_YET)
+
+    expect(control()).not.toBeInTheDocument()
+    expect(strip().queryByText("Nothing earlier to load")).not.toBeInTheDocument()
   })
 })

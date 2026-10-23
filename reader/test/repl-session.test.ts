@@ -67,9 +67,9 @@ function listen(session: ReplSession) {
     },
     /** The snapshot, once `holds` is true of it. */
     async until(holds: (snapshot: ReplSnapshot) => boolean) {
-      const deadline = Date.now() + 5_000
+      const deadline = performance.now() + 5_000
       while (snapshot === null || !holds(snapshot)) {
-        if (Date.now() > deadline) throw new Error(`gave up waiting, at ${JSON.stringify(snapshot)}`)
+        if (performance.now() > deadline) throw new Error(`gave up waiting, at ${JSON.stringify(snapshot)}`)
         await Bun.sleep(10)
       }
       return snapshot

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
@@ -205,9 +205,10 @@ describe("each setting's description", () => {
   }
 
   test("is Ctrl-worded off macOS, and absent for the Theme", async () => {
-    const [theme, scheme, completion, suggestion, ...others] = await settingsOn("Linux x86_64")
+    const [theme, scheme, completion, suggestion, eventsKept, ...others] = await settingsOn("Linux x86_64")
 
     expect(others).toEqual([])
+    expect(eventsKept).toHaveAccessibleName("Events kept")
     expect(theme).toHaveAccessibleName("Theme")
     expect(completion).toHaveAccessibleName("Completion popover")
     expect(suggestion).toHaveAccessibleName("History suggestion")
@@ -326,5 +327,74 @@ describe("the History suggestion setting", () => {
     const { user } = openTheReader()
 
     expect(suggestionButtons(await openSettings(user)).on).toHaveAttribute("aria-pressed", "true")
+  })
+})
+
+const EVENTS_KEPT_KEY = "rails-log-reader.events-kept"
+
+function eventsKeptGroup(dialog: HTMLElement) {
+  return within(dialog).getByRole("group", { name: "Events kept" })
+}
+
+/** Exactly `figure` of the four is pressed. */
+function expectOnlyPressed(dialog: HTMLElement, figure: string) {
+  for (const button of within(eventsKeptGroup(dialog)).getAllByRole("button")) {
+    expect(button).toHaveAttribute("aria-pressed", String(button.textContent === figure))
+  }
+}
+
+describe("the Events kept setting", () => {
+  afterEach(() => localStorage.removeItem(EVENTS_KEPT_KEY))
+
+  test("offers 5,000, 10,000, 25,000 and 50,000 as pressed-state buttons, with 5,000 pressed until set", async () => {
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
+
+    const buttons = within(eventsKeptGroup(dialog)).getAllByRole("button")
+
+    expect(buttons.map((button) => button.textContent)).toEqual(["5,000", "10,000", "25,000", "50,000"])
+    expectOnlyPressed(dialog, "5,000")
+    expect(localStorage.getItem(EVENTS_KEPT_KEY)).toBeNull()
+  })
+
+  test("is described by what it governs, what it costs and when a change takes effect", async () => {
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
+
+    const setting = within(dialog).getByRole("listitem", { name: "Events kept" })
+
+    expect(setting).toHaveAccessibleDescription(
+      "How many events the Reader loads when it opens and keeps as new ones arrive. Each Load earlier click loads at least this many more. More uses more memory. A reload loads the new amount.",
+    )
+  })
+
+  test("presses the chosen figure and stores it", async () => {
+    const { user } = openTheReader()
+    const dialog = await openSettings(user)
+
+    await user.click(within(eventsKeptGroup(dialog)).getByRole("button", { name: "25,000" }))
+
+    expectOnlyPressed(dialog, "25,000")
+    expect(localStorage.getItem(EVENTS_KEPT_KEY)).toBe("25000")
+  })
+
+  test("is still chosen on the next page load", async () => {
+    const { user, unmount } = openTheReader()
+    await user.click(within(eventsKeptGroup(await openSettings(user))).getByRole("button", { name: "50,000" }))
+
+    unmount()
+    const { user: next } = openTheReader()
+
+    expectOnlyPressed(await openSettings(next), "50,000")
+  })
+
+  test("reads a stored value that is not one of the four as 5,000", async () => {
+    for (const stored of ["7500", "100000", "lots", "", "5000.0"]) {
+      localStorage.setItem(EVENTS_KEPT_KEY, stored)
+      const { user, unmount } = openTheReader()
+
+      expectOnlyPressed(await openSettings(user), "5,000")
+      unmount()
+    }
   })
 })
