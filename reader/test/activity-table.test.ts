@@ -84,8 +84,6 @@ async function theReaderReads(logDirectory: string, events = LOAD_ON_OPEN_EVENTS
     },
   )
   opened.push(sidecar)
-  // An attachment that opened on nothing leaves nothing of the open for the next batch to be.
-  opening = false
 
   // The click itself is the module the browser's live hook calls, over the server's scan
   // rather than over `fetch`: this seam tests the real click, not a copy of it.
@@ -1319,6 +1317,22 @@ describe("the Memory bound", () => {
     // Collectively over the ceiling before eviction, but no single one of these small rows
     // ever is, and more than one is left standing: none carries the last-row-standing mark.
     expect(reader.rows.every((candidate) => !candidate.overBound)).toBe(true)
+  })
+
+  // The window the directory watcher can land in: `appendFile` has created the Sidecar but
+  // not yet written to it. The attachment opened on nothing, so the burst that follows is
+  // live, and the open's raised ceiling must not be taken for it.
+  test("still bounds a burst that arrives after the Reader attached to an empty Sidecar", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    const reader = await theReaderReads(log)
+    await appendToSidecar(log)
+    await reader.caughtUp()
+
+    await appendToSidecar(log, ...finishedRequests(run, LOAD_ON_OPEN_EVENTS / 2 + 10))
+    await reader.caughtUp()
+
+    expect(reader.rows).toHaveLength(LOAD_ON_OPEN_EVENTS / 2)
   })
 
   // #63: the fold's own report of what it let go of, which is what lets the *Console* drop

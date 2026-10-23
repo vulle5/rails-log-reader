@@ -55,6 +55,10 @@ export async function openSidecar(
   /** How many events the load-on-open history reads at least. */
   events: number,
   onEnvelopes: (envelopes: Envelope[]) => void,
+  /**
+   * Where the history an attachment opened on begins. The next `onEnvelopes` call is always
+   * that history, even when it is empty.
+   */
   onHistoryStart: (from: number) => void,
   /**
    * The live Run's own `run_header`, when `startOfHistory`'s window opened past it — a
@@ -130,39 +134,46 @@ export async function openSidecar(
       attached = true
     }
 
-    if (sidecar.size <= offset) return
-
     const historyStart = offset
+    const envelopes = sidecar.size > offset ? await readOn(sidecar.size) : []
 
+    // An attachment always delivers the batch it opened on, even an empty one: whoever is
+    // listening takes the batch after `onHistoryStart` for the open. Without it, an
+    // attachment to a Sidecar created but not yet written to would leave the next live batch
+    // to be taken for the open.
+    if (attached || envelopes.length > 0) onEnvelopes(envelopes)
+
+    // Only on the attachment this tick just opened, and only when it opened past the top
+    // of the file: an ordinary catch-up tick that finds no header is not missing anything,
+    // it just has not been appended yet. The live Run is whichever wrote the most recent
+    // envelope in the window — a concurrent Run's own header sitting in the same window
+    // (`rails s` beside `rails c`) answers a different question and does not stand in for
+    // the live Run's own, so this checks for that `run_id` specifically rather than for
+    // any `run_header` at all.
+    const lastEnvelope = envelopes.at(-1)
+    const liveRunId = lastEnvelope?.run_id
+    if (attached && historyStart > 0 && liveRunId !== undefined && !envelopes.some((e) => isRunHeader(e) && e.run_id === liveRunId)) {
+      void findLiveRunHeader(path, sidecar.ino, liveRunId, historyStart).then((header) => {
+        if (header !== null) onRunHeader(header)
+      })
+    }
+  }
+
+  /** The whole lines from `offset` up to `end`, moving `offset` past them. */
+  async function readOn(end: number) {
     const handle = await open(path, "r")
     try {
       // One allocation for everything appended since the last read, bounded by the Sidecar's
       // 64 MB cap on the file itself. Behaviour under volume — backpressure, a drop policy —
       // is out of scope for v1 and open on the map.
-      const span = Buffer.alloc(sidecar.size - offset)
+      const span = Buffer.alloc(end - offset)
       const { bytesRead } = await handle.read(span, 0, span.length, offset)
       const complete = span.subarray(0, bytesRead).lastIndexOf(NEWLINE)
       // A line without its newline is a write still in progress; it is read next time whole.
-      if (complete === -1) return
+      if (complete === -1) return []
 
-      const envelopes = readEnvelopes(span.subarray(0, complete + 1))
       offset += complete + 1
-      if (envelopes.length > 0) onEnvelopes(envelopes)
-
-      // Only on the attachment this tick just opened, and only when it opened past the top
-      // of the file: an ordinary catch-up tick that finds no header is not missing anything,
-      // it just has not been appended yet. The live Run is whichever wrote the most recent
-      // envelope in the window — a concurrent Run's own header sitting in the same window
-      // (`rails s` beside `rails c`) answers a different question and does not stand in for
-      // the live Run's own, so this checks for that `run_id` specifically rather than for
-      // any `run_header` at all.
-      const lastEnvelope = envelopes.at(-1)
-      const liveRunId = lastEnvelope?.run_id
-      if (attached && historyStart > 0 && liveRunId !== undefined && !envelopes.some((e) => isRunHeader(e) && e.run_id === liveRunId)) {
-        void findLiveRunHeader(path, sidecar.ino, liveRunId, historyStart).then((header) => {
-          if (header !== null) onRunHeader(header)
-        })
-      }
+      return readEnvelopes(span.subarray(0, complete + 1))
     } finally {
       await handle.close()
     }

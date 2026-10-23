@@ -39,6 +39,8 @@ afterEach(async () => {
 
 async function theReaderReads(logDirectory: string) {
   const delivered: Envelope[] = []
+  // Each `onEnvelopes` call as it came, for a test about where one batch ends and the next begins.
+  const batches: Envelope[][] = []
   const runHeaders: RunHeaderEnvelope[] = []
   // Where the history the Reader was given begins, as the Sidecar announces it: the offset a
   // load-earlier continues the backward scan from, kept here exactly as the browser keeps it.
@@ -46,14 +48,17 @@ async function theReaderReads(logDirectory: string) {
   const sidecar = await openSidecar(
     logDirectory,
     LOAD_ON_OPEN_EVENTS,
-    (envelopes) => delivered.push(...envelopes),
+    (envelopes) => {
+      delivered.push(...envelopes)
+      batches.push(envelopes)
+    },
     (from) => {
       historyStart = from
     },
     (header) => runHeaders.push(header),
   )
   opened.push(sidecar)
-  return { delivered, runHeaders, caughtUp: () => sidecar.catchUp(), historyStart: () => historyStart }
+  return { delivered, batches, runHeaders, caughtUp: () => sidecar.catchUp(), historyStart: () => historyStart }
 }
 
 describe("watching the log directory", () => {
@@ -147,6 +152,21 @@ describe("the offset", () => {
 
     expect(reader.delivered).toHaveLength(1)
     expect(reader.delivered[0]?.type).toBe("request_start")
+  })
+
+  // The browser takes the batch after a history announcement for the one the Reader opened
+  // on. Were an attachment to an empty Sidecar to send none, the next live batch would be
+  // taken for it instead.
+  test("delivers the batch an attachment opened on, empty when it opened on nothing", async () => {
+    const log = await aLogDirectory()
+    const run = aRun("srv-1")
+    await appendToSidecar(log)
+    const reader = await theReaderReads(log)
+
+    await appendToSidecar(log, run.start("req-1"))
+    await reader.caughtUp()
+
+    expect(reader.batches.map((batch) => batch.map((envelope) => envelope.type))).toEqual([[], ["request_start"]])
   })
 
   test("opens on roughly the last 5,000 events, scanned backwards from the end", async () => {
