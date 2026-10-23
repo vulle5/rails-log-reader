@@ -21,52 +21,74 @@ It was a real race, not a flaky test.
   bounds a burst that arrives after the Reader attached to an empty Sidecar" (fails about 60%
   of runs without the fix).
 
-## Still open: the REPL timing tests
+## Diagnosed, to confirm on WSL2: the REPL timing tests
 
-The feature's agents reported intermittent failures that passed on re-run, in
-`repl-session`, `reader-repl`, `reader-repl-history`, and once a status-strip test in
-`reader-transcript-entries`. No cause found yet.
+The failures were seen on Windows under WSL2. They don't reproduce on macOS: 0 failures in 32
+runs of `repl-session.test.ts` at 8 runs in parallel. Two causes were found.
 
-### What was observed
+### 1. A wall-clock jump ends `until` early (`repl-session`)
 
-1. **Quiet machine, full `bun test`:** 1 failure in 8 runs, `the REPL session > boots
-   bin/rails console with the eval loop on the first attachment that asks, and says booting,
-   then ready`. One other one-off failure: `the REPL session's multi-line check > checks a
-   complete input as complete, and one with an open block as incomplete`. The error output
-   of neither was captured.
-2. **Under CPU contention:** the four files run as 4 parallel `bun test` runs, 3 rounds, on 20
-   cores. Round one had 2 failures, both `the REPL session's console process ending > closes
-   its stdin, then sends it SIGTERM, when the session closes` (`reader/test/repl-session.test.ts`,
-   near line 409). Two errors were printed: `gave up waiting, at
-   {"state":{"kind":"booting"},"sandbox":false,"capabilities":[],"transcript":[],"consoles":[]}`.
-   That is the 5 s deadline in `listen().until` near the top of the same file.
-   - **Inconsistent:** bun reported that test at about 12.6 ms, which does not fit a 5 s
-     wait. The `gave up waiting` error may belong to a different test, or a session may be
-     leaking across tests. Not checked.
-3. **Rerun with full output saved:** 0 failures in 12 more runs. The rate is low and depends
-   on load.
+`until` in `reader/test/repl-session.test.ts` took its 5 s deadline from `Date.now()`. WSL2's
+wall clock can jump forward when Hyper-V resyncs it. A jump of more than 5 s makes `until` give
+up on its first check. This fits every oddity in the earlier observations:
 
-### Leads, none investigated yet
+- The failing test ran for about 12.6 ms but reported a 5 s `gave up waiting`.
+- The snapshot was `booting` with an empty Transcript: the stub had not even printed its boot
+  line yet.
+- Two parallel runs failed the same test in the same round, which a system-wide jump explains.
+- The one-off quiet-machine failures (`boots bin/rails console…` and the multi-line check) also
+  wait through `until`.
 
-- `afterEach` in `repl-session.test.ts` calls `session.close()` without waiting for the
-  console process to exit, then removes the root. A console from one test may still be
-  running, or still writing `log/stub-console.log`, when the next test starts.
-- `reader/test/stub-console.ts`:
-  - The SIGTERM handler waits up to 100 ms for stdin `end` before noting `SIGTERM`.
-  - The `channel.on("end")` handler exits after 100 ms.
-  - Under load, either timer could reorder `["stdin closed", "SIGTERM"]` or end the process
-    before it notes anything.
-- `reader/test/repl.fixtures.ts`: `bin/rails` is a shell script that `exec`s bun on the
-  stub. Starting a bun process is slow under contention, so check for any wait that is
-  shorter than a slow boot.
-- `reader/src/server/repl-session.ts`: how `close()`, and the order of stdin close and
-  SIGTERM, interact with a console that is still booting.
+The WSL2 machine is known to drift. An AI harness on it has reported a session as already 4 s
+old just after it started. That's the same fault: the VM's wall clock drifts from Windows', and
+something steps it back. Hyper-V time sync does this, and so does WSL resuming after sleep. The
+4 s seen there is just under the 5 s that `until` allows, and a resume after sleep can step it
+further.
+
+To reproduce on macOS, use a preload that moves `Date.now()` forward 6 s, 20 ms in. It fails
+`closes its stdin, then sends it SIGTERM…` with exactly that error and snapshot, in 26 ms.
+
+**Fix:** `until`, and the two deadline loops in `reader-command.test.ts`, use the monotonic
+`performance.now()`. The UI tests (`reader-repl`, `reader-repl-history`,
+`reader-transcript-entries`) pass with `Date.now()` jumping 6 s every 250 ms, so they don't
+depend on the clock.
+
+### 2. Bound-filling status-strip tests run past bun's 5 s limit under load
+
+Four tests in `reader-transcript-entries.test.tsx` fill the Activity table to the Memory bound.
+They take up to 1.9 s on a quiet machine, mostly rendering the rows and the `user-event` click
+over that DOM; less traffic doesn't make them faster. At 6 runs in parallel on 10 cores, two of
+them took 6 to 7.5 s and timed out in every run. After a timeout, the test keeps running and
+throws into the next one (`ERR_INVALID_THIS` from jest-dom). That's the same way an orphaned
+error can be pinned on an unrelated test.
+
+**Fix:** those four tests get a 15 s limit, `FILLS_THE_BOUND_MS`. After both fixes, the repro
+below passed 18 of 18 runs, against 18 of 18 failing before.
+
+### Left to do
+
+- Run the repro on the WSL2 machine. If `repl-session` still fails there, read the whole
+  failure block. A test that bun timed out is the first suspect for an error reported on a
+  later test.
+- Confirm the clock steps on the WSL2 machine. Leave this running while you work or run the
+  repro. It prints each time the wall clock moves apart from the monotonic one:
+
+  ```sh
+  bun -e 'let w=Date.now(),m=performance.now();setInterval(()=>{const dw=Date.now()-w,dm=performance.now()-m;if(Math.abs(dw-dm)>50)console.log(new Date().toISOString(),"wall clock stepped",Math.round(dw-dm),"ms");w=Date.now();m=performance.now()},250)'
+  ```
+
+  Steps of several seconds confirm the cause. `date; powershell.exe -c "Get-Date -Format o"`
+  compares the VM's clock with Windows' directly. The tests no longer depend on the clock, but
+  the drift itself can be cut down: run `wsl --update`, enable `systemd-timesyncd` in the
+  distro, or resync by hand with `sudo hwclock -s`.
+- The stub-console leads from before (the 100 ms timers in `stub-console.ts`, `afterEach` not
+  waiting for exit) were not needed to explain any observed failure, and stay unexamined.
 
 ### How to reproduce
 
 Run the four files as several parallel `bun test` runs, from `reader/`, with the full output
 of each sent to its own file (not filtered through grep). Repeat until one fails, then read
-the whole failure block, including which test the `gave up waiting` error belongs to.
+the whole failure block.
 
 ```sh
 for j in 1 2 3 4; do

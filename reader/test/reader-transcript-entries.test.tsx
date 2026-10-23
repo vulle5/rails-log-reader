@@ -86,6 +86,12 @@ function recorded(run: ReturnType<typeof aRun>, id: number, input: string, sql =
   ]
 }
 
+/**
+ * A test's time limit when it fills the Activity table to the Memory bound: thousands of rows,
+ * which take up to 2 s to render on a quiet machine, and several times that on a busy one.
+ */
+const FILLS_THE_BOUND_MS = 15_000
+
 /** Enough finished requests to push the fold past its ceiling on their own. */
 function traffic(count: number) {
   const server = aRun("srv-1")
@@ -259,7 +265,7 @@ describe("a Transcript entry's status strip", () => {
 
     expect(within(statusStrip()).getByText("queries cleared to save memory")).toBeInTheDocument()
     expect(within(theEntry()).queryByRole("button", { name: /quer/ })).not.toBeInTheDocument()
-  })
+  }, FILLS_THE_BOUND_MS)
 
   test("explains the cleared queries with the Events kept figure, not a fixed one", async () => {
     localStorage.setItem("rails-log-reader.events-kept", "10000")
@@ -275,7 +281,7 @@ describe("a Transcript entry's status strip", () => {
       "title",
       "The Reader keeps only its latest 10,000 events, and let go of the queries and log lines this ran as some of the oldest",
     )
-  })
+  }, FILLS_THE_BOUND_MS)
 
   test("names a figure chosen in Settings at once, without a reload", async () => {
     const { run, header } = consoleRun()
@@ -288,7 +294,7 @@ describe("a Transcript entry's status strip", () => {
     await chooseEventsKept(user, "25,000")
 
     expect(cleared()).toHaveAttribute("title", expect.stringContaining("latest 25,000 events"))
-  })
+  }, FILLS_THE_BOUND_MS)
 
   test("has no row link for an entry with no row", async () => {
     await theReader([[]], { transcript: [entry({ id: 1, outcome: INTEGER })] })
@@ -467,7 +473,7 @@ describe("a Transcript entry's cut", () => {
     })
 
     expect(theEntry()).toHaveTextContent("…5 more lines · show all")
-  })
+  }, FILLS_THE_BOUND_MS)
 
   test("cuts what was printed outside any evaluation, shown in place", async () => {
     const { user } = await theReader([[]], { transcript: [{ kind: "output", id: 1, output: lines(21), outputCut: false }] })

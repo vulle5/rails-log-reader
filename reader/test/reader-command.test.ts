@@ -727,11 +727,11 @@ function replSocket(url: string, origin: string) {
       socket.send(JSON.stringify(command))
     },
     async next(holds: (message: ReplMessage) => boolean, from = 0) {
-      const deadline = Date.now() + 10_000
+      const deadline = performance.now() + 10_000
       while (true) {
         const found = received.slice(from).find(holds)
         if (found !== undefined) return found
-        if (Date.now() > deadline) throw new Error(`no such message, only ${JSON.stringify(received)}`)
+        if (performance.now() > deadline) throw new Error(`no such message, only ${JSON.stringify(received)}`)
         await new Promise<void>((resolve) => {
           arrived = resolve
           setTimeout(resolve, 100)
@@ -908,8 +908,8 @@ describe("the REPL socket", () => {
 
       reader.kill(signal)
       await reader.exited
-      const deadline = Date.now() + 2_000
-      while ((await stubConsoleHeard(root)).length < 2 && Date.now() < deadline) await Bun.sleep(50)
+      const deadline = performance.now() + 2_000
+      while ((await stubConsoleHeard(root)).length < 2 && performance.now() < deadline) await Bun.sleep(50)
 
       expect(await stubConsoleHeard(root)).toEqual(["stdin closed", "SIGTERM"])
     }
