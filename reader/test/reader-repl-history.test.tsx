@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { fireEvent, within } from "@testing-library/react"
 
 import type { ReplState, TranscriptEntry } from "../src/shared/repl"
@@ -18,6 +18,7 @@ const MINUTE = 60_000
 
 afterEach(() => {
   localStorage.clear()
+  setSystemTime()
 })
 
 function keyOf(root: string) {
@@ -141,6 +142,8 @@ describe("the REPL's Input history on ↑", () => {
   })
 
   test("shows each row's first line, how many more lines it has, whether it raised, and when it ran", async () => {
+    // Stood still, so each row's age is counted from the same now it was kept at.
+    setSystemTime(Date.now())
     kept([
       { input: "Post.count", minutes: 3 * 60 },
       { input: "def greet\n  puts 1\nend", minutes: 12 },

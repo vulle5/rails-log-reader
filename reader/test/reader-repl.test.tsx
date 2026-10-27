@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import type { Outcome, ReplSnapshot, ReplState, RubyError, RubyNode, TranscriptEntry } from "../src/shared/repl"
@@ -13,6 +13,7 @@ import { RUBY_HASH, RUBY_RECORD } from "./repl.fixtures"
 
 afterEach(() => {
   localStorage.clear()
+  setSystemTime()
 })
 
 const PID = 48213
@@ -74,6 +75,8 @@ describe("the REPL drawer's header", () => {
   })
 
   test("says what the console process is doing, with a dot that repeats it", () => {
+    // Stood still, so the header counts a busy state's time from the same now as its `since`.
+    setSystemTime(Date.now())
     const states: [ReplState, string][] = [
       [{ kind: "booting" }, "booting…"],
       [READY, `pid ${PID}`],
