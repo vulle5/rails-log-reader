@@ -426,7 +426,7 @@ function RunDescriptionCell({ row, colSpan }: { row: Run; colSpan: number }) {
 function StartedCell({ row }: { row: Request | Evaluation }) {
   return (
     <Cell className="text-faint group-data-[state=interrupted]:shadow-interrupted">
-      {row.partial ? <Badge title="Its start was never seen — the Reader attached mid-flight">partial</Badge> : clock(row.startedAtWall)}
+      {row.partial ? <Badge title="The Reader does not hold this request's start">partial</Badge> : clock(row.startedAtWall)}
       {/* A different fact from `partial`, and never in tension with it: the *last row
           standing* over the Memory bound's ceiling, whether or not its start was ever seen. */}
       <OverBoundMark row={row} />

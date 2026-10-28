@@ -1,8 +1,8 @@
 import { watch, type FSWatcher } from "node:fs"
-import { open, stat } from "node:fs/promises"
+import { open, stat, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 
-import { LOAD_ON_OPEN_EVENTS } from "../shared/bounds"
+import { EARLIER_BUDGET_BYTES } from "../shared/bounds"
 import type { Earlier } from "../shared/earlier"
 import { EVENT_TYPES, isParamsHash, type Envelope } from "../shared/wire"
 
@@ -52,7 +52,13 @@ export type Sidecar = {
  */
 export async function openSidecar(
   logDirectory: string,
+  /** How many events the load-on-open history reads at least. */
+  events: number,
   onEnvelopes: (envelopes: Envelope[]) => void,
+  /**
+   * Where the history an attachment opened on begins. The next `onEnvelopes` call is always
+   * that history, even when it is empty.
+   */
   onHistoryStart: (from: number) => void,
   /**
    * The live Run's own `run_header`, when `startOfHistory`'s window opened past it — a
@@ -120,7 +126,7 @@ export async function openSidecar(
     let attached = false
     if (inode !== sidecar.ino || sidecar.size < offset) {
       inode = sidecar.ino
-      offset = await startOfHistory(path, sidecar.size)
+      offset = await startOfHistory(path, sidecar.size, events)
       // Announced on every attachment and every reset, not once at open: a truncation moves
       // the whole history, and a load-earlier cursor taken before it points into bytes that
       // are no longer the ones it was taken from.
@@ -128,39 +134,46 @@ export async function openSidecar(
       attached = true
     }
 
-    if (sidecar.size <= offset) return
-
     const historyStart = offset
+    const envelopes = sidecar.size > offset ? await readOn(sidecar.size) : []
 
+    // An attachment always delivers the batch it opened on, even an empty one: whoever is
+    // listening takes the batch after `onHistoryStart` for the open. Without it, an
+    // attachment to a Sidecar created but not yet written to would leave the next live batch
+    // to be taken for the open.
+    if (attached || envelopes.length > 0) onEnvelopes(envelopes)
+
+    // Only on the attachment this tick just opened, and only when it opened past the top
+    // of the file: an ordinary catch-up tick that finds no header is not missing anything,
+    // it just has not been appended yet. The live Run is whichever wrote the most recent
+    // envelope in the window — a concurrent Run's own header sitting in the same window
+    // (`rails s` beside `rails c`) answers a different question and does not stand in for
+    // the live Run's own, so this checks for that `run_id` specifically rather than for
+    // any `run_header` at all.
+    const lastEnvelope = envelopes.at(-1)
+    const liveRunId = lastEnvelope?.run_id
+    if (attached && historyStart > 0 && liveRunId !== undefined && !envelopes.some((e) => isRunHeader(e) && e.run_id === liveRunId)) {
+      void findLiveRunHeader(path, sidecar.ino, liveRunId, historyStart).then((header) => {
+        if (header !== null) onRunHeader(header)
+      })
+    }
+  }
+
+  /** The whole lines from `offset` up to `end`, moving `offset` past them. */
+  async function readOn(end: number) {
     const handle = await open(path, "r")
     try {
       // One allocation for everything appended since the last read, bounded by the Sidecar's
       // 64 MB cap on the file itself. Behaviour under volume — backpressure, a drop policy —
       // is out of scope for v1 and open on the map.
-      const span = Buffer.alloc(sidecar.size - offset)
+      const span = Buffer.alloc(end - offset)
       const { bytesRead } = await handle.read(span, 0, span.length, offset)
       const complete = span.subarray(0, bytesRead).lastIndexOf(NEWLINE)
       // A line without its newline is a write still in progress; it is read next time whole.
-      if (complete === -1) return
+      if (complete === -1) return []
 
-      const envelopes = readEnvelopes(span.subarray(0, complete + 1))
       offset += complete + 1
-      if (envelopes.length > 0) onEnvelopes(envelopes)
-
-      // Only on the attachment this tick just opened, and only when it opened past the top
-      // of the file: an ordinary catch-up tick that finds no header is not missing anything,
-      // it just has not been appended yet. The live Run is whichever wrote the most recent
-      // envelope in the window — a concurrent Run's own header sitting in the same window
-      // (`rails s` beside `rails c`) answers a different question and does not stand in for
-      // the live Run's own, so this checks for that `run_id` specifically rather than for
-      // any `run_header` at all.
-      const lastEnvelope = envelopes.at(-1)
-      const liveRunId = lastEnvelope?.run_id
-      if (attached && historyStart > 0 && liveRunId !== undefined && !envelopes.some((e) => isRunHeader(e) && e.run_id === liveRunId)) {
-        void findLiveRunHeader(path, sidecar.ino, liveRunId, historyStart).then((header) => {
-          if (header !== null) onRunHeader(header)
-        })
-      }
+      return readEnvelopes(span.subarray(0, complete + 1))
     } finally {
       await handle.close()
     }
@@ -201,41 +214,25 @@ export async function openSidecar(
 }
 
 /**
- * Where the load-on-open history before `end` begins: the start of the ~5,000th line back
- * from it, found by scanning backwards over the same offset the Reader tracks. `end` is the
- * end of a line — EOF, or the start of the line the Reader already has — so the newline the
- * count runs one past closes the line before the history, and the byte after it opens it.
+ * Where the history before `end` begins: the same split-aware backward scan a *Load earlier*
+ * click makes, so the Reader never opens on a request or an *Evaluation* it could have
+ * completed. `end` is the end of a line, or EOF, whose trailing write in progress the scan
+ * leaves out.
  *
- * Called with EOF when a Sidecar is attached to, and with the history's own start when the
- * *load-earlier* control continues the scan: one function, because it is one scan.
+ * A file with no complete line at all is one write in progress: it begins at the top, so
+ * the line is read whole once it is finished.
  */
-async function startOfHistory(path: string, end: number) {
+async function startOfHistory(path: string, end: number, events: number) {
   const handle = await open(path, "r")
   try {
-    const chunk = Buffer.alloc(Math.min(SCAN_CHUNK_BYTES, end))
-    let position = end
-    let lines = 0
-
-    while (position > 0) {
-      const length = Math.min(chunk.length, position)
-      position -= length
-      await handle.read(chunk, 0, length, position)
-
-      for (let index = length - 1; index >= 0; index--) {
-        if (chunk[index] !== NEWLINE) continue
-        lines += 1
-        if (lines > LOAD_ON_OPEN_EVENTS) return position + index + 1
-      }
-    }
-
-    return 0
+    return (await scanBack(handle, end, events, EARLIER_BUDGET_BYTES)).from
   } finally {
     await handle.close()
   }
 }
 
 /** How far past the load-on-open window this scan will look before giving up. */
-const MAX_HEADER_SCAN_BYTES = 64 * 1024 * 1024
+const MAX_HEADER_SCAN_BYTES = EARLIER_BUDGET_BYTES
 
 /**
  * One scan's result per Sidecar path. `inode` and `run_id` both have to match the cached
@@ -306,10 +303,15 @@ function isRunHeader(envelope: Envelope): envelope is RunHeaderEnvelope {
   return envelope.type === "run_header"
 }
 
-function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null {
+function asRunHeader(line: Buffer): RunHeaderEnvelope | null {
   if (line.length === 0 || !line.includes(RUN_HEADER_NEEDLE)) return null
   const envelope = readEnvelope(line)
-  return envelope !== null && isRunHeader(envelope) && envelope.run_id === runId ? envelope : null
+  return envelope !== null && isRunHeader(envelope) ? envelope : null
+}
+
+function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null {
+  const header = asRunHeader(line)
+  return header !== null && header.run_id === runId ? header : null
 }
 
 /**
@@ -318,11 +320,28 @@ function asLiveRunHeader(line: Buffer, runId: string): RunHeaderEnvelope | null 
  * silent fetch, and not a second mechanism — the only thing that makes this different from
  * opening the file is where the scan starts.
  *
+ * The block is at least `events` lines, and then as many more as it takes not to leave a
+ * request or an *Evaluation* split between the block and the history already held: while the
+ * block holds an event of an owner whose start it does not hold, the scan keeps reading back
+ * for that start. It stops at the top of the file, or once `budget` bytes have been read —
+ * what it left split is the next click's to carry on with.
+ *
+ * A Run row holds the scan back only when it is a `rake` task, and only a Run's `run_header`
+ * says what kind it is: when the block holds unattributed events of a Run whose header it
+ * does not, the scan looks further back for that header, parsing nothing but header lines on
+ * the way, and takes in everything down to it if it says `rake`. A header that is not found,
+ * or says anything else, leaves the cut where it was — a server runs all day.
+ *
  * Nothing is remembered between calls. The offset comes in from the browser and goes back
  * out with the envelopes, so this survives the browser reconnecting, which is exactly when a
  * server-side cursor would quietly have forgotten how far back the developer had read.
  */
-export async function readEarlier(logDirectory: string, before: number): Promise<Earlier> {
+export async function readEarlier(
+  logDirectory: string,
+  before: number,
+  events: number,
+  budget = EARLIER_BUDGET_BYTES,
+): Promise<Earlier> {
   const path = join(logDirectory, SIDECAR_NAME)
   if (before <= 0) return { envelopes: [], from: 0 }
 
@@ -335,19 +354,155 @@ export async function readEarlier(logDirectory: string, before: number): Promise
   // attachment is announcing where the history begins now as this returns.
   if (sidecar === null) return { envelopes: [], from: 0 }
 
-  const end = Math.min(before, sidecar.size)
-  const from = await startOfHistory(path, end)
   const handle = await open(path, "r")
   try {
-    const span = Buffer.alloc(end - from)
-    const { bytesRead } = await handle.read(span, 0, span.length, from)
-    const complete = span.subarray(0, bytesRead).lastIndexOf(NEWLINE)
-    if (complete === -1) return { envelopes: [], from }
-
-    return { envelopes: readEnvelopes(span.subarray(0, complete + 1)), from }
+    return await scanBack(handle, Math.min(before, sidecar.size), events, budget)
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * The lines before `end`, newest first, read a chunk at a time. `end` is the end of a line;
+ * a fragment after the last newline before it is a write still in progress, and is left out.
+ */
+async function* linesBackward(handle: FileHandle, end: number): AsyncGenerator<{ start: number; line: Buffer }> {
+  let position = end
+  /** [position, position + held.length): once trimmed, ends with the newline closing the next line to yield. */
+  let held = Buffer.alloc(0)
+  let trimmed = false
+
+  while (true) {
+    const search = trimmed ? held.length - 1 : held.length
+    const newline = search > 0 ? held.subarray(0, search).lastIndexOf(NEWLINE) : -1
+
+    if (newline !== -1 && !trimmed) {
+      held = held.subarray(0, newline + 1)
+      trimmed = true
+      continue
+    }
+
+    if (newline !== -1) {
+      yield { start: position + newline + 1, line: held.subarray(newline + 1, held.length - 1) }
+      held = held.subarray(0, newline + 1)
+      continue
+    }
+
+    if (position === 0) {
+      if (trimmed && held.length > 0) yield { start: 0, line: held.subarray(0, held.length - 1) }
+      return
+    }
+
+    const length = Math.min(SCAN_CHUNK_BYTES, position)
+    position -= length
+    const chunk = Buffer.alloc(length)
+    await handle.read(chunk, 0, length, position)
+    held = Buffer.concat([chunk, held])
+  }
+}
+
+/**
+ * Which owners the span read so far leaves split: an owner id is added by any event of it
+ * and cleared by its start, and the span is whole when none is left. Keyed by Run as well,
+ * because an id is only unique within the process that minted it.
+ */
+function splitOwners() {
+  const started = new Set<string>()
+  const missing = new Set<string>()
+
+  return {
+    add(envelope: Envelope) {
+      if (envelope.request_id === null) return
+      const owner = `${envelope.run_id}\n${envelope.request_id}`
+      if (envelope.type === "request_start" || envelope.type === "evaluation_start") {
+        started.add(owner)
+        missing.delete(owner)
+      } else if (!started.has(owner)) {
+        missing.add(owner)
+      }
+    },
+    get any() {
+      return missing.size > 0
+    },
+  }
+}
+
+/**
+ * The Runs whose unattributed events the span holds and whose `run_header` it does not: the
+ * ones whose row the cut would leave without a header, and which only that header can say
+ * are a `rake` task.
+ */
+function headerlessRuns() {
+  const runs = new Set<string>()
+
+  return {
+    add(envelope: Envelope) {
+      if (envelope.type === "run_header") runs.delete(envelope.run_id)
+      else if (envelope.request_id === null && envelope.type !== "run_end") runs.add(envelope.run_id)
+    },
+    [Symbol.iterator]: () => runs.values(),
+  }
+}
+
+type BackLine = { start: number; line: Buffer }
+
+async function scanBack(handle: FileHandle, end: number, events: number, budget: number): Promise<Earlier> {
+  const kept: Envelope[] = []
+  const owners = splitOwners()
+  const headerless = headerlessRuns()
+  const lines = linesBackward(handle, end)
+  /** Lines read past the cut looking for headers, newest first, awaiting a verdict on the cut. */
+  const ahead: BackLine[] = []
+  /** The headers among `ahead`, by Run: parsed alone, since nothing else past the cut is. */
+  const headersAhead = new Map<string, { start: number; rake: boolean }>()
+  let count = 0
+  let from = end
+
+  function take({ start, line }: BackLine) {
+    count += 1
+    from = start
+    const envelope = readEnvelope(line)
+    if (envelope === null) return
+    owners.add(envelope)
+    headerless.add(envelope)
+    kept.push(envelope)
+  }
+
+  /** The line `ahead` would take next, read from the file when `ahead` has none left. */
+  async function next() {
+    const line = ahead.shift() ?? (await lines.next()).value
+    return line === undefined ? null : (line as BackLine)
+  }
+
+  while (true) {
+    if (count < events || owners.any) {
+      const line = await next()
+      // A ceiling, but never one that stops the scan before it has made any progress.
+      if (line === null || (count > 0 && end - line.start > budget)) break
+      take(line)
+      continue
+    }
+
+    // The span is whole as far as requests and Evaluations go. What is left to ask is whether
+    // a Run it holds events of is a `rake` task, whose header lies before it: the cut reaches
+    // back for the farthest such header, and no further for any other kind of Run.
+    const pending = [...headerless].map((runId) => headersAhead.get(runId))
+    const rakeStart = Math.min(...pending.map((header) => (header?.rake ? header.start : Infinity)))
+    if (rakeStart !== Infinity) {
+      while (ahead.length > 0 && (ahead[0] as BackLine).start >= rakeStart) take(ahead.shift() as BackLine)
+      continue
+    }
+    if (pending.every((header) => header !== undefined)) break
+
+    const line = (await lines.next()).value as BackLine | undefined
+    if (line === undefined || end - line.start > budget) break
+    ahead.push(line)
+    const header = asRunHeader(line.line)
+    if (header !== null) headersAhead.set(header.run_id, { start: line.start, rake: header.payload.kind === "rake" })
+  }
+
+  // No complete line before `end` is no history before it: the top of the file, not `end` again.
+  return { envelopes: kept.reverse(), from: count === 0 ? 0 : from }
 }
 
 function readEnvelopes(lines: Buffer) {

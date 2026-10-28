@@ -8,6 +8,7 @@ import { completeRefusal, EMPTY_SNAPSHOT, submitRefusal, type Completion, type R
 import { latchRunIdentity, type RunIdentity } from "../src/shared/run-identity"
 import type { Envelope } from "../src/shared/wire"
 import type { ReplHandle } from "../src/ui/features/repl/hooks/repl-session"
+import { recallEventsKept } from "../src/ui/hooks/events-kept"
 import { Reader } from "../src/ui/Reader"
 import { stubComplete, stubCompletion } from "./repl.fixtures"
 
@@ -25,8 +26,8 @@ export type ReaderProps = ComponentProps<typeof Reader>
  * matter wherever a test cares about the order things arrive in: the *Memory bound* only
  * evicts at the end of one.
  */
-export function aFold() {
-  const activity = activityTable()
+export function aFold(events = recallEventsKept()) {
+  const activity = activityTable(events)
   const stream = consoleStream()
   // Cumulative, the way `useSidecar` counts it — `WireStatus.evictedRows`.
   let evictedRows = 0
@@ -47,7 +48,7 @@ export function aFold() {
      * already has. It can still evict, which the Console does hear about.
      */
     foldEarlier(batch: readonly Envelope[]) {
-      const evicted = activity.foldEarlier(batch)
+      const { evicted } = activity.foldEarlier(batch)
       stream.evict(evicted)
       evictedRows += evicted.length
     },
@@ -149,6 +150,14 @@ export function aReplSession(
 }
 
 // ---- finding things -----------------------------------------------------------------
+
+/** Opens Settings, presses one of the Events kept figures (`"5,000"`), and closes it again. */
+export async function chooseEventsKept(user: UserEvent, figure: string) {
+  await user.click(screen.getByRole("button", { name: "Settings" }))
+  const dialog = screen.getByRole("dialog", { name: "Settings" })
+  await user.click(within(within(dialog).getByRole("group", { name: "Events kept" })).getByRole("button", { name: figure }))
+  await user.click(within(dialog).getByRole("button", { name: "Close" }))
+}
 
 export function column(name: "Console" | "Activity table" | "Detail column") {
   return screen.getByRole("region", { name })

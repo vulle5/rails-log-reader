@@ -11,7 +11,7 @@ import { aRun, EPOCH } from "./sidecar.fixtures"
  */
 
 function folded(...envelopes: Envelope[]) {
-  const activity = activityTable()
+  const activity = activityTable(LOAD_ON_OPEN_EVENTS)
   activity.fold(envelopes)
   return activity
 }
@@ -295,7 +295,7 @@ describe("an Evaluation row under the Memory bound", () => {
 
   test("is evicted like a request once finished, and past it its events are the Run's", () => {
     const run = aRun("con-1")
-    const activity = activityTable()
+    const activity = activityTable(LOAD_ON_OPEN_EVENTS)
     activity.fold([run.evaluationStart("repl-a-1"), run.evaluationFinish("repl-a-1")])
     const evicted = activity.fold(traffic(LOAD_ON_OPEN_EVENTS))
 
@@ -308,7 +308,7 @@ describe("an Evaluation row under the Memory bound", () => {
 
   test("is remembered by its id and its console process's pid once evicted", () => {
     const run = aRun("con-1")
-    const activity = activityTable()
+    const activity = activityTable(LOAD_ON_OPEN_EVENTS)
     activity.fold([run.header("console", 92_014), run.evaluationStart("repl-a-1"), run.evaluationFinish("repl-a-1")])
     expect(activity.evictedEvaluations.size).toBe(0)
 
@@ -319,7 +319,7 @@ describe("an Evaluation row under the Memory bound", () => {
 
   test("carries its console process's pid though the bound took its Run row before it opened", () => {
     const run = aRun("con-1")
-    const activity = activityTable()
+    const activity = activityTable(LOAD_ON_OPEN_EVENTS)
     activity.fold([run.header("console", 92_014), run.log(null, "Loading development environment")])
     activity.fold(traffic(LOAD_ON_OPEN_EVENTS))
     expect(activity.rows.some((row) => row.kind === "run" && row.runId === "con-1")).toBe(false)
@@ -331,7 +331,7 @@ describe("an Evaluation row under the Memory bound", () => {
 
   test("is Interrupted by its console's exit after the bound took its Run row", () => {
     const run = aRun("con-1")
-    const activity = activityTable()
+    const activity = activityTable(LOAD_ON_OPEN_EVENTS)
     activity.fold([run.header("console", 92_014), run.log(null, "Loading development environment"), run.evaluationStart("repl-a-1", "sleep 60")])
     activity.fold(traffic(LOAD_ON_OPEN_EVENTS))
     expect(activity.rows.some((row) => row.kind === "run" && row.runId === "con-1")).toBe(false)

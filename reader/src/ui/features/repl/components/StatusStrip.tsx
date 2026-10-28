@@ -1,9 +1,11 @@
+import { useContext } from "react"
+
 import type { EvaluationRow } from "../../../../shared/activity"
-import { LOAD_ON_OPEN_EVENTS } from "../../../../shared/bounds"
 import type { EntryRow, Outcome } from "../../../../shared/repl"
 import { CopyButton } from "../../../components/CopyButton"
 import { LinkButton } from "../../../components/LinkButton"
 import { PrettyRawPill } from "../../../components/PrettyRawPill"
+import { ChosenEventsKept } from "../../../hooks/events-kept"
 import { cn } from "../../../lib/cn"
 import { elapsed, ms } from "../../../lib/format"
 import { useClimbingElapsed } from "../../activity-table/lib/elapsed"
@@ -33,6 +35,8 @@ export function StatusStrip({
   rawView: RawView
   className?: string
 }) {
+  const eventsKept = useContext(ChosenEventsKept)
+
   return (
     // A faint hairline over it and no fill, so it reads as its block's own bottom.
     <div
@@ -50,7 +54,7 @@ export function StatusStrip({
       {row?.kind === "evicted" && (
         <span
           className="text-faint"
-          title={`The Reader keeps only its latest ${LOAD_ON_OPEN_EVENTS.toLocaleString("en")} events, and let go of the queries and log lines this ran as some of the oldest`}
+          title={`The Reader keeps only its latest ${eventsKept.toLocaleString("en")} events, and let go of the queries and log lines this ran as some of the oldest`}
         >
           queries cleared to save memory
         </span>
