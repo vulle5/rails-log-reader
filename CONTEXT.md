@@ -566,6 +566,11 @@ is it unfound: a *Search* match inside a query a chip hides is counted on that c
 *Detail tab* that is not showing counts its own, and never turns the chip back on, for the
 reason Search never opens a *Collapsed Console*.
 
+Each chip says how many such queries the selected row holds, its trailing section included
+(`cache 38`), on or off: how much a chip hides is worth knowing before turning it off. The
+Search count rides on the same chip as a lit segment at its end, in words (`cache 38 · 2 matches`),
+because two bare numbers side by side read as one.
+
 Four kinds of statement are marked, because they are what a timeline is scanned for: `INSERT`,
 `UPDATE` and `DELETE`, which changed data, and `ROLLBACK`, which undid changes. A `ROLLBACK`
 is marked because, if it weren't, a rolled-back `INSERT` would read as one that happened. The
@@ -573,6 +578,25 @@ kind is read off the statement's first keyword, as `development.log` colours it,
 leading comment, which `development.log` does not skip. So a write that opens with `WITH` goes
 unmarked there and here alike. Nothing else is marked: a column where every statement stood
 out would have none that did.
+
+The mark is a coloured edge down the entry's left side, and the statement keeps its own
+colours: the edge is what the eye finds at scrolling speed, and a statement recoloured to
+match it reads less like SQL. The colours are the HTTP methods' a change usually comes from:
+`INSERT` as `POST`, `UPDATE` as `PUT`/`PATCH`, `DELETE` as `DELETE`. `ROLLBACK` alone is in the
+error colour, the one of the four that means something did not go as written. This departs from
+`development.log`, which colours `DELETE` red too, for the reason the Activity table already
+keeps the `DELETE` method out of the error colour: a delete is not a failure.
+
+**Timeline ruler** — the strip down the right side of a row's Timeline, in place of its
+scrollbar: a full-width tick per marked statement, a tick per entry holding a *Search* match,
+and a box over the stretch on screen, each at its place in the timeline. Pressing or dragging
+the strip scrolls, as a scrollbar's track does; a tick goes to its entry and, hovered, says what
+it marks. It draws what the timeline already shows and decides nothing: it is the marks and the
+matches seen from further away, so a long timeline's few writes are found without scrolling
+past everything between them. It replaces the scrollbar rather than sitting beside it, because
+two things saying where the reader is would be one thing said twice. A tick stays where it is
+drawn while the timeline scrolls, even though the column lays out only the entries near the
+screen.
 
 A backtrace collapses gem frames by default for the same reason: a real exception's trace
 is mostly framework internals, and scanning past forty of them to find the three that
