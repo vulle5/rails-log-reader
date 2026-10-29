@@ -190,7 +190,9 @@ one arriving from two directions. All levels show by default: a floor above `deb
 hide the developer's own calls. Rails' own lines are hidden by default: in a real dev app
 they *are* the log — `Started GET`, `Processing by`, `Rendering`, `Completed 200 OK`, and
 an *Echo* under every query — so a rail that opens on them buries the handful you wrote
-just as surely. Both settings persist, and both are remembered as what is *off*, so a
+just as surely. It is the one thinning in the Reader that starts off, and the exception holds
+because every line it hides is already in its row's *Detail column*, which opens on
+everything it holds. Both settings persist, and both are remembered as what is *off*, so a
 level the Reader has not met yet arrives shown.
 
 Hidden is never dropped, which is what keeps this a filter rather than the decision the
@@ -546,13 +548,31 @@ Pinned once opened, so selecting never reflows the layout. Renders what the Init
 emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
 cut says so where it is read rather than passing as whole.
 
-`SCHEMA` and `EXPLAIN` queries are hidden by default too, for the mirror-image reason the
-Console's `rails` chip is: `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops them
-before `development.log` is ever written to, while `SqlSubscriber` forwards them
-anyway — the rare "why was the first request after a restart the slow one" question only
-the dropped ones answer. One chip brings them back, persisted the same way the Console's
-chips are. Hidden is never dropped: the timeline still holds every one, and a hidden query
-is one click away rather than in the way of the ordinary request beside it.
+The column opens on everything it holds. Two chips thin it, each remembered the way the
+Console's chips are, and one setting of them applies to every row kind:
+- **`cache`** hides cached queries. `development.log` shows them, prefixed `CACHE`, but a
+  cached query never reached the database: it is an answer handed back a second time, and in
+  a real app there are enough of them to bury the queries that ran.
+- **`schema`** hides `SCHEMA` and `EXPLAIN` queries, which
+  `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops before `development.log` is ever
+  written to, while `SqlSubscriber` forwards them anyway — the rare "why was the first request
+  after a restart the slow one" question only the dropped ones answer.
+
+Neither starts off: a column that showed everything except one kind of query would be an
+exception to explain, and the developer, not the Reader, knows which kind is in the way. A
+chip turned off wears the struck-through "off" mark, so a thinned timeline says so. Hidden is
+never dropped: the timeline still holds every one, and a hidden query is one click away. Nor
+is it unfound: a *Search* match inside a query a chip hides is counted on that chip, the way a
+*Detail tab* that is not showing counts its own, and never turns the chip back on, for the
+reason Search never opens a *Collapsed Console*.
+
+Four kinds of statement are marked, because they are what a timeline is scanned for: `INSERT`,
+`UPDATE` and `DELETE`, which changed data, and `ROLLBACK`, which undid changes. A `ROLLBACK`
+is marked because, if it weren't, a rolled-back `INSERT` would read as one that happened. The
+kind is read off the statement's first keyword, as `development.log` colours it, past any
+leading comment, which `development.log` does not skip. So a write that opens with `WITH` goes
+unmarked there and here alike. Nothing else is marked: a column where every statement stood
+out would have none that did.
 
 A backtrace collapses gem frames by default for the same reason: a real exception's trace
 is mostly framework internals, and scanning past forty of them to find the three that
@@ -763,8 +783,8 @@ another tab is never counted at its start and again at its end.
 
 All four open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
-different thing to be at the bottom of, rather than the same stream thinned. Its own SCHEMA
-chip is the same stream thinned, exactly the case a Console chip already is, so toggling it
+different thing to be at the bottom of, rather than the same stream thinned. Its own chips
+are the same stream thinned, exactly the case a Console chip already is, so toggling one
 never refollows on its own — only a new Selection does. The Transcript starts following again
 whenever the *REPL* submits from this tab, because a submit asks to see its answer. Another
 tab's submit is something that arrived, and is counted when it ends. Picking an *Input history*
