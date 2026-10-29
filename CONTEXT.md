@@ -587,16 +587,27 @@ error colour, the one of the four that means something did not go as written. Th
 `development.log`, which colours `DELETE` red too, for the reason the Activity table already
 keeps the `DELETE` method out of the error colour: a delete is not a failure.
 
-**Timeline ruler** — the strip down the right side of a row's Timeline, in place of its
-scrollbar: a full-width tick per marked statement, a tick per entry holding a *Search* match,
-and a box over the stretch on screen, each at its place in the timeline. Pressing or dragging
-the strip scrolls, as a scrollbar's track does; a tick goes to its entry and, hovered, says what
-it marks. It draws what the timeline already shows and decides nothing: it is the marks and the
-matches seen from further away, so a long timeline's few writes are found without scrolling
-past everything between them. It replaces the scrollbar rather than sitting beside it, because
-two things saying where the reader is would be one thing said twice. A tick stays where it is
-drawn while the timeline scrolls, even though the column lays out only the entries near the
-screen.
+**Timeline ruler** — the strip down the right side of the Timeline tab, in place of its
+scrollbar, for every row kind and over the trailing section too: a full-width tick per marked
+statement, a tick per entry holding a *Search* match, and a thumb over the stretch on screen,
+each at its place in the timeline. Pressing or dragging the strip scrolls, as a scrollbar's
+track does. A mark's tick goes to its entry and, hovered, says what it marks. A match's tick is
+too thin to aim at and is only drawn, so the ruler says where the matches are without ever
+stepping through them. It draws what the timeline already shows and decides nothing: it is the
+marks and the matches seen from further away, so a long timeline's few writes are found
+without scrolling past everything between them. It replaces the scrollbar rather than sitting
+beside it, because two things saying where the reader is would be one thing said twice. The
+other *Detail tabs* keep a plain scrollbar: nothing in them is marked.
+
+The thumb is drawn over the ticks, never under them, so it stays readable however they crowd. A
+data migration's thousands of `UPDATE`s, or a term matching every entry, make a solid stripe,
+and the stripe is the truth about that timeline rather than something to thin: grouping ticks
+would take a threshold.
+
+Ticks move when the timeline itself changes: an entry arriving while its row is *In-flight*, a
+chip toggled, the column resized, a fold opened. They never move because the column laid out an
+entry it had skipped while that entry was off screen.
+_Avoid_: pill (the "↓ N new" pill is another thing), box, scroll pill — for its thumb.
 
 A backtrace collapses gem frames by default for the same reason: a real exception's trace
 is mostly framework internals, and scanning past forty of them to find the three that
@@ -721,14 +732,9 @@ moving the mouse is exactly what you do next.
 
 The rule assumes both ends are on screen, and at real volume — 58 rows, 145 console
 lines — the row usually isn't: it runs to a stub captioned "row is off screen — click to
-jump" instead of connecting. Built and measured, not argued away: at low volume the rule
-connects and reads fine; it degrades only at the volume the Console exists for, and a
-click dissolves the case rather than leaving it dangling. Per-request **colour coding**,
-**dimming** the non-matching lines, and **scrollbar markers** (ticks showing every
-occurrence, including off screen) were all built and rejected — colour collides long
-before a busy dev app runs out of requests, dimming makes everything else unreadable
-exactly when you are hovering constantly, and markers tell you *that* something is
-elsewhere without letting you read the connection to it.
+jump" instead of connecting. At low volume the rule connects and reads fine; it degrades
+only at the volume the Console exists for, and a click dissolves the case rather than leaving
+it dangling.
 
 **Gutter** — the strip down the *Console rail*'s inner edge, kept clear of text, that
 *Hover grouping*'s rule travels down. Part of the Console, not a boundary between columns.
@@ -766,12 +772,18 @@ chip are not, and a Run boundary is not — a restart may not yank a reader away
 were reading. One rule and no second, hidden pause state, which is a promise about what the
 Reader does *not* do rather than a feature it has.
 
-*Hover grouping*'s jump is the one place a column is moved for you, and it is not an exception
-to the rule but the plainest case of it: the jump scrolls the *Activity table* to the row, and
-where the port ends up is read like any other scroll — so landing on a row above the fold
-pauses the table exactly as scrolling to it by hand would. That is the click's doing and not
-the selection's, and it is what you wanted: a table that snapped back to the bottom after
-taking you somewhere would not have taken you anywhere.
+*Hover grouping*'s jump is one of two places a column is moved for you, and it is not an
+exception to the rule but the plainest case of it: the jump scrolls the *Activity table* to the
+row, and where the port ends up is read like any other scroll — so landing on a row above the
+fold pauses the table exactly as scrolling to it by hand would. That is the click's doing and
+not the selection's, and it is what you wanted: a table that snapped back to the bottom after
+taking you somewhere would not have taken you anywhere. The other is a mark's tick on the
+*Timeline ruler*, read the same way.
+
+In the *Detail column*'s Timeline the *Timeline ruler* is the scrollbar, so it is the control
+there: dragging it up pauses the column, as going to a mark above the bottom does, and
+reaching the bottom on it resumes it. A wheel, a trackpad and the keyboard scroll the column
+as they always did.
 
 A paused column counts what has arrived below and offers the count as a floating "↓ N new"
 pill, which resumes on click. The count is the point of the pill — it is what says when to
@@ -832,7 +844,8 @@ counts on its header without unfolding. It **highlights and never hides**: v1 fi
 *Activity table* by row kind and nothing else, and a text box that thinned rows or lines would
 be that exclusion returning through the one control nobody would think to check it against.
 So it is not a filter, it reaches no *Auto-scroll*, and it has neither a regex — a query
-language — nor next/prev — navigation. A match is found on the text as rendered, so SQL is
+language — nor next/prev — navigation. The *Timeline ruler* shows where its matches lie in a
+long timeline and is not navigation either: a match's tick is drawn, never clicked. A match is found on the text as rendered, so SQL is
 matched whole and lit across the highlighter's own tokens, and never edited to do it. Typing
 never waits on the lighting: when there is a lot to light, the matches trail the term, and
 every column catches up together, because one term is never shown two ways at once.
