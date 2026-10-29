@@ -32,6 +32,8 @@ const HIDDEN_NAMES: ReadonlySet<string> = new Set(["SCHEMA", "EXPLAIN"])
 export type DetailFilter = {
   /** Whether SCHEMA/EXPLAIN queries show. `false` until somebody asks for them. */
   showingSchema: boolean
+  /** PROTOTYPE (#220): whether cached queries show. */
+  showingCache?: boolean
 }
 
 export const DETAIL_FILTER_ON_OPEN: DetailFilter = { showingSchema: false }
@@ -51,7 +53,9 @@ export function detailFilterKey(filter: DetailFilter) {
 
 /** A query this filter hides is one `development.log` would never have shown either. */
 function isHidden(event: TimelineEvent, filter: DetailFilter) {
-  if (filter.showingSchema || event.type !== "sql") return false
+  if (event.type !== "sql") return false
+  if (filter.showingCache === false && event.payload.cached) return true
+  if (filter.showingSchema) return false
   return event.payload.name !== null && HIDDEN_NAMES.has(event.payload.name)
 }
 

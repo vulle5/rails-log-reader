@@ -30,6 +30,7 @@ import type { ReplHandle } from "../../repl/hooks/repl-session"
 import { RubyCode } from "../../repl/components/RubyCode"
 import { ResultPanel, resultLabel } from "../../repl/components/ResultPanel"
 import { resultMatches } from "../../repl/lib/entry-matches"
+import { MarkRuler, useQueryMark } from "../../../prototype-detail-thinning/thinning"
 
 /**
  * The rightmost column: one selected row's timeline, its SQL and `Rails.logger` lines
@@ -184,6 +185,8 @@ function RequestDetail({
             scroll,
             panel: (
               <>
+                {/* PROTOTYPE (#220): variant D's ruler. */}
+                <MarkRuler rowId={row.id} />
                 <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
                 {row.exception !== null && (
                   <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
@@ -745,9 +748,16 @@ function Entry({ className, ...props }: ComponentProps<"li">) {
 
 const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
+  // PROTOTYPE (#220): which mark, if any, and whether it is an edge, a tint, or both.
+  const mark = useQueryMark(sql)
 
   return (
-    <Entry className="[contain-intrinsic-size:auto_110px]">
+    <Entry
+      className={cn("[contain-intrinsic-size:auto_110px]", mark.edge && "shadow-[inset_3px_0_0_var(--mark)]")}
+      style={mark.style}
+      data-mark={mark.kind ?? undefined}
+      data-name={name ?? undefined}
+    >
       <div className="flex items-baseline gap-1.5 text-xs text-muted">
         {/* What `development.log` prefixes these with, and the reason a query took no time. */}
         {cached && <SqlMarker>CACHE</SqlMarker>}
@@ -761,7 +771,7 @@ const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; rails
         )}
         <span className="ml-auto font-mono tabular-nums">{ms(duration_ms)}</span>
       </div>
-      <Statement sql={sql} />
+      <Statement sql={sql} tint={mark.tint} />
       <Cut field="sql" original={event.truncated?.sql} />
       <Binds values={binds} />
       <Cut field="binds" original={event.truncated?.binds} />
@@ -785,7 +795,7 @@ function SqlMarker({ children }: { children: ReactNode }) {
  * `pre-wrap` wraps a long query without touching a character of it: what is read is what
  * pastes into a console.
  */
-function Statement({ sql }: { sql: string }) {
+function Statement({ sql, tint = false }: { sql: string; tint?: boolean }) {
   const matches = useMatches(sql)
   const tokens = useMemo(() => tokenizeSql(sql), [sql])
   let from = 0
@@ -802,7 +812,8 @@ function Statement({ sql }: { sql: string }) {
           <span
             key={at}
             className={cn(
-              "data-[token=keyword]:font-semibold data-[token=keyword]:text-sql-keyword",
+              "data-[token=keyword]:font-semibold",
+              tint ? "data-[token=keyword]:text-(--mark)" : "data-[token=keyword]:text-sql-keyword",
               "data-[token=identifier]:text-sql-identifier",
               "data-[token=string]:text-sql-string",
               "data-[token=number]:text-sql-number",

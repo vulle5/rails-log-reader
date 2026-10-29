@@ -20,7 +20,16 @@ import { CollapseConsoleButton, CollapsedConsole, useUnseenCount } from "./featu
 import { ConsoleRail } from "./features/console/components/ConsoleRail"
 import { detailItems, DetailColumn } from "./features/detail-column/components/DetailColumn"
 import type { DetailTabId } from "./features/detail-column/components/DetailTabs"
-import { DetailFilters, detailFilterKey, useDetailFilter } from "./features/detail-column/components/DetailFilters"
+import { detailFilterKey } from "./features/detail-column/components/DetailFilters"
+import {
+  SAMPLE_ROW_ID,
+  ThinningChips,
+  ThinningContext,
+  ThinningSwitcher,
+  useThinning,
+  useThinningPrototype,
+  withSampleRow,
+} from "./prototype-detail-thinning/thinning"
 import { EmptyReader } from "./features/setup-status/components/EmptyReader"
 import { ReplDrawer } from "./features/repl/components/ReplDrawer"
 import { FOLDED, useReplDrawer } from "./features/repl/hooks/repl-drawer"
@@ -138,7 +147,7 @@ function ReaderKeepingEvents(props: ReaderProps) {
 }
 
 function ReaderView({
-  rows = [],
+  rows: liveRows = [],
   lines = [],
   evictedRows = 0,
   evictedEvaluations = NONE_EVICTED,
@@ -160,7 +169,10 @@ function ReaderView({
   // *Selection* is a row's `id` rather than the row, because rows mutate in place and are
   // replaced wholesale on eviction: holding the id means the detail column follows the row
   // it named, and shows the placeholder again if that row is ever no longer there.
-  const [selected, setSelected] = useState<string | null>(null)
+  // PROTOTYPE (#220): the canned long request, selected on open.
+  const prototype = useThinningPrototype()
+  const rows = useMemo(() => withSampleRow(liveRows), [liveRows])
+  const [selected, setSelected] = useState<string | null>(SAMPLE_ROW_ID)
   const showing = rows.find((row) => row.id === selected) ?? null
 
   // The tab filter lives here rather than inside the table for the same reason Selection
@@ -169,7 +181,7 @@ function ReaderView({
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
-  const { filter: detailFilter, toggleSchema } = useDetailFilter()
+  const { filter: detailFilter, toggleSchema, toggleCache } = useThinning()
   // Above Selection, so clicking through requests on Params compares their params.
   const [detailTab, setDetailTab] = useState<DetailTabId>("timeline")
   const tableColumns = useHiddenTableColumns()
@@ -491,8 +503,17 @@ function ReaderView({
                   scroll={detailScroll}
                   bodyScrolls={false}
                   className="row-span-3"
-                  controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
+                  controls={
+                    <ThinningChips
+                      row={showing}
+                      filter={detailFilter}
+                      look={prototype.chip}
+                      onToggleCache={toggleCache}
+                      onToggleSchema={toggleSchema}
+                    />
+                  }
                 >
+                  <ThinningContext value={{ variant: prototype.variant, palette: prototype.palette }}>
                   <DetailColumn
                     row={showing}
                     filter={detailFilter}
@@ -504,6 +525,7 @@ function ReaderView({
                     actsOnlyFrom={actsOnlyFrom}
                     onShowInRepl={showInRepl}
                   />
+                  </ThinningContext>
                 </Column>
                 {/* Outside the drawer, so a drag that folds it carries on over its header. */}
                 <ColumnDivider
@@ -543,6 +565,7 @@ function ReaderView({
           </ChosenEventsKept>
         </EditorContext>
       </SearchContext>
+      <ThinningSwitcher prototype={prototype} theme={theme} />
     </div>
   )
 }
