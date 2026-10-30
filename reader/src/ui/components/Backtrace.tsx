@@ -2,33 +2,38 @@ import { useContext, useMemo, useState } from "react"
 
 import { OpenModifierHeld } from "../hooks/open-modifier"
 import { EditorContext } from "../hooks/editor-scheme"
-import { Marked, SearchContext, useMatches, type Match } from "../hooks/search"
+import { Marked, SearchContext, useMatches, type Match, type Search } from "../hooks/search"
 import { segmentBacktrace, type BacktraceSegment } from "../lib/backtrace"
 import { cn } from "../lib/cn"
 import { withOpenModifier } from "../lib/platform"
 import { fillScheme, sourceLocation } from "../lib/source-location"
+
+/** Which gem-frame markers are open, by the `from` of their gap, and how to open one. */
+export type OpenedMarkers = readonly [ReadonlySet<number>, (from: number) => void]
 
 /**
  * A backtrace, gem frames collapsed into inline markers and the developer's own in place, as the
  * *Detail column* draws an exception's and the *REPL*'s *Transcript* an error's. Nothing when it
  * has no frames.
  *
- * Collapse state lives in this component's own `useState`, not on the exception or the
- * row: selecting elsewhere unmounts it, so the next selection starts from an empty
- * `revealed` set with no explicit reset.
+ * Which markers have been opened, by the `from` of their gap, is this component's own unless
+ * its caller holds it in `opened`: the Detail column does, so the *Timeline ruler* can size the
+ * exception block by it. Either way it only ever grows: nothing closes a marker once opened.
  */
 export function Backtrace({
   backtrace,
   railsRoot,
   className,
+  opened,
 }: {
   backtrace: readonly string[]
   railsRoot: string | null
   className?: string
+  opened?: OpenedMarkers
 }) {
   const search = useContext(SearchContext)
-  // Only ever grows: nothing removes an entry once revealed.
-  const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
+  const [own, setOwn] = useState<ReadonlySet<number>>(() => new Set())
+  const [revealed, reveal] = opened ?? [own, (from: number) => setOwn((prev) => new Set(prev).add(from))]
   const segments = useMemo(() => segmentBacktrace(backtrace, railsRoot), [backtrace, railsRoot])
   const held = useContext(OpenModifierHeld)
   if (segments.length === 0) return null
@@ -55,13 +60,21 @@ export function Backtrace({
             segment={segment}
             railsRoot={railsRoot}
             held={held}
-            revealed={revealed.has(segment.from) || segment.frames.some((frame) => search.find(frame).length > 0)}
-            onReveal={() => setRevealed((prev) => new Set(prev).add(segment.from))}
+            revealed={gapShown(segment, revealed, search)}
+            onReveal={() => reveal(segment.from)}
           />
         ),
       )}
     </ol>
   )
+}
+
+/**
+ * Whether a gem-frame marker shows its frames: once opened, and while the *Search* term matches
+ * one of them, so a match is never folded away.
+ */
+export function gapShown(segment: Extract<BacktraceSegment, { type: "gap" }>, opened: ReadonlySet<number>, search: Search) {
+  return opened.has(segment.from) || segment.frames.some((frame) => search.find(frame).length > 0)
 }
 
 function GapSegment({

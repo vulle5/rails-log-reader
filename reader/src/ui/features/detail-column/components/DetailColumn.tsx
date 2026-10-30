@@ -1,4 +1,4 @@
-import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode } from "react"
+import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode, type RefObject } from "react"
 
 import type { ActivityRow, EvaluationRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
@@ -13,11 +13,13 @@ import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Search } from "../../../hooks/search"
 import { Copyable, CopyButton, LineCopy } from "../../../components/CopyButton"
 import { bindText, bytes, mediaType, size, statusLine } from "../lib/format"
-import { Backtrace, Openable } from "../../../components/Backtrace"
+import { Backtrace, gapShown, Openable, type OpenedMarkers } from "../../../components/Backtrace"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { exceptionText } from "../lib/exception-text"
-import { markKind, tokenizeSql } from "../lib/sql-highlight"
-import { intrinsicHeight } from "../lib/timeline-layout"
+import { queryMark, tokenizeSql } from "../lib/sql-highlight"
+import { intrinsicHeight, timelineLayout } from "../lib/timeline-layout"
+import { segmentBacktrace } from "../../../lib/backtrace"
+import { entryKey, TimelineRuler } from "./TimelineRuler"
 import { useContentWidth } from "../hooks/content-width"
 import { paramsSource } from "../lib/params-source"
 import { jsonSource } from "../lib/json-source"
@@ -143,10 +145,6 @@ function RequestDetail({
   onTab: (tab: DetailTabId) => void
   scroll: PanelScroll
 }) {
-  // Filtered once each, rather than where they are rendered: `trailing` is read twice below —
-  // once for whether the section exists at all, once for what it holds — and a second pass
-  // over the same array for the same filter would say nothing a first pass had not already.
-  const trailing = eventsShown(row.trailing, filter)
   const search = useContext(SearchContext)
   const params = useMemo(() => (row.params === null ? null : paramsSource(row.params)), [row.params])
   const paramsMatches = useMemo(() => (params === null ? 0 : countMatches(search, params.tree)), [search, params])
@@ -182,18 +180,17 @@ function RequestDetail({
             id: "timeline",
             label: "Timeline",
             scroll,
+            ruled: true,
             panel: (
-              <>
-                <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
-                {row.exception !== null && (
-                  <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
-                )}
-                {/* Checked on the filtered length rather than `row.trailing.length`: a trailing
-                    block of nothing but queries a chip hides must not leave an empty "After the
-                    request finished" section behind — the section is about there being something
-                    to show under it. */}
-                {trailing.length > 0 && <Trailing caption="After the request finished" events={trailing} railsRoot={railsRoot} />}
-              </>
+              <TimelinePanel
+                subject={row.id}
+                timeline={eventsShown(row.timeline, filter)}
+                exception={row.exception}
+                cutFrom={row.backtraceCutFrom}
+                trailing={eventsShown(row.trailing, filter)}
+                caption="After the request finished"
+                railsRoot={railsRoot}
+              />
             ),
           },
           {
@@ -265,8 +262,8 @@ function RunDetail({
   return (
     // No tab bar: a Run has nothing but its timeline to show.
     <Detail kind={<Highlight text={kind} />} name={row.appName ?? ""} facts={facts.join(" · ")}>
-      <DetailScroller className="flex-auto" scroll={scroll}>
-        <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
+      <DetailScroller className="flex-auto" scroll={scroll} ruled>
+        <TimelinePanel subject={row.id} timeline={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
       </DetailScroller>
     </Detail>
   )
@@ -302,7 +299,6 @@ function EvaluationDetail({
   actsOnlyFrom: string | null
   onShowInRepl: (entry: number) => void
 }) {
-  const trailing = eventsShown(row.trailing, filter)
   const label = resultLabel(row.outcome, held)
   const search = useContext(SearchContext)
   // Whether Raw was chosen on the Result tab. Any new Selection, one shown before included,
@@ -352,11 +348,15 @@ function EvaluationDetail({
             id: "timeline",
             label: "Timeline",
             scroll,
+            ruled: true,
             panel: (
-              <>
-                <Timeline label="Timeline" events={eventsShown(row.timeline, filter)} railsRoot={railsRoot} />
-                {trailing.length > 0 && <Trailing caption="After the evaluation finished" events={trailing} railsRoot={railsRoot} />}
-              </>
+              <TimelinePanel
+                subject={row.id}
+                timeline={eventsShown(row.timeline, filter)}
+                trailing={eventsShown(row.trailing, filter)}
+                caption="After the evaluation finished"
+                railsRoot={railsRoot}
+              />
             ),
           },
           {
@@ -700,21 +700,90 @@ function Detail({
   )
 }
 
-/** Renders whatever it is handed — filtering is each caller's own job, done exactly once,
- * because this is reused from three call sites and a filter applied here would run again for
- * every one of them. */
+const NOTHING: readonly TimelineEvent[] = []
+
+/**
+ * A row's Timeline tab, for every row kind: its timeline, the exception it raised, and its
+ * trailing section under its `caption`, with the *Timeline ruler* down their side. Each is handed
+ * in as the chips leave it. The ruler's layout and every entry's own estimate are taken at the
+ * one width, measured off the timeline.
+ *
+ * Which of the exception's gem-frame markers are open is held here, and the ruler's layout grows
+ * the exception block by each one. A new `subject` opens with every marker closed.
+ */
+function TimelinePanel({
+  subject,
+  timeline,
+  exception = null,
+  cutFrom = null,
+  trailing = NOTHING,
+  caption = "",
+  railsRoot,
+}: {
+  subject: string
+  timeline: readonly TimelineEvent[]
+  exception?: RequestException | null
+  /** The size the wire cut the exception's backtrace from. */
+  cutFrom?: number | null
+  trailing?: readonly TimelineEvent[]
+  caption?: string
+  railsRoot: string | null
+}) {
+  const [list, width] = useContentWidth<HTMLOListElement>()
+  const search = useContext(SearchContext)
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set())
+  const [openedFor, setOpenedFor] = useState(subject)
+  if (openedFor !== subject) {
+    setOpenedFor(subject)
+    setOpened(new Set())
+  }
+  const backtrace = exception?.backtrace
+  const segments = useMemo(() => (backtrace === undefined ? [] : segmentBacktrace(backtrace, railsRoot)), [backtrace, railsRoot])
+
+  const layout = useMemo(() => {
+    const shown = new Set<number>()
+    for (const segment of segments) if (segment.type === "gap" && gapShown(segment, opened, search)) shown.add(segment.from)
+    const block = exception === null ? null : { exception, segments, opened: shown, cut: cutFrom !== null }
+    return timelineLayout({ timeline, exception: block, trailing }, width)
+  }, [timeline, exception, cutFrom, segments, opened, search, trailing, width])
+
+  return (
+    <>
+      <TimelineRuler layout={layout} />
+      <Timeline label="Timeline" list={list} events={timeline} width={width} railsRoot={railsRoot} />
+      {exception !== null && (
+        <Exception
+          exception={exception}
+          cutFrom={cutFrom}
+          railsRoot={railsRoot}
+          opened={[opened, (from) => setOpened((prev) => new Set(prev).add(from))]}
+        />
+      )}
+      {/* Checked on what the chips leave rather than on everything the row holds: a trailing
+          block of nothing but queries a chip hides must not leave an empty section behind — the
+          section is about there being something to show under it. */}
+      {trailing.length > 0 && <Trailing caption={caption} events={trailing} width={width} railsRoot={railsRoot} />}
+    </>
+  )
+}
+
+/** Renders whatever it is handed: the chips' filtering is done once, by every row kind's caller. */
 function Timeline({
   label,
+  list,
   events,
+  width,
   railsRoot,
 }: {
   /** Absent in the trailing section, whose own heading already names what it lists. */
   label?: string
+  /** Where the timeline's width is measured from: the first list of the tab. */
+  list?: RefObject<HTMLOListElement | null>
   events: readonly TimelineEvent[]
+  /** The width the timeline's entries are estimated at. */
+  width: number
   railsRoot: string | null
 }) {
-  const [list, width] = useContentWidth<HTMLOListElement>()
-
   return (
     <ol aria-label={label} ref={list}>
       {/* `(run_id, seq)` is the event identity everywhere else in the Reader, and a key is
@@ -753,7 +822,7 @@ function Entry({ className, estimate, ...props }: ComponentProps<"li"> & { estim
 
 const Query = memo(function Query({ event, width, railsRoot }: { event: SqlEvent; width: number; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
-  const mark = useMemo(() => markKind(sql), [sql])
+  const mark = queryMark(event)
 
   return (
     // A marked statement's edge, read off its `data-mark`: `INSERT` in `POST`'s colour, `UPDATE`
@@ -762,6 +831,7 @@ const Query = memo(function Query({ event, width, railsRoot }: { event: SqlEvent
       className="data-[mark=insert]:shadow-mark-insert data-[mark=update]:shadow-mark-update data-[mark=delete]:shadow-mark-delete data-[mark=rollback]:shadow-mark-rollback"
       estimate={intrinsicHeight(event, width)}
       data-mark={mark ?? undefined}
+      data-event={entryKey(event)}
     >
       <div className="flex items-baseline gap-1.5 text-xs text-muted">
         {/* What `development.log` prefixes these with, and the reason a query took no time. */}
@@ -949,10 +1019,12 @@ function Exception({
   exception,
   cutFrom,
   railsRoot,
+  opened,
 }: {
   exception: RequestException
   cutFrom: number | null
   railsRoot: string | null
+  opened: OpenedMarkers
 }) {
   return (
     // The right padding keeps the message clear of the copy button, which is anchored here and
@@ -966,7 +1038,7 @@ function Exception({
           enough to select by hand. */}
       <CopyButton className="absolute top-1.5 right-2" size="md" text={() => exceptionText(exception, cutFrom)} label="Copy exception" />
       <ExceptionLine className="font-mono text-sm" exception={exception} />
-      <Backtrace className="mt-1.5" backtrace={exception.backtrace} railsRoot={railsRoot} />
+      <Backtrace className="mt-1.5" backtrace={exception.backtrace} railsRoot={railsRoot} opened={opened} />
       <Cut field="backtrace" original={cutFrom ?? undefined} />
     </section>
   )
@@ -1019,11 +1091,21 @@ function Callsite({
  * Reader bug rather than as the truth about the file. Set apart by a rule as well as the
  * caption, so it cannot be mistaken for the timeline it sits below.
  */
-function Trailing({ caption, events, railsRoot }: { caption: string; events: readonly TimelineEvent[]; railsRoot: string | null }) {
+function Trailing({
+  caption,
+  events,
+  width,
+  railsRoot,
+}: {
+  caption: string
+  events: readonly TimelineEvent[]
+  width: number
+  railsRoot: string | null
+}) {
   return (
     <section className="mt-3 border-t border-dashed border-border" aria-label={caption}>
       <Caption className="px-3 py-1.5">{caption}</Caption>
-      <Timeline events={events} railsRoot={railsRoot} />
+      <Timeline events={events} width={width} railsRoot={railsRoot} />
     </section>
   )
 }

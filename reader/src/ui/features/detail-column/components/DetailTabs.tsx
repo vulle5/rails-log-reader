@@ -37,6 +37,8 @@ export type DetailTab = {
   subject?: string
   /** Where this panel's scroll is followed from: the Timeline's *auto-scroll*. */
   scroll?: PanelScroll
+  /** Whether the panel draws the *Timeline ruler*, which its scrollport makes room for. */
+  ruled?: boolean
   panel: ReactNode
 }
 
@@ -141,6 +143,7 @@ export function DetailTabs({
                 // reader; this says so to whatever reads the tree rather than the styles.
                 aria-hidden={tab !== showing}
                 scroll={tab.scroll}
+                ruled={tab.ruled}
               >
                 {tab.panel}
               </DetailScroller>
@@ -159,11 +162,14 @@ export function DetailTabs({
 export function DetailScroller({
   className,
   scroll,
+  ruled = false,
   children,
   ...props
 }: {
   className?: string
   scroll?: PanelScroll
+  /** Whether it holds the *Timeline ruler*, which is drawn in its right padding. */
+  ruled?: boolean
   children: ReactNode
   id?: string
   role?: string
@@ -174,6 +180,7 @@ export function DetailScroller({
     <div
       className={cn(
         "flex min-h-0 flex-col gap-px overflow-auto pb-6 [scrollbar-gutter:stable] [scrollbar-width:thin]",
+        ruled && "pr-2.5",
         className,
       )}
       data-scrollport

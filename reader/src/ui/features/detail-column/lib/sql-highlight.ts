@@ -11,6 +11,8 @@
  * pastes into a console.
  */
 
+import type { SqlEvent } from "../../../../shared/wire"
+
 export type SqlTokenKind =
   | "keyword"
   /** A quoted one — `"posts"`, `` `posts` ``. An unquoted word is plain: it may be a function. */
@@ -117,4 +119,19 @@ export function markKind(sql: string): MarkKind | null {
     return token.kind === "keyword" ? (MARKS.get(token.text.toUpperCase()) ?? null) : null
   }
   return null
+}
+
+const marked = new WeakMap<SqlEvent, MarkKind | null>()
+
+/**
+ * A query's `markKind`, read once per event however many places draw it: its timeline entry and
+ * the *Timeline ruler*'s tick.
+ */
+export function queryMark(event: SqlEvent): MarkKind | null {
+  let kind = marked.get(event)
+  if (kind === undefined) {
+    kind = markKind(event.payload.sql)
+    marked.set(event, kind)
+  }
+  return kind
 }

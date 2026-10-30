@@ -12,6 +12,7 @@ import {
   cellUnder,
   chip,
   column,
+  detailPanel,
   folded,
   isQuery,
   itemsOf,
@@ -20,6 +21,7 @@ import {
   rowShowing,
   search,
   select,
+  showDetailTab,
   timeline,
   wholeText,
 } from "./reader.harness"
@@ -468,6 +470,198 @@ describe("a marked statement", () => {
 
     expect(entry).toHaveAttribute("data-mark", "update")
     expect(queries()[0]).not.toHaveAttribute("data-mark")
+  })
+})
+
+/**
+ * The *Timeline ruler*: a strip down the Timeline tab's side with a tick per marked statement and
+ * a thumb over the stretch on screen. happy-dom lays nothing out, so what is asserted here is
+ * what the ruler holds and where a tick takes the reader, never where it is drawn.
+ */
+describe("the Timeline ruler", () => {
+  function ruler() {
+    return within(detail()).getByRole("group", { name: "Timeline ruler" })
+  }
+
+  function noRuler() {
+    return within(detail()).queryByRole("group", { name: "Timeline ruler" })
+  }
+
+  test("is on a Request row's Timeline tab and on none of its other tabs", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.route("req-1", "OrdersController", "create", { pairs: [["total", "3"]] }),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.finish("req-1"),
+      run.response("req-1"),
+    )
+
+    await select(user, "/orders")
+    expect(within(detailPanel("Timeline")).getByRole("group", { name: "Timeline ruler" })).toBeInTheDocument()
+
+    for (const name of ["Params", "Headers", "Response"]) {
+      await showDetailTab(user, name)
+      expect(noRuler()).not.toBeInTheDocument()
+    }
+  })
+
+  test("is on an Evaluation row's Timeline tab and not on its Result tab", async () => {
+    const run = aRun("con-1")
+    const { user } = theReader(
+      run.header("console"),
+      run.evaluationStart("repl-a-1", "Order.create!"),
+      run.sql("repl-a-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.evaluationFinish("repl-a-1"),
+    )
+
+    await select(user, "Order.create!")
+    expect(within(detailPanel("Timeline")).getByRole("group", { name: "Timeline ruler" })).toBeInTheDocument()
+
+    await showDetailTab(user, "Result")
+    expect(noRuler()).not.toBeInTheDocument()
+  })
+
+  function ticks() {
+    return within(ruler()).queryAllByRole("button")
+  }
+
+  test("has a tick per marked statement, in timeline order, named by its kind and its query's name", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", "BEGIN", { name: "TRANSACTION", binds: [] }),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.sql("req-1", 'SELECT "orders".* FROM "orders"', { name: "Order Load" }),
+      run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+      run.sql("req-1", "DELETE FROM sessions", { name: null, binds: [] }),
+      run.sql("req-1", "ROLLBACK", { name: "TRANSACTION", binds: [] }),
+      run.finish("req-1"),
+      run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Update" }),
+    )
+
+    await select(user, "/orders")
+
+    const expected = [
+      ["INSERT · Order Create", "insert"],
+      ["UPDATE · Order Update", "update"],
+      ["DELETE", "delete"],
+      ["ROLLBACK · TRANSACTION", "rollback"],
+      ["UPDATE · Order Update", "update"],
+    ]
+    expect(ticks()).toHaveLength(expected.length)
+    for (const [at, [name, kind]] of expected.entries()) {
+      expect(ticks()[at]).toHaveAccessibleName(name!)
+      expect(ticks()[at]).toHaveAttribute("title", name)
+      expect(ticks()[at]).toHaveAttribute("data-mark", kind)
+    }
+  })
+
+  test("has a tick for every one of a timeline of nothing but marked statements", async () => {
+    const run = aRun("rake-1")
+    const updates = Array.from({ length: 40 }, (_, at) => run.sql(null, `UPDATE "orders" SET "total" = ${at}`, { name: null }))
+    const { user } = theReader(run.header("rake", 91_887), ...updates)
+
+    await select(user, "rake")
+
+    expect(ticks()).toHaveLength(40)
+  })
+
+  test("has no tick for a marked statement a chip hides", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.sql("req-1", 'DELETE FROM "orders" WHERE "id" = ?', { name: "Order Destroy", cached: true }),
+    )
+    await select(user, "/orders")
+
+    await user.click(chip(/^cache\b/, "Filter by query kind"))
+
+    expect(ticks()).toHaveLength(1)
+    expect(ticks()[0]).toHaveAccessibleName("INSERT · Order Create")
+  })
+
+  test("moves a tick below the exception down when a gem-frame marker in its backtrace is opened", async () => {
+    const run = aRun("srv-1")
+    const gems = Array.from({ length: 30 }, (_, at) => `rack (3.1.8) lib/rack/layer_${at}.rb:12:in \`call'`)
+    const { user } = theReader(
+      run.header(),
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44:in `total'", ...gems] },
+      }),
+      run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+    )
+    await select(user, "/orders")
+    const tick = () => within(ruler()).getByRole("button", { name: "UPDATE · Order Sync" })
+    const closed = parseFloat(tick().style.top)
+
+    await user.click(within(detail()).getByRole("button", { name: "30 frames hidden" }))
+
+    expect(parseFloat(tick().style.top)).toBeGreaterThan(closed)
+  })
+
+  describe("a mark's tick", () => {
+    const scrollIntoView = Element.prototype.scrollIntoView
+    let scrolledTo: { element: Element; options: ScrollIntoViewOptions | boolean | undefined }[] = []
+
+    beforeAll(() => {
+      Element.prototype.scrollIntoView = function record(this: Element, options?: ScrollIntoViewOptions | boolean) {
+        scrolledTo.push({ element: this, options })
+      }
+    })
+
+    afterEach(() => {
+      scrolledTo = []
+    })
+
+    afterAll(() => {
+      Element.prototype.scrollIntoView = scrollIntoView
+    })
+
+    test("brings its entry into view, centred, on a click", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+        run.sql("req-1", 'SELECT "orders".* FROM "orders"', { name: "Order Load" }),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+      )
+      await select(user, "/orders")
+
+      await user.click(within(ruler()).getByRole("button", { name: "UPDATE · Order Update" }))
+
+      expect(scrolledTo).toEqual([{ element: queries()[2]!, options: { block: "center" } }])
+    })
+
+    test("brings an entry in the trailing section into view", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+        run.finish("req-1"),
+        run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+      )
+      await select(user, "/orders")
+
+      await user.click(within(ruler()).getByRole("button", { name: "UPDATE · Order Sync" }))
+
+      const trailing = within(detail()).getByRole("region", { name: "After the request finished" })
+      const [entry] = within(trailing).getAllByRole("listitem").filter(isQuery)
+      expect(scrolledTo.map(({ element }) => element)).toEqual([entry!])
+    })
+  })
+
+  test("is on a Run row's timeline", async () => {
+    const run = aRun("rake-1")
+    const { user } = theReader(run.header("rake", 91_887), run.sql(null, 'UPDATE "orders" SET "total" = 0', { name: null }))
+
+    await select(user, "rake")
+
+    expect(ruler()).toBeInTheDocument()
   })
 })
 

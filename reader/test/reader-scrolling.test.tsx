@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { fireEvent, render, within } from "@testing-library/react"
+import { act, fireEvent, render, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
@@ -218,7 +218,10 @@ function scrollUp(name: ColumnName, up = ROW) {
 function resized(name: ColumnName, height: number) {
   const port = scrollport(name)
   Object.defineProperty(port, "clientHeight", { configurable: true, value: height })
-  for (const { callback, elements } of observers) if (elements.has(port)) callback()
+  // A stubbed observer firing is no DOM event, so nothing else wraps what it updates in `act`.
+  act(() => {
+    for (const { callback, elements } of observers) if (elements.has(port)) callback()
+  })
 }
 
 function scrollBackToTheBottom(name: ColumnName) {
@@ -845,6 +848,46 @@ describe("the Detail column's chips", () => {
 
     expect(pinnedToBottom("Console")).toBe(false)
     expect(pinnedToBottom("Activity table")).toBe(true)
+  })
+})
+
+/**
+ * The *Timeline ruler*'s thumb is where the Timeline's scrollport really is, read off the port as
+ * it scrolls, never off the timeline's estimated layout.
+ */
+describe("the Timeline ruler's thumb", () => {
+  function thumb() {
+    return within(column("Detail column")).getByRole("img", { name: "Timeline ruler thumb", hidden: true })
+  }
+
+  /** Twelve one-row queries: 240 pixels of timeline in a 60-pixel port. */
+  function aWritingRequest() {
+    const envelopes: Envelope[] = [run.start("w1", "POST", "/orders")]
+    for (let each = 0; each < 12; each += 1) {
+      const sql = each === 3 ? 'INSERT INTO "orders" DEFAULT VALUES' : 'SELECT "orders".* FROM "orders"'
+      envelopes.push(run.sql("w1", sql, { binds: [] }))
+    }
+    return envelopes
+  }
+
+  test("covers the stretch on screen, and follows the port as it scrolls", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    expect(thumb()).toHaveStyle({ top: "75%", height: "25%" })
+
+    scrollUp("Detail column", 3 * ROW)
+
+    expect(thumb()).toHaveStyle({ top: "50%", height: "25%" })
+  })
+
+  test("is drawn over the ruler's ticks", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    const ruler = within(column("Detail column")).getByRole("group", { name: "Timeline ruler" })
+    const [tick] = within(ruler).getAllByRole("button")
+    expect(tick!.compareDocumentPosition(thumb()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
