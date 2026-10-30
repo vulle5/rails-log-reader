@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { act, fireEvent, render, within } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import userEvent, { type UserEvent } from "@testing-library/user-event"
 
 import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC, HANGS as DENSE_HANG } from "./traffic.fixtures"
@@ -47,6 +47,7 @@ const geometry = {
   scrollHeight: Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight"),
   clientHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight"),
   scrollTop: Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop"),
+  scrollIntoView: Element.prototype.scrollIntoView,
 }
 
 const scrolledTo = new WeakMap<Element, number>()
@@ -97,6 +98,14 @@ beforeAll(() => {
       scrolledTo.set(this, Math.min(Math.max(top, 0), bottomOf(this)))
     },
   })
+  // Every row is centred in its scrollport, as near as the port goes, whatever `block` asks for:
+  // `block: "center"` is how a mark's tick brings its entry into view.
+  Element.prototype.scrollIntoView = function centre(this: Element) {
+    const port = this.closest<HTMLElement>("[data-scrollport]")
+    if (port === null) return
+    const above = [...port.querySelectorAll("li, tr")].indexOf(this)
+    port.scrollTop = above * ROW + ROW / 2 - port.clientHeight / 2
+  }
 })
 
 afterAll(() => {
@@ -104,6 +113,7 @@ afterAll(() => {
   Object.defineProperty(Element.prototype, "scrollHeight", geometry.scrollHeight!)
   Object.defineProperty(HTMLElement.prototype, "clientHeight", geometry.clientHeight!)
   Object.defineProperty(Element.prototype, "scrollTop", geometry.scrollTop!)
+  Element.prototype.scrollIntoView = geometry.scrollIntoView
 })
 
 afterEach(() => {
@@ -249,6 +259,47 @@ function detailEntries() {
 }
 
 const COLUMNS: ColumnName[] = ["Console", "Activity table", "Detail column"]
+
+/** Twelve one-row queries, the one at `insertAt` an `INSERT`: 240 pixels of timeline in a 60-pixel port. */
+function aWritingRequest(insertAt = 3) {
+  const envelopes: Envelope[] = [run.start("w1", "POST", "/orders")]
+  for (let each = 0; each < 12; each += 1) {
+    const sql = each === insertAt ? 'INSERT INTO "orders" DEFAULT VALUES' : 'SELECT "orders".* FROM "orders"'
+    envelopes.push(run.sql("w1", sql, { binds: [] }))
+  }
+  return envelopes
+}
+
+function ruler() {
+  return within(column("Detail column")).getByRole("group", { name: "Timeline ruler" })
+}
+
+function thumb() {
+  return within(column("Detail column")).getByRole("img", { name: "Timeline ruler thumb", hidden: true })
+}
+
+/**
+ * A browser announces a scroll a script made with a `scroll` event of its own, which happy-dom
+ * does not, so a test announces the one the ruler made in the Detail column.
+ */
+function announceTheScroll() {
+  fireEvent.scroll(scrollport("Detail column"))
+}
+
+/** Presses the ruler `at` pixels down its strip and lets go there. */
+async function pressTheRuler(user: UserEvent, at: number) {
+  await dragTheRuler(user, at, at)
+}
+
+/** Presses the ruler `from` pixels down its strip and drags the press to `to`, announcing each scroll. */
+async function dragTheRuler(user: UserEvent, from: number, to: number) {
+  const target = ruler()
+  await user.pointer({ keys: "[MouseLeft>]", target, coords: { clientY: from } })
+  announceTheScroll()
+  await user.pointer({ target, coords: { clientY: to } })
+  announceTheScroll()
+  await user.pointer({ keys: "[/MouseLeft]", target, coords: { clientY: to } })
+}
 
 // ---- the tests ----------------------------------------------------------------------
 
@@ -856,20 +907,6 @@ describe("the Detail column's chips", () => {
  * it scrolls, never off the timeline's estimated layout.
  */
 describe("the Timeline ruler's thumb", () => {
-  function thumb() {
-    return within(column("Detail column")).getByRole("img", { name: "Timeline ruler thumb", hidden: true })
-  }
-
-  /** Twelve one-row queries: 240 pixels of timeline in a 60-pixel port. */
-  function aWritingRequest() {
-    const envelopes: Envelope[] = [run.start("w1", "POST", "/orders")]
-    for (let each = 0; each < 12; each += 1) {
-      const sql = each === 3 ? 'INSERT INTO "orders" DEFAULT VALUES' : 'SELECT "orders".* FROM "orders"'
-      envelopes.push(run.sql("w1", sql, { binds: [] }))
-    }
-    return envelopes
-  }
-
   test("covers the stretch on screen, and follows the port as it scrolls", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
@@ -885,9 +922,100 @@ describe("the Timeline ruler's thumb", () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
-    const ruler = within(column("Detail column")).getByRole("group", { name: "Timeline ruler" })
-    const [tick] = within(ruler).getAllByRole("button")
+    const [tick] = within(ruler()).getAllByRole("button")
     expect(tick!.compareDocumentPosition(thumb()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+/**
+ * The *Timeline ruler* is the Timeline's scrollbar: pressing or dragging its strip moves the
+ * scrollport, and the Detail column's *auto-scroll* reads where the port ends up like any other
+ * scroll. The strip is the port's height, so a pixel down it is a pixel of the port's own.
+ */
+describe("the Timeline ruler as the Timeline's scrollbar", () => {
+  test("scrolls the Timeline toward the point pressed, centring the thumb on it", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await pressTheRuler(user, 30)
+
+    expect(thumb()).toHaveStyle({ top: "37.5%", height: "25%" })
+  })
+
+  test("scrolls it continuously as the press is dragged", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await dragTheRuler(user, 30, 18)
+    expect(thumb()).toHaveStyle({ top: "17.5%" })
+
+    await dragTheRuler(user, 18, 45)
+    expect(thumb()).toHaveStyle({ top: "62.5%" })
+  })
+
+  test("drags the thumb from where it was grabbed, rather than jumping it to the pointer", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    // The thumb spans 45 to 60 pixels down the strip: grabbed 5 pixels into it.
+    await dragTheRuler(user, 50, 35)
+
+    expect(thumb()).toHaveStyle({ top: "50%" })
+  })
+
+  test("pauses the Detail column when dragged up, so what arrives is counted on the pill", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await dragTheRuler(user, 50, 20)
+    arrive(run.sql("w1"))
+
+    expect(pinnedToBottom("Detail column")).toBe(false)
+    expect(pill("Detail column")).toHaveTextContent("1 new")
+  })
+
+  test("resumes following when dragged back to the bottom, and clears the pill", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+    await dragTheRuler(user, 50, 20)
+    arrive(run.sql("w1"))
+
+    await dragTheRuler(user, 20, PORT)
+    arrive(run.sql("w1"))
+
+    expect(pinnedToBottom("Detail column")).toBe(true)
+    expect(pill("Detail column")).not.toBeInTheDocument()
+  })
+
+})
+
+/**
+ * A mark's tick on the *Timeline ruler* scrolls its entry into view, and the Detail column's
+ * *auto-scroll* reads where that leaves the port, as it reads *Hover grouping*'s jump.
+ */
+describe("a mark's tick on the Timeline ruler", () => {
+  test("pauses the Detail column when it takes it above the bottom", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await user.click(within(ruler()).getByRole("button", { name: /^INSERT/ }))
+    announceTheScroll()
+    arrive(run.sql("w1"))
+
+    expect(pinnedToBottom("Detail column")).toBe(false)
+    expect(pill("Detail column")).toHaveTextContent("1 new")
+  })
+
+  test("leaves the Detail column following when its entry is at the bottom already", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest(11))
+    await select(user, "/orders")
+
+    await user.click(within(ruler()).getByRole("button", { name: /^INSERT/ }))
+    announceTheScroll()
+    arrive(run.sql("w1"))
+
+    expect(pinnedToBottom("Detail column")).toBe(true)
+    expect(pill("Detail column")).not.toBeInTheDocument()
   })
 })
 

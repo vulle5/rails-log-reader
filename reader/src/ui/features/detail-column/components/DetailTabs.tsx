@@ -157,7 +157,9 @@ export function DetailTabs({
 /**
  * One scrollport in the Detail column: a tab's panel, or a *Run row*'s timeline, which has no
  * bar. The gutter is reserved whether or not the content needs a scrollbar yet, so the column
- * does not narrow under the reader the moment it first has something to scroll.
+ * does not narrow under the reader the moment it first has something to scroll. A ruled one has
+ * no scrollbar: the *Timeline ruler* is its scrollbar, in a right padding kept whether or not
+ * there is anything to scroll.
  */
 export function DetailScroller({
   className,
@@ -168,7 +170,7 @@ export function DetailScroller({
 }: {
   className?: string
   scroll?: PanelScroll
-  /** Whether it holds the *Timeline ruler*, which is drawn in its right padding. */
+  /** Whether it holds the *Timeline ruler*. */
   ruled?: boolean
   children: ReactNode
   id?: string
@@ -179,8 +181,8 @@ export function DetailScroller({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-col gap-px overflow-auto pb-6 [scrollbar-gutter:stable] [scrollbar-width:thin]",
-        ruled && "pr-2.5",
+        "flex min-h-0 flex-col gap-px overflow-auto pb-6",
+        ruled ? "pr-2.5 [scrollbar-width:none]" : "[scrollbar-gutter:stable] [scrollbar-width:thin]",
         className,
       )}
       data-scrollport

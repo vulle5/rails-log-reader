@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react"
 
 import type { SqlEvent } from "../../../../shared/wire"
 import { queryMark, type MarkKind } from "../lib/sql-highlight"
@@ -12,13 +12,41 @@ import type { TimelineLayout } from "../lib/timeline-layout"
  * entries it skipped off screen; the thumb is placed by the scrollport's own numbers, so it is
  * where the reader really is. Drawn first inside the scrollport, sticky and of no height, so it
  * stays in view and lays out nothing in the timeline under it: the scrollport's right padding is
- * its room.
+ * its room, and the port has no scrollbar of its own beside it.
+ *
+ * It is the port's scrollbar. Pressing the strip anywhere but a tick centres the thumb on the
+ * point pressed, or, pressed on the thumb, holds it where it was grabbed; dragging moves it on
+ * from there. It only ever sets the port's `scrollTop`, so the scroll it causes is read by the
+ * column's *auto-scroll* like any other.
  */
 export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
   const anchor = useRef<HTMLDivElement>(null)
   const [port, setPort] = useState<HTMLElement | null>(null)
   const view = useView(port, layout)
   const ticks = useMemo(() => marks(layout), [layout])
+  // How far below the thumb's top the press that is dragging it landed, as a fraction of the whole.
+  const grab = useRef<number | null>(null)
+
+  function press(event: PointerEvent<HTMLDivElement>) {
+    // A tick is a button of its own, whose click goes to its entry.
+    if (port === null || event.button !== 0 || event.target !== event.currentTarget) return
+    // No text selection starts under a drag.
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const at = pointedAt(port, event)
+    const { top, size } = viewOf(port)
+    grab.current = at >= top && at <= top + size ? at - top : size / 2
+    scrollTo(port, at - grab.current)
+  }
+
+  function drag(event: PointerEvent<HTMLDivElement>) {
+    if (port === null || grab.current === null) return
+    scrollTo(port, pointedAt(port, event) - grab.current)
+  }
+
+  function release() {
+    grab.current = null
+  }
 
   useLayoutEffect(() => {
     setPort(anchor.current?.closest<HTMLElement>("[data-scrollport]") ?? null)
@@ -26,11 +54,17 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
 
   return (
     <div ref={anchor} className="sticky top-0 z-10 -mb-px h-0 flex-none">
+      {/* `touch-none`: a finger dragging the strip scrolls the port through it, rather than panning the page. */}
       <div
-        className="absolute top-0 -right-2.5 w-2.5 border-l border-border bg-sunken"
+        className="absolute top-0 -right-2.5 w-2.5 touch-none border-l border-border bg-sunken"
         style={{ height: view.height }}
         role="group"
         aria-label="Timeline ruler"
+        onPointerDown={press}
+        onPointerMove={drag}
+        onPointerUp={release}
+        onPointerCancel={release}
+        onLostPointerCapture={release}
       >
         {ticks.map((tick) => (
           // A tick's colour is its mark's, read off its `data-mark`: the colour its entry's edge is in.
@@ -123,6 +157,16 @@ function useView(port: HTMLElement | null, layout: TimelineLayout): View {
   }, [port, read, layout])
 
   return view
+}
+
+/** How far down the strip `event` is, as a fraction of the whole: the strip is the port's height. */
+function pointedAt(port: HTMLElement, event: PointerEvent<HTMLDivElement>) {
+  return (event.clientY - event.currentTarget.getBoundingClientRect().top) / port.clientHeight
+}
+
+/** Scrolls `port` so the thumb's top is at `fraction` of the strip. The port clamps it to its range. */
+function scrollTo(port: HTMLElement, fraction: number) {
+  port.scrollTop = fraction * port.scrollHeight
 }
 
 function viewOf(port: HTMLElement): View {
