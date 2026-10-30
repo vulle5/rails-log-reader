@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
@@ -7,6 +7,7 @@ import { DENSE_TRAFFIC } from "./traffic.fixtures"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { RequestRow, RunRow } from "../src/shared/activity"
 import type { Envelope, SqlPayload } from "../src/shared/wire"
+import { intrinsicHeight } from "../src/ui/features/detail-column/lib/timeline-layout"
 import {
   cellUnder,
   chip,
@@ -766,6 +767,44 @@ describe("a field the Sidecar had to cut", () => {
     await select(user, "/posts/12")
 
     expect(within(detail()).queryByText(CUT)).not.toBeInTheDocument()
+  })
+})
+
+describe("an entry the column has not laid out yet", () => {
+  // The width a DOM with no layout is told the timeline has, so the estimate is the one at a
+  // width the column measured rather than at any it could assume.
+  const WIDTH = 412
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => WIDTH })
+  })
+
+  afterAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth!)
+  })
+
+  test("is sized by its own estimate at the timeline's width, in the trailing section too", async () => {
+    const run = aRun("srv-1")
+    const start = run.start("req-1", "GET", "/posts/12")
+    const events = [
+      run.sql("req-1", "SELECT 1", { binds: [] }),
+      run.sql("req-1", `SELECT ${'"posts"."title", '.repeat(30)}"posts"."id" FROM "posts"`, { callsite: "app/models/post.rb:3" }),
+      run.log("req-1", "word ".repeat(60), { tags: ["www.example.test"] }),
+    ]
+    const finish = run.finish("req-1")
+    const trailing = run.log("req-1", "Executor#to_complete ran after the body closed")
+    const { user } = theReader(start, ...events, finish, trailing)
+
+    await select(user, "/posts/12")
+
+    const entries = itemsOf(timeline())
+    expect(entries).toHaveLength(events.length)
+    for (const [at, entry] of entries.entries()) {
+      expect(entry).toHaveStyle({ containIntrinsicSize: `auto ${intrinsicHeight(events[at]!, WIDTH)}px` })
+    }
+    const after = within(detail()).getByRole("region", { name: "After the request finished" })
+    expect(within(after).getByRole("listitem")).toHaveStyle({ containIntrinsicSize: `auto ${intrinsicHeight(trailing, WIDTH)}px` })
   })
 })
 

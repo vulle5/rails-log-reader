@@ -17,6 +17,8 @@ import { Backtrace, Openable } from "../../../components/Backtrace"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { exceptionText } from "../lib/exception-text"
 import { markKind, tokenizeSql } from "../lib/sql-highlight"
+import { intrinsicHeight } from "../lib/timeline-layout"
+import { useContentWidth } from "../hooks/content-width"
 import { paramsSource } from "../lib/params-source"
 import { jsonSource } from "../lib/json-source"
 import { xmlSource } from "../lib/xml-source"
@@ -713,15 +715,17 @@ function Timeline({
   events: readonly TimelineEvent[]
   railsRoot: string | null
 }) {
+  const [list, width] = useContentWidth<HTMLOListElement>()
+
   return (
-    <ol aria-label={label}>
+    <ol aria-label={label} ref={list}>
       {/* `(run_id, seq)` is the event identity everywhere else in the Reader, and a key is
           one more place it saves inventing one. */}
       {events.map((event) =>
         event.type === "sql" ? (
-          <Query key={`${event.run_id} ${event.seq}`} event={event} railsRoot={railsRoot} />
+          <Query key={`${event.run_id} ${event.seq}`} event={event} width={width} railsRoot={railsRoot} />
         ) : (
-          <LogLine key={`${event.run_id} ${event.seq}`} event={event} railsRoot={railsRoot} />
+          <LogLine key={`${event.run_id} ${event.seq}`} event={event} width={width} railsRoot={railsRoot} />
         ),
       )}
     </ol>
@@ -734,16 +738,22 @@ function Timeline({
  * eye can see are the same, one chip apart.
  *
  * Off-screen entries skip layout and paint entirely, which is what keeps a scroll-driven reflow
- * over a thousand-entry timeline cheap. `auto` in `contain-intrinsic-size` keeps an entry's last
- * rendered height once the browser has measured it, so each kind's estimate — a query's is taller
- * than a log line's — only matters before that: for the first paint, and for an entry that never
- * becomes visible at all.
+ * over a thousand-entry timeline cheap. Until the browser lays one out, it is `estimate` pixels
+ * tall: its `intrinsicHeight`, from its own data at the timeline's width, so the timeline's scroll
+ * height is close to its estimated one from the first paint. `auto` in `contain-intrinsic-size`
+ * keeps an entry's last rendered height once the browser has measured it.
  */
-function Entry({ className, ...props }: ComponentProps<"li">) {
-  return <li className={cn("border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]", className)} {...props} />
+function Entry({ className, estimate, ...props }: ComponentProps<"li"> & { estimate: number }) {
+  return (
+    <li
+      className={cn("border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]", className)}
+      style={{ containIntrinsicSize: `auto ${estimate}px` }}
+      {...props}
+    />
+  )
 }
 
-const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; railsRoot: string | null }) {
+const Query = memo(function Query({ event, width, railsRoot }: { event: SqlEvent; width: number; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
   const mark = useMemo(() => markKind(sql), [sql])
 
@@ -751,10 +761,8 @@ const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; rails
     // A marked statement's edge, read off its `data-mark`: `INSERT` in `POST`'s colour, `UPDATE`
     // in `PUT`/`PATCH`'s, `DELETE` in `DELETE`'s, and `ROLLBACK` in the error colour.
     <Entry
-      className={cn(
-        "[contain-intrinsic-size:auto_110px]",
-        "data-[mark=insert]:shadow-mark-insert data-[mark=update]:shadow-mark-update data-[mark=delete]:shadow-mark-delete data-[mark=rollback]:shadow-mark-rollback",
-      )}
+      className="data-[mark=insert]:shadow-mark-insert data-[mark=update]:shadow-mark-update data-[mark=delete]:shadow-mark-delete data-[mark=rollback]:shadow-mark-rollback"
+      estimate={intrinsicHeight(event, width)}
       data-mark={mark ?? undefined}
     >
       <div className="flex items-baseline gap-1.5 text-xs text-muted">
@@ -793,8 +801,11 @@ function SqlMarker({ children }: { children: ReactNode }) {
  *
  * `pre-wrap` wraps a long query without touching a character of it: what is read is what
  * pastes into a console.
+ *
+ * Memoised, so a resize, which re-renders every entry for its new estimate, leaves the statement
+ * as it was drawn.
  */
-function Statement({ sql }: { sql: string }) {
+const Statement = memo(function Statement({ sql }: { sql: string }) {
   const matches = useMatches(sql)
   const tokens = useMemo(() => tokenizeSql(sql), [sql])
   let from = 0
@@ -826,7 +837,7 @@ function Statement({ sql }: { sql: string }) {
       })}
     </code>
   )
-}
+})
 
 /**
  * What the wire's `truncated` map is for. A field the Initializer cut must say so where it
@@ -901,7 +912,7 @@ function bindKind(value: BindValue): BindKind {
   return "boolean"
 }
 
-const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent; railsRoot: string | null }) {
+const LogLine = memo(function LogLine({ event, width, railsRoot }: { event: AppLogEvent; width: number; railsRoot: string | null }) {
   const { severity, message, source, tags, callsite } = event.payload
 
   return (
@@ -910,7 +921,8 @@ const LogLine = memo(function LogLine({ event, railsRoot }: { event: AppLogEvent
     // Laid out across rather than down, so a run of queries is not broken up by something that
     // looks like another query. It wraps only so that a callsite can start a line of its own.
     <Entry
-      className="group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm [contain-intrinsic-size:auto_28px]"
+      className="group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm"
+      estimate={intrinsicHeight(event, width)}
       data-level={severity}
       data-source={source}
     >
