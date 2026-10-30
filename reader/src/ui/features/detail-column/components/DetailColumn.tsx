@@ -2,7 +2,7 @@ import { memo, useContext, useId, useMemo, useState, type ComponentProps, type R
 
 import type { ActivityRow, EvaluationRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
-import { eventsShown, type DetailFilter } from "./DetailFilters"
+import { eventsHeld, eventsShown, type DetailFilter } from "./DetailFilters"
 import { LevelText } from "../../../components/LevelText"
 import { MethodText } from "../../../components/MethodText"
 import { LinkButton } from "../../../components/LinkButton"
@@ -12,7 +12,7 @@ import { cn } from "../../../lib/cn"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Search } from "../../../hooks/search"
 import { Copyable, CopyButton, LineCopy } from "../../../components/CopyButton"
-import { bytes, mediaType, size, statusLine } from "../lib/format"
+import { bindText, bytes, mediaType, size, statusLine } from "../lib/format"
 import { Backtrace, Openable } from "../../../components/Backtrace"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { exceptionText } from "../lib/exception-text"
@@ -60,9 +60,7 @@ import { resultMatches } from "../../repl/lib/entry-matches"
  * find by scrolling down.
  */
 export function detailItems(row: ActivityRow | null, filter: DetailFilter) {
-  if (row === null) return 0
-  const trailing = row.kind === "run" ? [] : row.trailing
-  return eventsShown(row.timeline, filter).length + eventsShown(trailing, filter).length
+  return row === null ? 0 : eventsShown(eventsHeld(row), filter).length
 }
 
 export function DetailColumn({
@@ -890,7 +888,7 @@ function Binds({ values }: { values: readonly BindValue[] }) {
                 kind === "null" && "text-faint italic",
               )}
             >
-              <Highlight text={value === null ? "NULL" : String(value)} />
+              <Highlight text={bindText(value)} />
             </li>
           )
         })}

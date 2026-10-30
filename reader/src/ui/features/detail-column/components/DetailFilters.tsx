@@ -1,8 +1,11 @@
-import { useCallback, useState } from "react"
+import { useCallback, useContext, useState } from "react"
 
-import type { TimelineEvent } from "../../../../shared/activity"
+import type { ActivityRow, TimelineEvent } from "../../../../shared/activity"
+import type { SqlEvent } from "../../../../shared/wire"
 import { Chip } from "../../../components/Chip"
+import { SearchContext, type Search } from "../../../hooks/search"
 import { recallPreference, rememberPreference } from "../../../lib/preference"
+import { queryMatches } from "../lib/query-matches"
 
 /**
  * Everything that thins the *Detail column*, on the axis `ConsoleFilters` does not touch. A
@@ -21,6 +24,11 @@ import { recallPreference, rememberPreference } from "../../../lib/preference"
  *
  * Remembered as what is **off**, as the Console's chips are, so a kind of query this Reader
  * learns later arrives shown.
+ *
+ * Each chip counts the queries of its kind the selected row holds, its trailing section
+ * included, on or off. Off, it also counts the *Search* matches inside the queries it hides,
+ * by the rule their entries light by — so the number is what lights when it is turned on. A
+ * match never turns a chip back on.
  */
 
 export const QUERY_KINDS = ["cache", "schema"] as const
@@ -52,7 +60,7 @@ export function detailFilterKey(filter: DetailFilter) {
 }
 
 /** A query can be of both kinds — a cached SCHEMA query — and either chip off hides it. */
-function isOfKind(event: TimelineEvent, kind: QueryKind) {
+function isOfKind(event: TimelineEvent, kind: QueryKind): event is SqlEvent {
   if (event.type !== "sql") return false
   if (kind === "cache") return event.payload.cached
   return event.payload.name !== null && SCHEMA_NAMES.has(event.payload.name)
@@ -89,13 +97,44 @@ const CHIP_TITLES: Record<QueryKind, string> = {
   schema: "SCHEMA and EXPLAIN queries — the ones development.log never shows",
 }
 
+type Tally = { count: number; matches: number }
+
+/** Everything `row`'s Detail column holds: its timeline, then its trailing section, which a Run row has none of. */
+export function eventsHeld(row: ActivityRow): readonly TimelineEvent[] {
+  return row.kind === "run" ? row.timeline : [...row.timeline, ...row.trailing]
+}
+
+/**
+ * Each kind's count in everything `row`'s Detail column holds, and the matches inside it while
+ * its chip is off. A query of both kinds is counted on both chips, its matches included while
+ * both are off, so a match neither chip alone would reveal is still said on each.
+ */
+function tallies(row: ActivityRow, filter: DetailFilter, search: Search) {
+  const held = eventsHeld(row)
+  return Object.fromEntries(
+    QUERY_KINDS.map((kind): [QueryKind, Tally] => {
+      const ofKind = held.filter((event) => isOfKind(event, kind))
+      const matches = filter.hiddenKinds.has(kind) ? ofKind.reduce((count, query) => count + queryMatches(search, query), 0) : 0
+      return [kind, { count: ofKind.length, matches }]
+    }),
+  ) as Record<QueryKind, Tally>
+}
+
 type DetailFiltersProps = {
+  /** The selected row, whose queries the chips count. No count while nothing is selected. */
+  row: ActivityRow | null
   filter: DetailFilter
   onToggleKind: (kind: QueryKind) => void
 }
 
-/** One group: there is only the one axis here, unlike the Console's two. */
-export function DetailFilters({ filter, onToggleKind }: DetailFiltersProps) {
+/**
+ * One group: there is only the one axis here, unlike the Console's two. Counted on every
+ * render: the fold grows a row in place, so a count memoised on the row would go stale.
+ */
+export function DetailFilters({ row, filter, onToggleKind }: DetailFiltersProps) {
+  const search = useContext(SearchContext)
+  const tally = row === null ? null : tallies(row, filter, search)
+
   return (
     <div className="flex flex-none items-center">
       <div className="flex flex-wrap gap-0.5" role="group" aria-label="Filter by query kind">
@@ -106,6 +145,8 @@ export function DetailFilters({ filter, onToggleKind }: DetailFiltersProps) {
             kind={kind}
             showing={!filter.hiddenKinds.has(kind)}
             title={CHIP_TITLES[kind]}
+            count={tally?.[kind].count}
+            matches={tally?.[kind].matches}
             onToggle={() => onToggleKind(kind)}
           />
         ))}

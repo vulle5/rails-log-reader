@@ -232,11 +232,11 @@ function pill(name: ColumnName) {
 }
 
 function cacheChip() {
-  return chip("cache", "Filter by query kind")
+  return chip(/^cache\b/, "Filter by query kind")
 }
 
 function schemaChip() {
-  return chip("schema", "Filter by query kind")
+  return chip(/^schema\b/, "Filter by query kind")
 }
 
 /** Every entry the Detail column is showing, its own timeline's and the trailing section's. */

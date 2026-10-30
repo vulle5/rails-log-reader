@@ -1,6 +1,7 @@
 import type { TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, SqlEvent } from "../../../../shared/wire"
 import type { BacktraceSegment } from "../../../lib/backtrace"
+import { bindText } from "./format"
 
 /**
  * Where each block of a Timeline tab sits, estimated from the block's own data rather than read
@@ -164,7 +165,7 @@ function bindsHeight(binds: readonly BindValue[], width: number, metrics: FontMe
   // border; its `px-1.25` and border around its text.
   const GAP = 4
   const CHIP_HEIGHT = 19
-  const chips = binds.map((value) => (value === null ? "NULL" : String(value)).length * TEXT_XS * metrics.mono + 12)
+  const chips = binds.map((value) => bindText(value).length * TEXT_XS * metrics.mono + 12)
   // "parameter values", upper-cased and `tracking-wider`.
   const caption = 16 * TEXT_2XS * (metrics.text + 0.05)
   const together = chips.reduce((sum, chip) => sum + GAP + chip, caption)

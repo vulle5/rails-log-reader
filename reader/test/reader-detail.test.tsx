@@ -15,8 +15,10 @@ import {
   folded,
   isQuery,
   itemsOf,
+  lit,
   openTheReaderOver,
   rowShowing,
+  search,
   select,
   timeline,
   wholeText,
@@ -476,11 +478,11 @@ describe("a marked statement", () => {
  */
 describe("the Detail column's chips", () => {
   function cacheChip() {
-    return chip("cache", "Filter by query kind")
+    return chip(/^cache\b/, "Filter by query kind")
   }
 
   function schemaChip() {
-    return chip("schema", "Filter by query kind")
+    return chip(/^schema\b/, "Filter by query kind")
   }
 
   const STORED = "rails-log-reader.detail-filter"
@@ -494,8 +496,7 @@ describe("the Detail column's chips", () => {
   }
 
   /** A request holding one of each kind of query, in this order. */
-  function aMixedRequest() {
-    const run = aRun("srv-1")
+  function aMixedRequest(run = aRun("srv-1")) {
     return [
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
@@ -725,6 +726,138 @@ describe("the Detail column's chips", () => {
 
     expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
     expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("counts each kind the selected row holds, its trailing section included, on and off", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      ...aMixedRequest(run),
+      run.finish("req-1"),
+      run.sql("req-1", "SELECT 3", { cached: true }),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", cached: true }),
+    )
+
+    await select(user, "/posts/12")
+
+    expect(cacheChip()).toHaveAccessibleName("cache 4")
+    expect(schemaChip()).toHaveAccessibleName("schema 3")
+
+    await user.click(cacheChip())
+    await user.click(schemaChip())
+
+    expect(cacheChip()).toHaveAccessibleName("cache 4")
+    expect(schemaChip()).toHaveAccessibleName("schema 3")
+  })
+
+  test("counts what the newly selected row holds", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      ...aMixedRequest(run),
+      run.start("req-2", "GET", "/authors"),
+      run.sql("req-2", "SELECT 1", { name: "Author Load" }),
+    )
+
+    await select(user, "/posts/12")
+    expect(cacheChip()).toHaveAccessibleName("cache 2")
+
+    await select(user, "/authors")
+
+    expect(cacheChip()).toHaveAccessibleName("cache 0")
+    expect(schemaChip()).toHaveAccessibleName("schema 0")
+  })
+
+  describe("with a Search term matching inside a query a chip hides", () => {
+    /**
+     * `widget` is in a cached query's name, statement, binds and Callsite — five matches, every
+     * one inside a single token, so each lights as one mark — and in nothing else on the page.
+     * A sixth is in a cached query of the trailing section.
+     */
+    function aRequestWithCachedWidgets() {
+      const run = aRun("srv-1")
+      return [
+        run.start("req-1", "GET", "/posts/12"),
+        run.sql("req-1", 'SELECT "widgets".* FROM "widgets"', {
+          name: "Widget Load",
+          cached: true,
+          binds: ["widget", 7],
+          callsite: "app/models/widget.rb:3:in 'recent'",
+        }),
+        run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+        run.finish("req-1"),
+        run.sql("req-1", "SELECT 2", { name: "Widget Count", cached: true, binds: [] }),
+      ]
+    }
+
+    function litInTheTimeline() {
+      return [...lit(timeline()), ...lit(within(detail()).getByRole("region", { name: "After the request finished" }))]
+    }
+
+    test("describes the chip as holding them, counted as they light once it is on", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await search(user, "widget")
+
+      expect(cacheChip()).toHaveAccessibleDescription("6 matches")
+      expect(schemaChip()).not.toHaveAccessibleDescription(/match/)
+
+      await user.click(cacheChip())
+
+      expect(cacheChip()).not.toHaveAccessibleDescription(/match/)
+      expect(litInTheTimeline()).toHaveLength(6)
+    })
+
+    test("says 1 match for one", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await search(user, "Count")
+
+      expect(cacheChip()).toHaveAccessibleDescription("1 match")
+    })
+
+    test("says nothing while the chip is on, or when nothing it hides matches", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await search(user, "widget")
+
+      expect(cacheChip()).not.toHaveAccessibleDescription(/match/)
+
+      await user.click(cacheChip())
+      await search(user, "Post Load")
+
+      expect(cacheChip()).not.toHaveAccessibleDescription(/match/)
+    })
+
+    test("counts a match inside a cached SCHEMA query on both chips while both are off", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "GET", "/posts/12"),
+        run.sql("req-1", "SELECT widgets FROM sqlite_master", { name: "SCHEMA", cached: true, binds: [] }),
+      )
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await user.click(schemaChip())
+      await search(user, "widget")
+
+      expect(cacheChip()).toHaveAccessibleDescription("1 match")
+      expect(schemaChip()).toHaveAccessibleDescription("1 match")
+    })
+
+    test("never turns the chip back on", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await search(user, "widget")
+
+      expect(cacheChip()).toHaveAttribute("aria-pressed", "false")
+      expect(timelineSays()).toEqual(["SELECT 1"])
+    })
   })
 })
 

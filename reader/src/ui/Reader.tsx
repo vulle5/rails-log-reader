@@ -491,7 +491,7 @@ function ReaderView({
                   scroll={detailScroll}
                   bodyScrolls={false}
                   className="row-span-3"
-                  controls={<DetailFilters filter={detailFilter} onToggleKind={toggleKind} />}
+                  controls={<DetailFilters row={showing} filter={detailFilter} onToggleKind={toggleKind} />}
                 >
                   <DetailColumn
                     row={showing}
