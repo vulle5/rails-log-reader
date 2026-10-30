@@ -71,7 +71,7 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
           <button
             key={tick.key}
             type="button"
-            className="absolute inset-x-0 h-0.75 cursor-pointer data-[mark=delete]:bg-method-delete data-[mark=insert]:bg-method-post data-[mark=rollback]:bg-error data-[mark=update]:bg-method-put-patch"
+            className="absolute inset-x-0 h-0.75 data-[mark=delete]:bg-method-delete data-[mark=insert]:bg-method-post data-[mark=rollback]:bg-error data-[mark=update]:bg-method-put-patch"
             style={{ top: `${tick.at * 100}%` }}
             data-mark={tick.kind}
             title={tick.label}
