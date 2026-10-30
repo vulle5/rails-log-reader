@@ -103,7 +103,7 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
             tick under it. Named, though hidden from assistive technology with its layer. */}
         <div className="pointer-events-none absolute inset-0" aria-hidden="true">
           <div
-            className="absolute inset-x-0 border-y border-foreground/30 bg-foreground/10"
+            className="absolute inset-x-0 border-y border-foreground/50 bg-foreground/20"
             style={{ top: `${view.top * 100}%`, height: `${view.size * 100}%` }}
             role="img"
             aria-label="Timeline ruler thumb"
