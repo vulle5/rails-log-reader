@@ -169,7 +169,7 @@ function ReaderView({
   // break. Nothing filters by Run — previous Runs stay visible on open.
   const [showingKind, setShowingKind] = useState<RowKindFilter>("all")
   const { filter, toggleLevel, toggleRails } = useConsoleFilter()
-  const { filter: detailFilter, toggleSchema } = useDetailFilter()
+  const { filter: detailFilter, toggleKind } = useDetailFilter()
   // Above Selection, so clicking through requests on Params compares their params.
   const [detailTab, setDetailTab] = useState<DetailTabId>("timeline")
   const tableColumns = useHiddenTableColumns()
@@ -223,9 +223,9 @@ function ReaderView({
   //
   // Only the Detail column ever refollows on its own, and only on a new *Selection*
   // (`refollowsWhen`) — another row's timeline is a different thing entirely to be at the
-  // bottom of. Its schema chip is folded into `listing` alongside `selected`, so toggling it
+  // bottom of. Its chips are folded into `listing` alongside `selected`, so toggling one
   // is still a relist and not a pile of "arrived" queries, but is never by itself a
-  // `refollowsWhen` change: the chip thins the same timeline, the same "same stream thinned"
+  // `refollowsWhen` change: a chip thins the same timeline, the same "same stream thinned"
   // case a Console chip already is, and a reader who scrolled up in it is still reading where
   // they were.
   const consoleScroll = useAutoScroll({
@@ -491,7 +491,7 @@ function ReaderView({
                   scroll={detailScroll}
                   bodyScrolls={false}
                   className="row-span-3"
-                  controls={<DetailFilters filter={detailFilter} onToggleSchema={toggleSchema} />}
+                  controls={<DetailFilters filter={detailFilter} onToggleKind={toggleKind} />}
                 >
                   <DetailColumn
                     row={showing}

@@ -151,9 +151,9 @@ type AutoScrollOptions = {
    * up in it is still reading where they were.
    *
    * Of the columns, the Detail column alone supplies one, and supplies *Selection* — not its
-   * own filter chip, for the same reason the other columns' chips are not `refollowsWhen`
+   * own filter chips, for the same reason the other columns' chips are not `refollowsWhen`
    * either. A new Selection is a different row's timeline, which opens at its newest activity
-   * rather than inheriting the last one's scroll position; the schema chip thins that same
+   * rather than inheriting the last one's scroll position; its chips thin that same
    * timeline, so it is `listing`'s concern only, exactly the "same stream thinned" case a
    * Console chip already is.
    *

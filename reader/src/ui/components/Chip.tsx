@@ -9,7 +9,7 @@ import { cn } from "../lib/cn"
  * while what colours it is a fixed, small set.
  */
 
-export type ChipKind = `level-${Severity}` | "source-rails" | "schema"
+export type ChipKind = `level-${Severity}` | "source-rails" | "cache" | "schema"
 
 export type ChipProps = {
   named: string

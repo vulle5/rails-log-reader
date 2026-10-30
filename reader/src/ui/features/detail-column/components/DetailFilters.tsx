@@ -5,109 +5,139 @@ import { Chip } from "../../../components/Chip"
 import { recallPreference, rememberPreference } from "../../../lib/preference"
 
 /**
- * The *Detail column*'s one thinning, on the axis `ConsoleFilters` does not touch.
- * A Console line is thinned by who logged it; a Detail column entry is thinned by whether
- * `development.log` would ever have shown it at all.
+ * Everything that thins the *Detail column*, on the axis `ConsoleFilters` does not touch. A
+ * Console line is thinned by who logged it; a Detail column entry by what kind of query it is.
+ * One setting applies to every row kind's timeline and trailing section alike.
  *
- * `SCHEMA` and `EXPLAIN` queries are the ones it would not have:
- * `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops them before a line is ever
- * written, so a request with no cache miss never sees one there. `SqlSubscriber` forwards
- * them anyway, on purpose — the rare "why was the first request after a restart the slow
- * one" question is one only the dropped ones answer. That question is now one chip away
- * instead of in the way of every ordinary request's timeline.
+ * - **`cache`** hides queries the query cache answered. `development.log` shows them, prefixed
+ *   `CACHE`, but none of them reached the database.
+ * - **`schema`** hides `SCHEMA` and `EXPLAIN` queries, which
+ *   `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops before `development.log` is
+ *   written to, while `SqlSubscriber` forwards them anyway.
  *
- * Off by default, for the reason `ConsoleFilters`' `showingRails` is: `development.log` is
- * the baseline every developer already knows this column by, and SCHEMA rows are the one
- * respect in which the unfiltered timeline showed *more* than that baseline, not less.
+ * Neither starts off: the column opens on everything it holds. A chip turned off hides; it
+ * never drops — a hidden query is still on `row.timeline`, still in the Sidecar, and back the
+ * moment its chip is turned on.
  *
- * Nothing is dropped by this filter — a hidden query is still on `row.timeline`, still in the
- * Sidecar, and still reachable the moment the chip is turned on, the same guarantee
- * `ConsoleFilters` gives Rails' own lines.
+ * Remembered as what is **off**, as the Console's chips are, so a kind of query this Reader
+ * learns later arrives shown.
  */
+
+export const QUERY_KINDS = ["cache", "schema"] as const
+
+export type QueryKind = (typeof QUERY_KINDS)[number]
 
 /** The two names `IGNORE_PAYLOAD_NAMES` drops, spelled out once rather than imported: the
  * Reader has no dependency on Rails to import them from. */
-const HIDDEN_NAMES: ReadonlySet<string> = new Set(["SCHEMA", "EXPLAIN"])
+const SCHEMA_NAMES: ReadonlySet<string> = new Set(["SCHEMA", "EXPLAIN"])
 
 export type DetailFilter = {
-  /** Whether SCHEMA/EXPLAIN queries show. `false` until somebody asks for them. */
-  showingSchema: boolean
+  /** Kinds of query turned off by hand. Empty on a Reader nobody has told otherwise. */
+  hiddenKinds: ReadonlySet<QueryKind>
 }
 
-export const DETAIL_FILTER_ON_OPEN: DetailFilter = { showingSchema: false }
+export const DETAIL_FILTER_ON_OPEN: DetailFilter = { hiddenKinds: new Set() }
 
 /**
- * What the chip currently says, as one string — fed into the Detail column's *auto-scroll*
- * `listing` alongside the selected row's id, the same way `consoleFilterKey` feeds the
- * Console's. A toggle inserts and removes rows throughout the timeline rather than only
- * appending, so a paused column must not read the ones it reveals as arrivals — but it is
- * never by itself a reason to refollow: the timeline is the same one thinned, exactly the
- * "same stream thinned" case a Console chip already is, and only a new Selection reopens at
- * the newest activity.
+ * What the chips currently say, as one string — the same string `remember` writes — fed into
+ * the Detail column's *auto-scroll* `listing` alongside the selected row's id, the way
+ * `consoleFilterKey` feeds the Console's. A toggle inserts and removes entries throughout the
+ * timeline rather than only appending, so a paused column must not read the ones it reveals as
+ * arrivals — but it is never by itself a reason to refollow: the timeline is the same one
+ * thinned, exactly the "same stream thinned" case a Console chip already is, and only a new
+ * Selection reopens at the newest activity.
  */
 export function detailFilterKey(filter: DetailFilter) {
-  return JSON.stringify(filter)
+  return JSON.stringify(stored(filter))
 }
 
-/** A query this filter hides is one `development.log` would never have shown either. */
-function isHidden(event: TimelineEvent, filter: DetailFilter) {
-  if (filter.showingSchema || event.type !== "sql") return false
-  return event.payload.name !== null && HIDDEN_NAMES.has(event.payload.name)
+/** A query can be of both kinds — a cached SCHEMA query — and either chip off hides it. */
+function isOfKind(event: TimelineEvent, kind: QueryKind) {
+  if (event.type !== "sql") return false
+  if (kind === "cache") return event.payload.cached
+  return event.payload.name !== null && SCHEMA_NAMES.has(event.payload.name)
 }
 
 export function eventsShown(events: readonly TimelineEvent[], filter: DetailFilter) {
-  return events.filter((event) => !isHidden(event, filter))
+  const hidden = [...filter.hiddenKinds]
+  if (hidden.length === 0) return events
+  return events.filter((event) => !hidden.some((kind) => isOfKind(event, kind)))
 }
 
 /**
- * The chip's state, persisted the moment it changes — for the reason `useConsoleFilter`'s is:
+ * The chips' state, persisted the moment it changes — for the reason `useConsoleFilter`'s is:
  * a filter re-set on every reload is one nobody uses.
  */
 export function useDetailFilter() {
   const [filter, setFilter] = useState<DetailFilter>(recall)
 
-  const toggleSchema = useCallback(() => {
+  const toggleKind = useCallback((kind: QueryKind) => {
     setFilter((previous) => {
-      const next = { showingSchema: !previous.showingSchema }
+      const hiddenKinds = new Set(previous.hiddenKinds)
+      if (!hiddenKinds.delete(kind)) hiddenKinds.add(kind)
+      const next = { hiddenKinds }
       remember(next)
       return next
     })
   }, [])
 
-  return { filter, toggleSchema }
+  return { filter, toggleKind }
+}
+
+const CHIP_TITLES: Record<QueryKind, string> = {
+  cache: "Cached queries — answered by the query cache, without reaching the database",
+  schema: "SCHEMA and EXPLAIN queries — the ones development.log never shows",
 }
 
 type DetailFiltersProps = {
   filter: DetailFilter
-  onToggleSchema: () => void
+  onToggleKind: (kind: QueryKind) => void
 }
 
-/** One chip, in its own group: there is only the one axis here, unlike the Console's two. */
-export function DetailFilters({ filter, onToggleSchema }: DetailFiltersProps) {
+/** One group: there is only the one axis here, unlike the Console's two. */
+export function DetailFilters({ filter, onToggleKind }: DetailFiltersProps) {
   return (
     <div className="flex flex-none items-center">
       <div className="flex flex-wrap gap-0.5" role="group" aria-label="Filter by query kind">
-        <Chip
-          named="schema"
-          kind="schema"
-          showing={filter.showingSchema}
-          title="SCHEMA and EXPLAIN queries — off by default, because development.log never shows them either"
-          onToggle={onToggleSchema}
-        />
+        {QUERY_KINDS.map((kind) => (
+          <Chip
+            key={kind}
+            named={kind}
+            kind={kind}
+            showing={!filter.hiddenKinds.has(kind)}
+            title={CHIP_TITLES[kind]}
+            onToggle={() => onToggleKind(kind)}
+          />
+        ))}
       </div>
     </div>
   )
 }
 
-/** Anything unreadable — absent, blocked, or corrupt — is the opening filter. */
+/**
+ * Anything unreadable — absent, blocked, or corrupt — is the opening filter. Without a
+ * `kindsOff`, a stored `showingSchema` is read instead: `false` is `schema` off, and anything
+ * else is shown.
+ */
 function recall(): DetailFilter {
   return recallPreference("detail-filter", DETAIL_FILTER_ON_OPEN, (remembered) => {
     const stored: unknown = JSON.parse(remembered)
     if (stored === null || typeof stored !== "object") return DETAIL_FILTER_ON_OPEN
 
-    const { showingSchema } = stored as { showingSchema?: unknown }
-    return { showingSchema: showingSchema === true }
+    const { kindsOff, showingSchema } = stored as { kindsOff?: unknown; showingSchema?: unknown }
+    if (Array.isArray(kindsOff)) {
+      return { hiddenKinds: new Set(kindsOff.filter((kind): kind is QueryKind => QUERY_KINDS.includes(kind))) }
+    }
+    return { hiddenKinds: new Set<QueryKind>(showingSchema === false ? ["schema"] : []) }
   })
+}
+
+/**
+ * The remembered shape, sorted — so one filter is one string whatever order the chips were
+ * clicked in, which is what lets `detailFilterKey` be an identity rather than a history.
+ */
+function stored(filter: DetailFilter) {
+  return { kindsOff: [...filter.hiddenKinds].sort() }
 }
 
 function remember(filter: DetailFilter) {

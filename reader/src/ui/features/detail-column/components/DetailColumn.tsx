@@ -40,9 +40,9 @@ import { resultMatches } from "../../repl/lib/entry-matches"
  *
  * Nothing here reformats: a query is rendered as the Initializer emitted it, comment and
  * all, tokenized into spans that put the text back together character for character. What
- * is read is what `development.log` showed and what pastes into a console — SCHEMA and
- * EXPLAIN queries included, unless `DetailFilters`' one chip is hiding them: `development.log`
- * itself never shows them at all.
+ * is read is what `development.log` showed and what pastes into a console — and SCHEMA and
+ * EXPLAIN queries besides, which `development.log` never shows. The column opens on all of it;
+ * `DetailFilters`' chips thin it by query kind.
  *
  * The column is present from the first paint whether or not anything is selected — the
  * placeholder is what pins it — so selecting a row changes what this holds and nothing
@@ -54,7 +54,7 @@ import { resultMatches } from "../../repl/lib/entry-matches"
  * row has no trailing section to add, and a column that stopped rendering one would otherwise
  * leave the pill quietly counting things nobody can scroll to. Filtered the same way the
  * timeline itself is, for the same reason `showingLines.length` and not `lines.length` is what
- * the Console's own auto-scroll counts: a query the chip is hiding is not one the reader would
+ * the Console's own auto-scroll counts: a query a chip is hiding is not one the reader would
  * find by scrolling down.
  */
 export function detailItems(row: ActivityRow | null, filter: DetailFilter) {
@@ -189,7 +189,7 @@ function RequestDetail({
                   <Exception exception={row.exception} cutFrom={row.backtraceCutFrom} railsRoot={railsRoot} />
                 )}
                 {/* Checked on the filtered length rather than `row.trailing.length`: a trailing
-                    block of nothing but SCHEMA queries, hidden, must not leave an empty "After the
+                    block of nothing but queries a chip hides must not leave an empty "After the
                     request finished" section behind — the section is about there being something
                     to show under it. */}
                 {trailing.length > 0 && <Trailing caption="After the request finished" events={trailing} railsRoot={railsRoot} />}

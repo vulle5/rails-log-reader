@@ -22,8 +22,8 @@ import {
 } from "./reader.harness"
 
 afterEach(() => {
-  // The schema chip persists by design, which between tests is one test writing another's
-  // filter.
+  // The Detail column's chips persist by design, which between tests is one test writing
+  // another's filter.
   localStorage.clear()
 })
 
@@ -385,31 +385,83 @@ describe("a query", () => {
 })
 
 /**
- * #54: `development.log` never shows a SCHEMA or EXPLAIN query — Rails' own log subscriber
- * drops them by name before a line is ever written — so the Detail column hides them the same
- * way on open, with one chip to bring them back for the reload-diagnosis case they exist for.
+ * The column opens on everything it holds, and two chips thin it by query kind: `cache` hides
+ * the queries the query cache answered, `schema` the SCHEMA and EXPLAIN ones `development.log`
+ * never shows. One setting of them thins every row kind's timeline.
  */
-describe("the schema chip", () => {
+describe("the Detail column's chips", () => {
+  function cacheChip() {
+    return chip("cache", "Filter by query kind")
+  }
+
   function schemaChip() {
     return chip("schema", "Filter by query kind")
   }
 
-  function trailing() {
-    return within(detail()).queryByRole("region", { name: "After the request finished" })
+  const STORED = "rails-log-reader.detail-filter"
+
+  function trailing(caption = "After the request finished") {
+    return within(detail()).getByRole("region", { name: caption })
   }
 
-  test("hides SCHEMA and EXPLAIN queries on open, among a request's ordinary ones", async () => {
+  function noTrailing(caption = "After the request finished") {
+    return within(detail()).queryByRole("region", { name: caption })
+  }
+
+  /** A request holding one of each kind of query, in this order. */
+  function aMixedRequest() {
     const run = aRun("srv-1")
-    const { user } = theReader(
+    return [
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
-      run.sql("req-1", "EXPLAIN SELECT 1", { name: "EXPLAIN" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
-    )
+      run.sql("req-1", "SELECT 1", { name: "Post Load", cached: true }),
+      run.sql("req-1", "EXPLAIN SELECT 1", { name: "EXPLAIN" }),
+      run.sql("req-1", "SELECT 2", { name: "Comment Load", cached: true }),
+    ]
+  }
+
+  test("shows cached, SCHEMA and EXPLAIN queries on open, with both chips on", async () => {
+    const { user } = theReader(...aMixedRequest())
 
     await select(user, "/posts/12")
 
-    expect(timelineSays()).toEqual(["SELECT 1"])
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1", "SELECT 1", "EXPLAIN SELECT 1", "SELECT 2"])
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("hides every cached query once cache is off, and reports the chip not pressed", async () => {
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+    await user.click(cacheChip())
+
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1", "EXPLAIN SELECT 1"])
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "false")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("brings cached queries back where they were emitted, each still marked CACHE", async () => {
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+    await user.click(cacheChip())
+    await user.click(cacheChip())
+
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1", "SELECT 1", "EXPLAIN SELECT 1", "SELECT 2"])
+    const [schema, ran, cached, explain, alsoCached] = queries()
+    for (const query of [schema, ran, explain]) expect(query).not.toHaveTextContent("CACHE")
+    for (const query of [cached, alsoCached]) expect(query).toHaveTextContent("CACHE")
+  })
+
+  test("hides SCHEMA and EXPLAIN queries once schema is off, and leaves the rest alone", async () => {
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+    await user.click(schemaChip())
+
+    expect(timelineSays()).toEqual(["SELECT 1", "SELECT 1", "SELECT 2"])
     expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
   })
 
@@ -418,27 +470,32 @@ describe("the schema chip", () => {
     const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", callsite: "app/models/post.rb:3:in '<class:Post>'" }),
-      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
-    )
-
-    await select(user, "/posts/12")
-
-    expect(callsiteLines()).toHaveLength(0)
-  })
-
-  test("brings them back, interleaved where they were emitted, once the chip is on", async () => {
-    const run = aRun("srv-1")
-    const { user } = theReader(
-      run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+      run.sql("req-1", "SELECT 1", { cached: true, callsite: "app/models/post.rb:9:in 'recent'" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
     )
 
     await select(user, "/posts/12")
     await user.click(schemaChip())
+    await user.click(cacheChip())
 
-    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1"])
-    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+    expect(callsiteLines()).toHaveLength(0)
+  })
+
+  test("hides a cached SCHEMA query when either chip is off", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", cached: true }),
+      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+    )
+
+    await select(user, "/posts/12")
+    await user.click(schemaChip())
+    expect(timelineSays()).toEqual(["SELECT 1"])
+
+    await user.click(schemaChip())
+    await user.click(cacheChip())
+    expect(timelineSays()).toEqual(["SELECT 1"])
   })
 
   test("leaves a query named anything else alone", async () => {
@@ -450,40 +507,138 @@ describe("the schema chip", () => {
     )
 
     await select(user, "/posts/12")
+    await user.click(schemaChip())
+    await user.click(cacheChip())
 
     expect(timelineSays()).toEqual(["SELECT 1", "PRAGMA foreign_keys"])
   })
 
-  test("hides an all-SCHEMA trailing section rather than leaving it empty", async () => {
+  test("thins the trailing section too, in emitted order", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.finish("req-1"),
+      run.sql("req-1", "SELECT 1", { cached: true, binds: [] }),
+      run.log("req-1", "after the fact"),
+      run.sql("req-1", "SELECT 2", { cached: true, binds: [] }),
+    )
+
+    await select(user, "/posts/12")
+    await user.click(cacheChip())
+
+    expect(trailing()).toHaveTextContent("after the fact")
+    expect(trailing()).not.toHaveTextContent("SELECT")
+
+    await user.click(cacheChip())
+
+    expect(itemsOf(within(trailing()).getByRole("list")).map((entry) => entry.textContent)).toEqual([
+      expect.stringContaining("SELECT 1"),
+      expect.stringContaining("after the fact"),
+      expect.stringContaining("SELECT 2"),
+    ])
+  })
+
+  test("hides a trailing section of nothing but hidden queries rather than leaving it empty", async () => {
     const run = aRun("srv-1")
     const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.finish("req-1"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+      run.sql("req-1", "SELECT 1", { cached: true }),
     )
 
     await select(user, "/posts/12")
+    expect(trailing()).toBeInTheDocument()
 
-    expect(trailing()).not.toBeInTheDocument()
+    await user.click(schemaChip())
+    expect(trailing()).toBeInTheDocument()
+
+    await user.click(cacheChip())
+    expect(noTrailing()).not.toBeInTheDocument()
   })
 
-  test("persists the choice, like the Console's chips", async () => {
-    const run = aRun("srv-1")
-    const envelopes = [
-      run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
-    ]
+  test("thins a Run row and an Evaluation row with the same setting", async () => {
+    const server = aRun("srv-1")
+    const console = aRun("con-1")
+    const { user } = theReader(
+      server.header(),
+      server.sql(null, "SELECT 1", { name: "Boot Load" }),
+      server.sql(null, "SELECT 1", { name: "Boot Load", cached: true }),
+      console.header("console", 48_213),
+      console.evaluationStart("repl-a-1", "Post.count"),
+      console.sql("repl-a-1", 'SELECT COUNT(*) FROM "posts"'),
+      console.sql("repl-a-1", 'SELECT COUNT(*) FROM "posts"', { cached: true }),
+      console.evaluationFinish("repl-a-1"),
+      console.sql("repl-a-1", "SELECT 2", { cached: true }),
+    )
+
+    await select(user, "server")
+    await user.click(cacheChip())
+
+    expect(timelineSays()).toEqual(["SELECT 1"])
+
+    await select(user, "Post.count")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "false")
+    expect(timelineSays()).toEqual(['SELECT COUNT(*) FROM "posts"'])
+    expect(noTrailing("After the evaluation finished")).not.toBeInTheDocument()
+  })
+
+  test("persists both choices, like the Console's chips, stored as what is off", async () => {
+    const envelopes = aMixedRequest()
 
     const first = theReader(...envelopes)
     await select(first.user, "/posts/12")
+    await first.user.click(cacheChip())
     await first.user.click(schemaChip())
+    await first.user.click(cacheChip())
+
+    expect(JSON.parse(localStorage.getItem(STORED)!)).toEqual({ kindsOff: ["schema"] })
 
     first.unmount()
 
     const second = theReader(...envelopes)
     await select(second.user, "/posts/12")
 
-    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master"])
+    expect(timelineSays()).toEqual(["SELECT 1", "SELECT 1", "SELECT 2"])
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
+  })
+
+  test("shows a kind of query nothing stored says is off", async () => {
+    localStorage.setItem(STORED, '{"kindsOff":["schema","a-kind-from-later"]}')
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
+  })
+
+  test("reads a choice for schema stored before the cache chip existed", async () => {
+    localStorage.setItem(STORED, '{"showingSchema":false}')
+    const hidden = theReader(...aMixedRequest())
+    await select(hidden.user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
+
+    hidden.unmount()
+    localStorage.setItem(STORED, '{"showingSchema":true}')
+    const shown = theReader(...aMixedRequest())
+    await select(shown.user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("opens on everything when what is stored is unreadable", async () => {
+    localStorage.setItem(STORED, "{not json")
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
     expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
   })
 })

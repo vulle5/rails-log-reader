@@ -231,6 +231,10 @@ function pill(name: ColumnName) {
   return within(column(name)).queryByRole("button", { name: /new$/ })
 }
 
+function cacheChip() {
+  return chip("cache", "Filter by query kind")
+}
+
 function schemaChip() {
   return chip("schema", "Filter by query kind")
 }
@@ -772,12 +776,42 @@ describe("the Detail tabs", () => {
 })
 
 /**
- * #54's chip is folded into the Detail column's `listing`, exactly as a Console chip is into
- * the Console's, but it is never by itself a `refollowsWhen` change: it thins the selected
+ * The Detail column's chips are folded into its `listing`, exactly as a Console chip is into
+ * the Console's, but neither is by itself a `refollowsWhen` change: each thins the selected
  * row's own timeline rather than opening a different one, the same "same stream thinned" case
  * a Console chip already is. Only a new *Selection* refollows.
  */
-describe("the Detail column's schema chip", () => {
+describe("the Detail column's chips", () => {
+  /** A request still in flight whose timeline holds cached queries among the ones that ran. */
+  const CACHING = "cache27"
+  const CACHED: Envelope[] = [
+    ...aRequest(CACHING, "/feed", 12, false),
+    run.sql(CACHING, "SELECT 1"),
+    run.sql(CACHING, "SELECT 1", { cached: true }),
+    run.log(CACHING, "Feed cache MISS"),
+    run.sql(CACHING, "SELECT 2"),
+    run.sql(CACHING, "SELECT 2", { cached: true }),
+    run.sql(CACHING, "SELECT 2", { cached: true }),
+  ]
+
+  test("toggling cache while paused neither refollows nor counts what it reveals as new", async () => {
+    const { user, arrive } = openTheReader(...HISTORY, ...CACHED)
+    await select(user, "/feed")
+    // Far enough up that the queries the chip hides below never clamp the column to its bottom.
+    scrollUp("Detail column", 8 * ROW)
+
+    await user.click(cacheChip())
+    expect(pinnedToBottom("Detail column")).toBe(false)
+    expect(pill("Detail column")).not.toBeInTheDocument()
+
+    arrive(run.log(CACHING, "Feed cache WRITE"))
+    await user.click(cacheChip())
+
+    // The three cached queries it brought back are old ones: only the line that arrived is new.
+    expect(pinnedToBottom("Detail column")).toBe(false)
+    expect(pill("Detail column")).toHaveTextContent("1 new")
+  })
+
   test("re-derives what the Detail column is showing rather than adding to it", async () => {
     const { user, arrive } = openTheReader(...HISTORY)
     await select(user, "/reports/monthly.csv")
@@ -787,7 +821,7 @@ describe("the Detail column's schema chip", () => {
     await user.click(schemaChip())
 
     // Neither disturbed by the toggle: a paused column stays paused, and the count is what
-    // arrived while away — not old queries the chip has just revealed.
+    // arrived while away — never a relist of the same timeline.
     expect(pinnedToBottom("Detail column")).toBe(false)
     expect(pill("Detail column")).toHaveTextContent("1 new")
   })
@@ -857,7 +891,7 @@ describe("a request with a very large number of children", () => {
     expect(pinnedToBottom("Detail column")).toBe(true)
   })
 
-  test("keeps the SCHEMA/EXPLAIN chip and the trailing section working at this volume", async () => {
+  test("keeps the schema chip and the trailing section working at this volume", async () => {
     const { user, arrive } = openTheReader(
       ...HISTORY,
       ...aRequest("big4", "/n-plus-one", LARGE, false),
@@ -866,11 +900,11 @@ describe("a request with a very large number of children", () => {
     )
     await select(user, "/n-plus-one")
 
-    // SCHEMA hidden by default: one child of `LARGE + 1` does not show.
-    expect(itemsOf(timeline())).toHaveLength(LARGE)
+    // Everything shown on open; schema off hides the one SCHEMA child of `LARGE + 1`.
+    expect(itemsOf(timeline())).toHaveLength(LARGE + 1)
 
     await user.click(schemaChip())
-    expect(itemsOf(timeline())).toHaveLength(LARGE + 1)
+    expect(itemsOf(timeline())).toHaveLength(LARGE)
 
     arrive(run.log("big4", "after the request finished"))
     const trailing = within(column("Detail column")).getByRole("region", { name: "After the request finished" })
