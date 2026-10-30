@@ -95,3 +95,26 @@ function kindOf(text: string): SqlTokenKind {
   if (opener !== undefined && opener >= "0" && opener <= "9") return "number"
   return KEYWORDS.has(text.toUpperCase()) ? "keyword" : "plain"
 }
+
+/** The kind of a *marked statement*: one that changed data, or the `ROLLBACK` that undid changes. */
+export type MarkKind = "insert" | "update" | "delete" | "rollback"
+
+const MARKS: ReadonlyMap<string, MarkKind> = new Map([
+  ["INSERT", "insert"],
+  ["UPDATE", "update"],
+  ["DELETE", "delete"],
+  ["ROLLBACK", "rollback"],
+])
+
+/**
+ * The kind a statement's first keyword names, past any leading comment and whitespace — so
+ * `ROLLBACK TO SAVEPOINT` is a rollback and a write opening with `WITH` is no mark at all.
+ * Any other first token, keyword or not, is `null`.
+ */
+export function markKind(sql: string): MarkKind | null {
+  for (const token of tokenizeSql(sql)) {
+    if (token.kind === "comment" || (token.kind === "plain" && token.text.trim() === "")) continue
+    return token.kind === "keyword" ? (MARKS.get(token.text.toUpperCase()) ?? null) : null
+  }
+  return null
+}

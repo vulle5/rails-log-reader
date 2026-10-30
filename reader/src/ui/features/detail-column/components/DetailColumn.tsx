@@ -16,7 +16,7 @@ import { bytes, mediaType, size, statusLine } from "../lib/format"
 import { Backtrace, Openable } from "../../../components/Backtrace"
 import { OpenModifierHeld, useOpenModifierHeld } from "../../../hooks/open-modifier"
 import { exceptionText } from "../lib/exception-text"
-import { tokenizeSql } from "../lib/sql-highlight"
+import { markKind, tokenizeSql } from "../lib/sql-highlight"
 import { paramsSource } from "../lib/params-source"
 import { jsonSource } from "../lib/json-source"
 import { xmlSource } from "../lib/xml-source"
@@ -745,9 +745,18 @@ function Entry({ className, ...props }: ComponentProps<"li">) {
 
 const Query = memo(function Query({ event, railsRoot }: { event: SqlEvent; railsRoot: string | null }) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
+  const mark = useMemo(() => markKind(sql), [sql])
 
   return (
-    <Entry className="[contain-intrinsic-size:auto_110px]">
+    // A marked statement's edge, read off its `data-mark`: `INSERT` in `POST`'s colour, `UPDATE`
+    // in `PUT`/`PATCH`'s, `DELETE` in `DELETE`'s, and `ROLLBACK` in the error colour.
+    <Entry
+      className={cn(
+        "[contain-intrinsic-size:auto_110px]",
+        "data-[mark=insert]:shadow-mark-insert data-[mark=update]:shadow-mark-update data-[mark=delete]:shadow-mark-delete data-[mark=rollback]:shadow-mark-rollback",
+      )}
+      data-mark={mark ?? undefined}
+    >
       <div className="flex items-baseline gap-1.5 text-xs text-muted">
         {/* What `development.log` prefixes these with, and the reason a query took no time. */}
         {cached && <SqlMarker>CACHE</SqlMarker>}

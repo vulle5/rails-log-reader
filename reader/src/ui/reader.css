@@ -86,6 +86,12 @@
   /* A *Transcript* evaluation's edge once it raised or lost its console process: the pinned
      group's edge in the error colour. */
   --shadow-failed: inset 2px 0 0 var(--color-error);
+  /* A *marked statement*'s edge, drawn inside its entry so marking it moves no text, and as wide
+     as an Interrupted row's edge. */
+  --shadow-mark-insert: inset 3px 0 0 var(--color-method-post);
+  --shadow-mark-update: inset 3px 0 0 var(--color-method-put-patch);
+  --shadow-mark-delete: inset 3px 0 0 var(--color-method-delete);
+  --shadow-mark-rollback: inset 3px 0 0 var(--color-error);
 
   /* The small labels set into a line of text: filter chips, and the tags beside a Console line. */
   --radius-chip: 3px;

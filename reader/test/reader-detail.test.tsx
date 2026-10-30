@@ -6,7 +6,7 @@ import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { RequestRow, RunRow } from "../src/shared/activity"
-import type { Envelope } from "../src/shared/wire"
+import type { Envelope, SqlPayload } from "../src/shared/wire"
 import {
   cellUnder,
   chip,
@@ -381,6 +381,90 @@ describe("a query", () => {
     // Its duration and its statement, and no name beside them.
     expect(theQuery()).toHaveTextContent(/^0\.4ms\s*PRAGMA foreign_keys$/)
     expect(within(theQuery()).getByText("0.4ms")).toBeInTheDocument()
+  })
+})
+
+/**
+ * A statement that changed data, or undid changes, is marked by the kind its first keyword names,
+ * past any leading comment. Every other statement is left unmarked.
+ */
+describe("a marked statement", () => {
+  /** The entry of the one query a request ran, selected. */
+  async function theEntryOf(sql: string, query: Omit<Partial<SqlPayload>, "sql"> = {}) {
+    const run = aRun("srv-1")
+    const { user } = theReader(run.start("req-1", "POST", "/orders"), run.sql("req-1", sql, query))
+
+    await select(user, "/orders")
+    const [entry] = queries()
+    if (entry === undefined) throw new Error("the detail column rendered no query")
+    return entry
+  }
+
+  test.each([
+    ['INSERT INTO "orders" ("total") VALUES (?) RETURNING "id"', "insert"],
+    ['UPDATE "orders" SET "total" = ? WHERE "orders"."id" = ?', "update"],
+    ['DELETE FROM "orders" WHERE "orders"."id" = ?', "delete"],
+    ["ROLLBACK", "rollback"],
+    ["ROLLBACK TO SAVEPOINT active_record_1", "rollback"],
+    ["insert into orders (total) values (3)", "insert"],
+  ])("marks %s as %s", async (sql, kind) => {
+    expect(await theEntryOf(sql)).toHaveAttribute("data-mark", kind)
+  })
+
+  test("reads the kind past a leading QueryLogs comment", async () => {
+    const entry = await theEntryOf(`/*action='create',controller='orders'*/ INSERT INTO "orders" DEFAULT VALUES`)
+
+    expect(entry).toHaveAttribute("data-mark", "insert")
+  })
+
+  test("reads the kind past leading whitespace and a line comment", async () => {
+    expect(await theEntryOf(`\n  -- backfill\n  UPDATE orders SET total = 0`)).toHaveAttribute("data-mark", "update")
+  })
+
+  test.each([
+    ['SELECT "orders".* FROM "orders"'],
+    ["BEGIN"],
+    ["COMMIT"],
+    ["SAVEPOINT active_record_1"],
+    ["RELEASE SAVEPOINT active_record_1"],
+    ['SELECT "orders".* FROM "orders" WHERE "orders"."id" = ? LIMIT ? FOR UPDATE'],
+    ['WITH "totals" AS (SELECT 1) INSERT INTO "orders" ("total") SELECT * FROM "totals"'],
+    ["/* nothing but a comment */"],
+  ])("leaves %s unmarked", async (sql) => {
+    expect(await theEntryOf(sql)).not.toHaveAttribute("data-mark")
+  })
+
+  test("marks a raw execute with a nil name by its statement like any other", async () => {
+    expect(await theEntryOf("DELETE FROM sessions", { name: null, binds: [] })).toHaveAttribute("data-mark", "delete")
+  })
+
+  test("keeps the statement's own token colours", async () => {
+    const entry = await theEntryOf('INSERT INTO "orders" DEFAULT VALUES')
+    const statement = within(entry).getByRole("code")
+
+    expect(entry).toHaveAttribute("data-mark", "insert")
+
+    for (const keyword of ["INSERT", "INTO", "DEFAULT", "VALUES"]) {
+      expect(within(statement).getByText(keyword)).toHaveAttribute("data-token", "keyword")
+    }
+    expect(within(statement).getByText('"orders"')).toHaveAttribute("data-token", "identifier")
+  })
+
+  test("is marked the same way in the trailing section", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", "SELECT 1"),
+      run.finish("req-1"),
+      run.sql("req-1", 'UPDATE "orders" SET "synced" = ?'),
+    )
+
+    await select(user, "/orders")
+    const trailing = within(detail()).getByRole("region", { name: "After the request finished" })
+    const [entry] = within(trailing).getAllByRole("listitem").filter(isQuery)
+
+    expect(entry).toHaveAttribute("data-mark", "update")
+    expect(queries()[0]).not.toHaveAttribute("data-mark")
   })
 })
 
