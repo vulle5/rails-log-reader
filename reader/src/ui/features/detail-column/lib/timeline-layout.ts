@@ -46,7 +46,7 @@ export type TimelineContent = {
 
 export type TimelineBlock =
   | { kind: "entry"; section: "timeline" | "trailing"; event: TimelineEvent }
-  | { kind: "exception" }
+  | { kind: "exception"; exception: ExceptionContent }
   | { kind: "caption" }
 
 /** A block's estimated height, and its top as an offset and as a fraction of the total. */
@@ -78,7 +78,7 @@ export function timelineLayout(content: TimelineContent, width: number, metrics 
     sized.push({ kind: "entry", section: "timeline", event, height: entryHeight(event, width, metrics) })
   }
   if (content.exception !== null) {
-    sized.push({ kind: "exception", height: BLOCK_GAP + exceptionHeight(content.exception, width, metrics) })
+    sized.push({ kind: "exception", exception: content.exception, height: BLOCK_GAP + exceptionHeight(content.exception, width, metrics) })
   }
   if (content.trailing.length > 0) {
     sized.push({ kind: "caption", height: BLOCK_GAP + captionHeight(metrics) })

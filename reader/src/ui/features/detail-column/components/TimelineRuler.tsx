@@ -1,18 +1,22 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react"
+import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react"
 
 import type { SqlEvent } from "../../../../shared/wire"
+import { SearchContext, type Search } from "../../../hooks/search"
 import { queryMark, type MarkKind } from "../lib/sql-highlight"
 import type { TimelineLayout } from "../lib/timeline-layout"
+import { holdsMatch } from "../lib/timeline-matches"
 
 /**
  * The *Timeline ruler*: a strip down the Timeline's right side, a full-width tick per marked
- * statement at its place in `layout`, and a thumb over the stretch the scrollport is showing.
+ * statement and a tick per entry, or exception block, holding a *Search* match, each at its place
+ * in `layout`, and a thumb over the stretch the scrollport is showing.
  *
  * A tick is placed by the timeline's estimated layout, so it stays put while the browser lays out
  * entries it skipped off screen; the thumb is placed by the scrollport's own numbers, so it is
- * where the reader really is. Drawn first inside the scrollport, sticky and of no height, so it
- * stays in view and lays out nothing in the timeline under it: the scrollport's right padding is
- * its room, and the port has no scrollbar of its own beside it.
+ * where the reader really is. An entry holds a match by the same rule it lights by, so a match
+ * tick is drawn exactly where something is lit. Drawn first inside the scrollport, sticky and of
+ * no height, so it stays in view and lays out nothing in the timeline under it: the scrollport's
+ * right padding is its room, and the port has no scrollbar of its own beside it.
  *
  * It is the port's scrollbar. Pressing the strip anywhere but a tick centres the thumb on the
  * point pressed, or, pressed on the thumb, holds it where it was grabbed; dragging moves it on
@@ -24,6 +28,8 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
   const [port, setPort] = useState<HTMLElement | null>(null)
   const view = useView(port, layout)
   const ticks = useMemo(() => marks(layout), [layout])
+  const search = useContext(SearchContext)
+  const matched = useMemo(() => matchesAt(layout, search), [layout, search])
   // How far below the thumb's top the press that is dragging it landed, as a fraction of the whole.
   const grab = useRef<number | null>(null)
 
@@ -66,6 +72,20 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
         onPointerCancel={release}
         onLostPointerCapture={release}
       >
+        {/* Under the marks' ticks, so an entry both marked and matching shows its mark, and
+            passes a click through to it. Named, though hidden from assistive technology with
+            their layer. */}
+        <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+          {matched.map((at, index) => (
+            <div
+              key={index}
+              className="absolute inset-x-0 h-0.5 bg-match"
+              style={{ top: `${at * 100}%` }}
+              role="img"
+              aria-label="Search match"
+            />
+          ))}
+        </div>
         {ticks.map((tick) => (
           // A tick's colour is its mark's, read off its `data-mark`: the colour its entry's edge is in.
           <button
@@ -106,6 +126,11 @@ function marks(layout: TimelineLayout): Tick[] {
     ticks.push({ key: entryKey(block.event), at: block.fraction, kind, label: tickLabel(kind, block.event) })
   }
   return ticks
+}
+
+/** Where each entry or exception block holding a match of the current term sits in `layout`, in timeline order. */
+function matchesAt(layout: TimelineLayout, search: Search): number[] {
+  return layout.blocks.filter((block) => holdsMatch(search, block)).map((block) => block.fraction)
 }
 
 /** `INSERT · Order Create`, or the kind alone for a query with no name. */

@@ -604,6 +604,134 @@ describe("the Timeline ruler", () => {
     expect(parseFloat(tick().style.top)).toBeGreaterThan(closed)
   })
 
+  /** Every match tick: drawn only, so hidden from assistive technology with the layer it is in. */
+  function matchTicks() {
+    return within(ruler()).queryAllByRole("img", { name: "Search match", hidden: true })
+  }
+
+  function topOf(tick: HTMLElement) {
+    return parseFloat(tick.style.top)
+  }
+
+  describe("with a Search term", () => {
+    /** Four marked statements, so each match tick can be held against the mark tick of its own entry. */
+    function aRequestOfWrites() {
+      const run = aRun("srv-1")
+      return [
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+        run.sql("req-1", 'UPDATE "widgets" SET "total" = ?', { name: "Widget Update", binds: ["widget"] }),
+        run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+        run.sql("req-1", 'UPDATE "widgets" SET "synced" = ?', { name: "Widget Sync" }),
+      ]
+    }
+
+    test("has one match tick per entry holding a match, at its entry's place", async () => {
+      const { user } = theReader(...aRequestOfWrites())
+      await select(user, "/orders")
+
+      await search(user, "widget")
+
+      const marks = ticks()
+      expect(matchTicks().map(topOf)).toEqual([topOf(marks[1]!), topOf(marks[3]!)])
+    })
+
+    test("draws its match ticks out of reach: not buttons, and not exposed to assistive technology", async () => {
+      const { user } = theReader(...aRequestOfWrites())
+      await select(user, "/orders")
+
+      await search(user, "widget")
+
+      expect(within(ruler()).queryAllByRole("img", { name: "Search match" })).toEqual([])
+      const names = ["UPDATE · Order Update", "UPDATE · Widget Update", "UPDATE · Order Sync", "UPDATE · Widget Sync"]
+      expect(ticks()).toHaveLength(names.length)
+      for (const [at, name] of names.entries()) expect(ticks()[at]).toHaveAccessibleName(name)
+    })
+
+    test("moves its match ticks as the term changes, and has none once it is cleared", async () => {
+      const { user } = theReader(...aRequestOfWrites())
+      await select(user, "/orders")
+      expect(matchTicks()).toEqual([])
+
+      await search(user, "widget")
+      await search(user, "sync")
+
+      const marks = ticks()
+      expect(matchTicks().map(topOf)).toEqual([topOf(marks[2]!), topOf(marks[3]!)])
+
+      await search(user, "")
+
+      expect(matchTicks()).toEqual([])
+    })
+
+    test("has a match tick for a log line, the exception and an entry of the trailing section, in timeline order", async () => {
+      const run = aRun("srv-1")
+      const gems = Array.from({ length: 3 }, (_, at) => `rack (3.1.8) lib/rack/layer_${at}.rb:12:in \`call'`)
+      const { user } = theReader(
+        run.header(),
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+        run.log("req-1", "Charging the card"),
+        run.log("req-1", "Charged", { tags: ["card"] }),
+        run.log("req-1", "Charged", { callsite: "app/models/card.rb:3:in 'charge'" }),
+        run.log("req-1", "Completed", { source: "rails", callsite: "app/models/card.rb:9:in 'charge'" }),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+        run.finish("req-1", {
+          status: 500,
+          exception: { class: "CardError", message: "declined", backtrace: ["app/models/order.rb:44:in `total'", ...gems] },
+        }),
+        run.sql("req-1", 'SELECT "cards".* FROM "cards"', { name: "Card Load" }),
+        run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+      )
+      await select(user, "/orders")
+      const [insert, update, sync] = ticks().map(topOf)
+
+      await search(user, "card")
+
+      const found = matchTicks().map(topOf)
+      // Three of the log lines, the exception, and the trailing SELECT: the Rails line's Callsite is never shown.
+      expect(found).toHaveLength(5)
+      expect(found.toSorted((a, b) => a - b)).toEqual(found)
+      expect(found.slice(0, 3).every((at) => at > insert! && at < update!)).toBe(true)
+      expect(found[3]).toBeGreaterThan(update!)
+      expect(found[4]).toBeLessThan(sync!)
+    })
+
+    test("has a match tick for the exception when only a frame folded into a gem-frame marker matches", async () => {
+      const run = aRun("srv-1")
+      const gems = ["rack (3.1.8) lib/rack/runtime.rb:12:in `call'", "rack (3.1.8) lib/rack/sendfile.rb:9:in `call'"]
+      const { user } = theReader(
+        run.header(),
+        run.start("req-1", "POST", "/orders"),
+        run.finish("req-1", {
+          status: 500,
+          exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44:in `total'", ...gems] },
+        }),
+      )
+      await select(user, "/orders")
+
+      await search(user, "sendfile")
+
+      expect(matchTicks()).toHaveLength(1)
+    })
+
+    test("has no match tick for a query a chip hides", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "GET", "/posts/12"),
+        run.sql("req-1", 'SELECT "widgets".* FROM "widgets"', { name: "Widget Load", cached: true }),
+        run.sql("req-1", 'SELECT "widgets".* FROM "widgets"', { name: "Widget Load" }),
+      )
+      await select(user, "/posts/12")
+      await search(user, "widget")
+      expect(matchTicks()).toHaveLength(2)
+
+      await user.click(chip(/^cache\b/, "Filter by query kind"))
+
+      expect(matchTicks()).toHaveLength(1)
+    })
+  })
+
   describe("a mark's tick", () => {
     const scrollIntoView = Element.prototype.scrollIntoView
     let scrolledTo: { element: Element; options: ScrollIntoViewOptions | boolean | undefined }[] = []
@@ -635,6 +763,23 @@ describe("the Timeline ruler", () => {
       await user.click(within(ruler()).getByRole("button", { name: "UPDATE · Order Update" }))
 
       expect(scrolledTo).toEqual([{ element: queries()[2]!, options: { block: "center" } }])
+    })
+
+    test("is kept, and still brings its entry into view, when its entry holds a Search match", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'SELECT "orders".* FROM "orders"', { name: "Order Load" }),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+      )
+      await select(user, "/orders")
+      await search(user, "total")
+
+      const tick = within(ruler()).getByRole("button", { name: "UPDATE · Order Update" })
+      expect(matchTicks().map(topOf)).toEqual([topOf(tick)])
+      await user.click(tick)
+
+      expect(scrolledTo).toEqual([{ element: queries()[1]!, options: { block: "center" } }])
     })
 
     test("brings an entry in the trailing section into view", async () => {

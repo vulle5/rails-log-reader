@@ -5,7 +5,7 @@ import type { SqlEvent } from "../../../../shared/wire"
 import { Chip } from "../../../components/Chip"
 import { SearchContext, type Search } from "../../../hooks/search"
 import { recallPreference, rememberPreference } from "../../../lib/preference"
-import { queryMatches } from "../lib/query-matches"
+import { queryMatches } from "../lib/timeline-matches"
 
 /**
  * Everything that thins the *Detail column*, on the axis `ConsoleFilters` does not touch. A
