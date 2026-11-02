@@ -79,7 +79,7 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
           {matched.map((at, index) => (
             <div
               key={index}
-              className="absolute inset-x-0 h-0.5 bg-match"
+              className="absolute inset-x-0 h-0.5 bg-match-tick"
               style={{ top: `${at * 100}%` }}
               role="img"
               aria-label="Search match"
