@@ -286,6 +286,26 @@ function announceTheScroll() {
   fireEvent.scroll(scrollport("Detail column"))
 }
 
+/**
+ * The browser has laid out entries it had skipped near where the port is now, and they came out
+ * `taller` pixels more than their estimates: the timeline's scroll height grows by that much
+ * under a `scrollTop` it leaves where it was, and the observers watching the timeline are told.
+ */
+function laidOut(taller: number) {
+  const port = scrollport("Detail column")
+  const height = port.scrollHeight + taller
+  Object.defineProperty(port, "scrollHeight", { configurable: true, value: height })
+  // A stubbed observer firing is no DOM event, so nothing else wraps what it updates in `act`.
+  act(() => {
+    for (const { callback, elements } of observers) if (elements.has(timeline())) callback()
+  })
+}
+
+/** Lets the browser's next `frames` animation frames go by. */
+async function framesPass(frames: number) {
+  for (let each = 0; each < frames; each += 1) await new Promise((done) => requestAnimationFrame(done))
+}
+
 /** Presses the ruler `at` pixels down its strip and lets go there. */
 async function pressTheRuler(user: UserEvent, at: number) {
   await dragTheRuler(user, at, at)
@@ -940,6 +960,44 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     await pressTheRuler(user, 30)
 
     expect(thumb()).toHaveStyle({ top: "37.5%", height: "25%" })
+  })
+
+  test("keeps the thumb on the point pressed as the browser lays out the entries it scrolled to", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await user.pointer({ keys: "[MouseLeft>]", target: ruler(), coords: { clientY: 30 } })
+    announceTheScroll()
+    laidOut(60)
+
+    expect(thumb()).toHaveStyle({ top: "37.5%", height: "20%" })
+  })
+
+  test("keeps it there through the frames after the press is let go, while the layout settles", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await user.pointer({ keys: "[MouseLeft>]", target: ruler(), coords: { clientY: 30 } })
+    announceTheScroll()
+    // `fireEvent`, as every user-event action is awaited out through a timeout, and happy-dom
+    // runs all its pending animation frames at once inside it: the frames after a release would
+    // all be over before the browser had laid anything out.
+    fireEvent.pointerUp(ruler(), { clientY: 30 })
+    laidOut(60)
+
+    expect(thumb()).toHaveStyle({ top: "37.5%", height: "20%" })
+  })
+
+  test("lets the thumb go once the layout has settled, so a later resize scrolls nothing", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await pressTheRuler(user, 30)
+    await framesPass(3)
+    laidOut(60)
+
+    // 90 of the port's 300 pixels down, where the press left it.
+    expect(thumb()).toHaveStyle({ top: "30%", height: "20%" })
   })
 
   test("scrolls it continuously as the press is dragged", async () => {

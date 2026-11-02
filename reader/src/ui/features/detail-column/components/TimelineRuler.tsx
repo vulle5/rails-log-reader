@@ -22,16 +22,30 @@ import { holdsMatch } from "../lib/timeline-matches"
  * point pressed, or, pressed on the thumb, holds it where it was grabbed; dragging moves it on
  * from there. It only ever sets the port's `scrollTop`, so the scroll it causes is read by the
  * column's *auto-scroll* like any other.
+ *
+ * Scrolling somewhere the browser has not laid out yet changes the port's scroll height a frame
+ * or two later, as the entries brought near the screen take their real heights in place of their
+ * estimates. The `scrollTop` the press set is then a different fraction of the whole, and the
+ * thumb would settle away from the pointer. So the thumb's top stays aimed at the point while the
+ * strip is held and for `SETTLE_FRAMES` after it is let go: whenever the timeline is resized in
+ * that time, the port is scrolled back to it.
  */
 export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
   const anchor = useRef<HTMLDivElement>(null)
   const [port, setPort] = useState<HTMLElement | null>(null)
-  const view = useView(port, layout)
   const ticks = useMemo(() => marks(layout), [layout])
   const search = useContext(SearchContext)
   const matched = useMemo(() => matchesAt(layout, search), [layout, search])
   // How far below the thumb's top the press that is dragging it landed, as a fraction of the whole.
   const grab = useRef<number | null>(null)
+  // Where the press or drag put the thumb's top, as a fraction of the whole, while it is held there.
+  const aimed = useRef<number | null>(null)
+  const letGo = useRef(0)
+  const view = useView(port, layout, () => {
+    if (port === null || aimed.current === null) return
+    scrollTo(port, aimed.current)
+    if (grab.current === null) letGoLater()
+  })
 
   function press(event: PointerEvent<HTMLDivElement>) {
     // A tick is a button of its own, whose click goes to its entry.
@@ -42,17 +56,39 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
     const at = pointedAt(port, event)
     const { top, size } = viewOf(port)
     grab.current = at >= top && at <= top + size ? at - top : size / 2
-    scrollTo(port, at - grab.current)
+    cancelAnimationFrame(letGo.current)
+    aim(port, at - grab.current)
   }
 
   function drag(event: PointerEvent<HTMLDivElement>) {
     if (port === null || grab.current === null) return
-    scrollTo(port, pointedAt(port, event) - grab.current)
+    aim(port, pointedAt(port, event) - grab.current)
   }
 
   function release() {
+    if (grab.current === null) return
     grab.current = null
+    letGoLater()
   }
+
+  function aim(port: HTMLElement, fraction: number) {
+    aimed.current = fraction
+    scrollTo(port, fraction)
+  }
+
+  /** Stops holding the thumb where it was aimed once `SETTLE_FRAMES` pass from now. */
+  function letGoLater() {
+    cancelAnimationFrame(letGo.current)
+    const wait = (left: number) => {
+      letGo.current = requestAnimationFrame(() => {
+        if (left > 1) wait(left - 1)
+        else aimed.current = null
+      })
+    }
+    wait(SETTLE_FRAMES)
+  }
+
+  useLayoutEffect(() => () => cancelAnimationFrame(letGo.current), [])
 
   useLayoutEffect(() => {
     setPort(anchor.current?.closest<HTMLElement>("[data-scrollport]") ?? null)
@@ -114,6 +150,13 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
   )
 }
 
+/**
+ * How many frames after the strip is let go the thumb stays aimed where it was. A browser lays
+ * out what a scroll brought near the screen two frames after it, and once more after the scroll
+ * that follows: three covers each round of it.
+ */
+const SETTLE_FRAMES = 3
+
 type Tick = { key: string; at: number; kind: MarkKind; label: string }
 
 /** A tick per marked statement in `layout`, in timeline order. */
@@ -156,10 +199,15 @@ type View = { height: number; top: number; size: number }
  * Where `port` is scrolled to, read as it scrolls, after every render of the ruler, and as the
  * port or any block inside it is resized: an entry the browser lays out for the first time
  * changes the port's scroll height without scrolling it. The blocks are watched afresh whenever
- * `layout` changes, which is whenever the port's content does.
+ * `layout` changes, which is whenever the port's content does. `resized` runs first on each
+ * resize, so whatever it scrolls is what is read.
  */
-function useView(port: HTMLElement | null, layout: TimelineLayout): View {
+function useView(port: HTMLElement | null, layout: TimelineLayout, resized: () => void): View {
   const [view, setView] = useState<View>({ height: 0, top: 0, size: 1 })
+  const onResize = useRef(resized)
+  useLayoutEffect(() => {
+    onResize.current = resized
+  })
 
   const read = useCallback(() => {
     if (port === null) return
@@ -172,7 +220,10 @@ function useView(port: HTMLElement | null, layout: TimelineLayout): View {
   useLayoutEffect(() => {
     if (port === null) return
     port.addEventListener("scroll", read, { passive: true })
-    const observer = new ResizeObserver(read)
+    const observer = new ResizeObserver(() => {
+      onResize.current()
+      read()
+    })
     observer.observe(port)
     for (const block of port.children) observer.observe(block)
     return () => {
