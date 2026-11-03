@@ -607,6 +607,16 @@ would take a threshold.
 Ticks move when the timeline itself changes: an entry arriving while its row is *In-flight*, a
 chip toggled, the column resized, a fold opened. They never move because the column laid out an
 entry it had skipped while that entry was off screen.
+
+The ticks, the thumb and a press all measure the timeline the same way, each entry as tall as its
+own content says it is, so a tick lies inside the thumb exactly when its entry is on screen, and a
+press lands on what the strip draws at that point. Where an entry turns out taller or shorter than
+its content said, only the thumb's pace through that entry shows it: it moves slower or faster
+than the content there, and never apart from the ticks.
+
+Where a press or drag meets an edge case, the ruler does what a native scrollbar does: an entry
+arriving while the strip is held leaves what is on screen still and moves the thumb, and the
+thumb pushed against either end of the strip reaches that end of the timeline.
 _Avoid_: pill (the "↓ N new" pill is another thing), box, scroll pill — for its thumb.
 
 A backtrace collapses gem frames by default for the same reason: a real exception's trace
