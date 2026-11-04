@@ -178,7 +178,6 @@ afterAll(() => {
 })
 
 afterEach(() => {
-  localStorage.clear()
   observers.length = 0
 })
 

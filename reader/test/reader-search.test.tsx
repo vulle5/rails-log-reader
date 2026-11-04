@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import { aRun } from "./sidecar.fixtures"
@@ -17,10 +17,6 @@ import {
   timeline,
   wholeText,
 } from "./reader.harness"
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 /**
  * Seam 2, the search's half: the Reader mounted over both folds seeded from one stream of

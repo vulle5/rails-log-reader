@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import type { Outcome, ReplSnapshot, ReplState, TranscriptEntry } from "../src/shared/repl"
@@ -9,10 +9,6 @@ import { aReplSession, openRepl, openTheReader, replDrawer, replOpen, foldRepl }
  * The *Unseen result*, through the rendered Reader over a stand-in session: the mark on a
  * folded REPL drawer's header, which a tab's own snapshot updates turn on and unfolding turns off.
  */
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 const READY: ReplState = { kind: "ready", pid: 48213 }
 const RESULT: Outcome = { kind: "result", className: "Integer", text: "2", cut: false, tree: { type: "integer", inspect: "2" }, inspectError: null }

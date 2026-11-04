@@ -36,7 +36,6 @@ beforeEach(() => {
 
 afterEach(() => {
   window.matchMedia = matchMedia
-  localStorage.clear()
   delete document.documentElement.dataset.theme
 })
 

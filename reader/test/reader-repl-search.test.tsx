@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { within } from "@testing-library/react"
 
 import type { EvaluationEntry, Outcome, ReplSnapshot, ReplState, RubyError, RubyNode, StartedConsole } from "../src/shared/repl"
@@ -26,10 +26,6 @@ import {
  * drawer's header and an *Evaluation row*'s Result tab light and count, read off the rendered
  * Reader over a seeded fold and a stand-in REPL session.
  */
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 const PID = 48213
 const READY: ReplState = { kind: "ready", pid: PID }

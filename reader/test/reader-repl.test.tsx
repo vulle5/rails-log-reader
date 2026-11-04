@@ -12,7 +12,6 @@ import { RUBY_HASH, RUBY_RECORD } from "./repl.fixtures"
  */
 
 afterEach(() => {
-  localStorage.clear()
   setSystemTime()
 })
 

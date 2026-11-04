@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { act, screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
@@ -39,10 +39,6 @@ beforeAll(() => {
 
 afterAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth!)
-})
-
-afterEach(() => {
-  localStorage.clear()
 })
 
 const run = aRun("srv-125")

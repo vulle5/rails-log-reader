@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
@@ -11,10 +11,6 @@ import { column, openTheReader, rowShowing, search, tab } from "./reader.harness
  */
 
 const KEY = "rails-log-reader.hidden-table-columns"
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 function theReader() {
   const run = aRun("srv-1")

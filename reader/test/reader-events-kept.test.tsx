@@ -15,7 +15,6 @@ beforeEach(fakeTheSidecar)
 
 afterEach(() => {
   restoreTheSidecar()
-  localStorage.clear()
 })
 
 function paths() {

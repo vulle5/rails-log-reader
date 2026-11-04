@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { act, screen, waitFor, within } from "@testing-library/react"
 
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
@@ -29,10 +29,6 @@ import { aRun } from "./sidecar.fixtures"
  * keeps one long entry from burying the rest, through the rendered Reader over a seeded fold and
  * a stand-in *REPL* session.
  */
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 const PID = 48213
 const READY: ReplState = { kind: "ready", pid: PID }

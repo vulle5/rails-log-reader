@@ -26,12 +26,6 @@ import {
   wholeText,
 } from "./reader.harness"
 
-afterEach(() => {
-  // The Detail column's chips persist by design, which between tests is one test writing
-  // another's filter.
-  localStorage.clear()
-})
-
 /**
  * Seam 2, reached the way a developer reaches it: the Reader is mounted over a seeded fold
  * and a row is *clicked*. Nothing here reads the detail column without selecting one first,

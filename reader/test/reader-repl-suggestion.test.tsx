@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 
 import type { HistoryEntry } from "../src/ui/features/repl/lib/input-history"
@@ -13,10 +13,6 @@ import { aReplSession, openRepl, openTheReader, replDrawer, replOpen } from "./r
 const ROOT = "/work/blog"
 const PID = 48213
 const SETTING_KEY = "rails-log-reader.history-suggestion"
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 /** Puts `inputs` in storage as an earlier page load left them, the last one newest. */
 function kept(...inputs: string[]) {
