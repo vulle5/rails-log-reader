@@ -347,6 +347,11 @@ function along(px: number) {
   return (px / PORT) * TIMELINE
 }
 
+/** How far down the strip `at` pixels down the timeline's estimate is drawn: `along`'s inverse. */
+function onTheStrip(at: number) {
+  return (at / TIMELINE) * PORT
+}
+
 /**
  * Where on the timeline's estimate `element`, drawn on the ruler, starts and how much of it it
  * spans. Read off its style, as its percentages are rounded past what `toHaveStyle` can match.
@@ -1187,7 +1192,7 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     await select(user, "/orders")
     laidOut(detailEntries()[3]!, 10 * ENTRY)
     const tick = within(ruler()).getByRole("button", { name: /^INSERT/ })
-    const drawnAt = (onTheRuler(tick).top / TIMELINE) * PORT
+    const drawnAt = onTheStrip(onTheRuler(tick).top)
 
     // Pressed on the strip a pixel above the tick, off its own hit area.
     await pressTheRuler(user, drawnAt - 1)
@@ -1197,13 +1202,25 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     expect(top < PORT && bottom > 0).toBe(true)
   })
 
+  test("reaches the top of the Timeline when dragged to the top of the strip", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    await dragTheRuler(user, 30, 0)
+
+    expect(scrollport("Detail column").scrollTop).toBe(0)
+    expectTheThumb(0)
+  })
+
   test("resumes following when dragged to the bottom, though the last entry was laid out taller than its estimate", async () => {
     const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
     await dragTheRuler(user, 50, 20)
     laidOut(detailEntries().at(-1)!, 3 * ENTRY)
 
-    await dragTheRuler(user, 20, PORT)
+    // Held by its middle, the thumb is pushed 6 pixels of estimate past the end: aimed through the
+    // estimate, its top would fall in the last entry and leave the port short of its bottom.
+    await dragTheRuler(user, 20, onTheStrip(TIMELINE + 6 - PORT / 2))
     arrive(run.sql("w1"))
 
     expect(pinnedToBottom("Detail column")).toBe(true)
