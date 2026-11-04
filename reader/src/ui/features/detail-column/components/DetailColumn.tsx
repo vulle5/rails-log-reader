@@ -710,7 +710,8 @@ const NOTHING: readonly TimelineEvent[] = []
  * one width, measured off the timeline.
  *
  * The tab is drawn by walking the ruler's own layout, so the page holds exactly the blocks the
- * ruler places, in its order. Each block's root carries its index in the layout as `data-block`.
+ * ruler places, in its order. Each block's root carries its index in the layout as
+ * `data-layout-index`.
  *
  * Which of the exception's gem-frame markers are open is held here, and the ruler's layout grows
  * the exception block by each one. A new `subject` opens with every marker closed.
@@ -838,7 +839,7 @@ function Entry({
     <li
       className={cn("border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]", className)}
       style={{ containIntrinsicSize: `auto ${estimate}px` }}
-      data-layoutIndex={layoutIndex}
+      data-layout-index={layoutIndex}
       {...props}
     />
   )
@@ -1081,7 +1082,7 @@ function Exception({
     <section
       className="relative border-y border-border border-t-error py-2 pr-23 pl-3"
       aria-label="Exception"
-      data-layoutIndex={layoutIndex}
+      data-layout-index={layoutIndex}
     >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
           somewhere else, so it alone gets a control for it — a query or a log line is easy
@@ -1164,7 +1165,7 @@ function Trailing({
 /** A small heading over one part of a panel. */
 function Caption({ className, layoutIndex, children }: { className?: string; layoutIndex?: number; children: ReactNode }) {
   return (
-    <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)} data-layoutIndex={layoutIndex}>
+    <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)} data-layout-index={layoutIndex}>
       {children}
     </h3>
   )

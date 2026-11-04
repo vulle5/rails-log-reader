@@ -274,3 +274,60 @@ function pack(widths: readonly number[], width: number, gap: number) {
   }
   return { rows, last: Math.min(last, width) }
 }
+
+/**
+ * A block's element on the page: its index in the layout, and its real top and height in the
+ * scrollport's content.
+ */
+export type BlockOnPage = { index: number; top: number; height: number }
+
+/**
+ * The stretch of the scrollport's content on screen, `top` to `bottom` pixels down the
+ * `contentHeight` of it, and the block each edge is in: the last whose element starts at or above
+ * it, or null above the first.
+ */
+export type OnScreen = {
+  top: number
+  bottom: number
+  contentHeight: number
+  atTop: BlockOnPage | null
+  atBottom: BlockOnPage | null
+}
+
+/** The thumb's top and size, as fractions of the layout's total. */
+export type Thumb = { top: number; size: number }
+
+/**
+ * Where the thumb is, on `layout`'s measure, with the screen where `screen` says. Each edge's
+ * share into its block's real height is placed at that share of the block's estimated height, so
+ * a block's tick is inside the thumb exactly when the block's element starts on screen, however
+ * far any block's real height is from its estimate.
+ *
+ * Past a block's element, before the next one starts, is the gap the layout counts in the next
+ * block's height: the edge is at the next block's offset. Past the last element is the port's
+ * room under it, placed in the layout's room in proportion. An edge at either end of the content
+ * is that end of the layout.
+ */
+export function thumbOnScreen(layout: TimelineLayout, screen: OnScreen): Thumb {
+  if (layout.total <= 0) return { top: 0, size: 1 }
+  const { contentHeight } = screen
+  const top = screen.top <= 0 ? 0 : placeEdge(layout, screen.top, screen.atTop, contentHeight)
+  const bottom = screen.bottom >= contentHeight ? layout.total : placeEdge(layout, screen.bottom, screen.atBottom, contentHeight)
+  return { top: top / layout.total, size: Math.max(bottom - top, 0) / layout.total }
+}
+
+/** Where `at` pixels down the page, inside `block`, is on `layout`'s measure. */
+function placeEdge(layout: TimelineLayout, at: number, block: BlockOnPage | null, contentHeight: number) {
+  const placed = block === null ? undefined : layout.blocks[block.index]
+  if (block === null || placed === undefined) return 0
+  const realBottom = block.top + block.height
+  if (at < realBottom) return placed.offset + share(at - block.top, block.height) * placed.height
+  const placedBottom = placed.offset + placed.height
+  if (block.index < layout.blocks.length - 1) return placedBottom
+  return placedBottom + share(at - realBottom, contentHeight - realBottom) * (layout.total - placedBottom)
+}
+
+/** How far `into` is through `of`, from 0 to 1. Nothing to be through is all the way through it. */
+function share(into: number, of: number) {
+  return of <= 0 ? 1 : Math.min(Math.max(into / of, 0), 1)
+}

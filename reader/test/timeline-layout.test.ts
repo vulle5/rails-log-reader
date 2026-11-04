@@ -3,7 +3,13 @@ import { describe, expect, test } from "bun:test"
 import { aRun } from "./sidecar.fixtures"
 import type { TimelineEvent } from "../src/shared/activity"
 import { segmentBacktrace } from "../src/ui/lib/backtrace"
-import { entryHeight, timelineLayout, type TimelineContent } from "../src/ui/features/detail-column/lib/timeline-layout"
+import {
+  entryHeight,
+  thumbOnScreen,
+  timelineLayout,
+  type BlockOnPage,
+  type TimelineContent,
+} from "../src/ui/features/detail-column/lib/timeline-layout"
 
 /**
  * Seam 2: where each block of a Timeline tab sits, estimated from its own data, because a DOM
@@ -225,5 +231,123 @@ describe("laying out what follows the timeline", () => {
     const trailed = timelineLayout(content(entries, { exception: exception(), trailing: [query()] }), WIDE).total
     expect(raised).toBeGreaterThan(alone)
     expect(trailed).toBeGreaterThan(raised)
+  })
+})
+
+/**
+ * The thumb, placed on the estimate from where the screen really is: the page's real heights
+ * say which block each edge of the screen is in and how far into it, and that share of the
+ * block is placed in its estimated height.
+ */
+describe("placing the thumb", () => {
+  const entries = [query(), run.log("req-1", "Hi"), query(LONG), query("COMMIT"), query(), run.log("req-1", "Bye"), query(LONG)]
+  const layout = timelineLayout(content(entries), WIDE)
+  const VIEWPORT = 50
+
+  type Page = { blocks: BlockOnPage[]; contentHeight: number }
+
+  /** The page as a browser lays it out: each block `heights` tall, one under the other, and `room` under the last. */
+  function page(heights: readonly number[], room = 24): Page {
+    let top = 0
+    const blocks = heights.map((height, index) => {
+      const block = { index, top, height }
+      top += height
+      return block
+    })
+    return { blocks, contentHeight: top + room }
+  }
+
+  /** Every block as tall on the page as its estimate, but those in `taller`. */
+  function heights(taller: Record<number, number> = {}) {
+    return layout.blocks.map((block, index) => taller[index] ?? block.height)
+  }
+
+  /** Where the screen's bottom is with its top `top` pixels down `onPage`. */
+  function bottomOf(onPage: Page, top: number) {
+    return Math.min(top + VIEWPORT, onPage.contentHeight)
+  }
+
+  /** The thumb with the screen's top `top` pixels down `onPage`, each edge in the last block starting at or above it. */
+  function thumbAt(onPage: Page, top: number) {
+    const bottom = bottomOf(onPage, top)
+    const at = (edge: number): BlockOnPage | null => onPage.blocks.findLast((block) => block.top <= edge) ?? null
+    return thumbOnScreen(layout, { top, bottom, contentHeight: onPage.contentHeight, atTop: at(top), atBottom: at(bottom) })
+  }
+
+  /** Each scroll position of `onPage`, a few pixels apart. */
+  function scrolls(onPage: Page) {
+    const positions: number[] = []
+    for (let top = 0; top <= onPage.contentHeight - VIEWPORT; top += 3) positions.push(top)
+    return [...positions, onPage.contentHeight - VIEWPORT]
+  }
+
+  test.each([
+    ["every block as tall as its estimate", heights()],
+    ["an entry laid out three times its estimate", heights({ 2: layout.blocks[2]!.height * 3 })],
+    ["an entry laid out at half its estimate", heights({ 4: layout.blocks[4]!.height / 2 })],
+  ])("puts a block's tick inside the thumb exactly when the block starts on screen, with %s", (_, real) => {
+    const onPage = page(real)
+    for (const top of scrolls(onPage)) {
+      const thumb = thumbAt(onPage, top)
+      const bottom = bottomOf(onPage, top)
+      for (const [index, block] of layout.blocks.entries()) {
+        const tick = block.fraction
+        const onScreen = onPage.blocks[index]!.top >= top && onPage.blocks[index]!.top < bottom
+        // The thumb's end is its top and size added back up, which rounds.
+        const inside = tick >= thumb.top && tick < thumb.top + thumb.size - 1e-12
+        expect({ top, index, inside }).toEqual({ top, index, inside: onScreen })
+      }
+    }
+  })
+
+  test("leaves every tick, and the thumb over every other block, where they were when an entry is laid out taller", () => {
+    const estimated = page(heights())
+    const laidOut = page(heights({ 2: layout.blocks[2]!.height * 3 }))
+    // A share into each block other than the taller one, on both pages.
+    for (const index of [0, 1, 3, 5]) {
+      const into = (onPage: Page) => onPage.blocks[index]!.top + onPage.blocks[index]!.height / 4
+      expect(thumbAt(laidOut, into(laidOut)).top).toBeCloseTo(thumbAt(estimated, into(estimated)).top, 12)
+    }
+    expect(timelineLayout(content(entries), WIDE).blocks.map((block) => block.fraction)).toEqual(layout.blocks.map((block) => block.fraction))
+  })
+
+  test("moves the thumb through a taller entry with the share of it scrolled past", () => {
+    const estimate = layout.blocks[2]!
+    const laidOut = page(heights({ 2: estimate.height * 3 }))
+    const real = laidOut.blocks[2]!
+    for (const quarter of [0, 1, 2, 3]) {
+      const thumb = thumbAt(laidOut, real.top + (real.height * quarter) / 4)
+      expect(thumb.top * layout.total).toBeCloseTo(estimate.offset + (estimate.height * quarter) / 4, 9)
+    }
+  })
+
+  test("is at the top of the strip with the screen at the top of the page", () => {
+    expect(thumbAt(page(heights({ 0: 500 })), 0).top).toBe(0)
+  })
+
+  test("is at the bottom of the strip with the screen at the bottom of the page", () => {
+    const laidOut = page(heights({ 6: layout.blocks[6]!.height * 3 }))
+    const thumb = thumbAt(laidOut, laidOut.contentHeight - VIEWPORT)
+    expect(thumb.top + thumb.size).toBeCloseTo(1, 12)
+  })
+
+  test("places the port's room under the last block in the layout's room, in proportion", () => {
+    const onPage = page(heights(), 40)
+    const lastBottom = onPage.contentHeight - 40
+    const thumb = thumbAt(onPage, lastBottom + 10 - VIEWPORT)
+    const room = layout.total - (layout.blocks.at(-1)!.offset + layout.blocks.at(-1)!.height)
+    expect((thumb.top + thumb.size) * layout.total).toBeCloseTo(layout.total - room * (3 / 4), 9)
+  })
+
+  test("covers the whole strip with everything on screen", () => {
+    const onPage = page(heights())
+    const { contentHeight, blocks } = onPage
+    const thumb = thumbOnScreen(layout, { top: 0, bottom: contentHeight, contentHeight, atTop: blocks[0]!, atBottom: blocks.at(-1)! })
+    expect(thumb).toEqual({ top: 0, size: 1 })
+  })
+
+  test("covers the whole strip over an empty timeline", () => {
+    const empty = timelineLayout(content([]), WIDE)
+    expect(thumbOnScreen(empty, { top: 0, bottom: 0, contentHeight: 0, atTop: null, atBottom: null })).toEqual({ top: 0, size: 1 })
   })
 })

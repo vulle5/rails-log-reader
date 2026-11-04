@@ -4,7 +4,7 @@ import type { TimelineEvent } from "../../../../shared/activity"
 import type { SqlEvent } from "../../../../shared/wire"
 import { SearchContext, type Search } from "../../../hooks/search"
 import { queryMark, type MarkKind } from "../lib/sql-highlight"
-import type { TimelineLayout } from "../lib/timeline-layout"
+import { thumbOnScreen, type BlockOnPage, type Thumb, type TimelineLayout } from "../lib/timeline-layout"
 import { holdsMatch } from "../lib/timeline-matches"
 
 /**
@@ -12,12 +12,13 @@ import { holdsMatch } from "../lib/timeline-matches"
  * statement and a tick per entry, or exception block, holding a *Search* match, each at its place
  * in `layout`, and a thumb over the stretch the scrollport is showing.
  *
- * A tick is placed by the timeline's estimated layout, so it stays put while the browser lays out
- * entries it skipped off screen; the thumb is placed by the scrollport's own numbers, so it is
- * where the reader really is. An entry holds a match by the same rule it lights by, so a match
- * tick is drawn exactly where something is lit. Drawn first inside the scrollport, sticky and of
- * no height, so it stays in view and lays out nothing in the timeline under it: the scrollport's
- * right padding is its room, and the port has no scrollbar of its own beside it.
+ * Ticks and thumb are placed on one measure, the timeline's estimated layout, so a tick stays put
+ * while the browser lays out entries it skipped off screen, and lies inside the thumb exactly when
+ * its entry starts on screen. The page's real heights only say which block each edge of the
+ * screen is in and how far into it. An entry holds a match by the same rule it lights by, so a
+ * match tick is drawn exactly where something is lit. Drawn first inside the scrollport, sticky
+ * and of no height, so it stays in view and lays out nothing in the timeline under it: the
+ * scrollport's right padding is its room, and the port has no scrollbar of its own beside it.
  *
  * It is the port's scrollbar. Pressing the strip anywhere but a tick centres the thumb on the
  * point pressed, or, pressed on the thumb, holds it where it was grabbed; dragging moves it on
@@ -55,7 +56,7 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     const at = pointedAt(port, event)
-    const { top, size } = viewOf(port)
+    const { top, size } = viewOf(port, layout)
     grab.current = at >= top && at <= top + size ? at - top : size / 2
     cancelAnimationFrame(letGo.current)
     aim(port, at - grab.current)
@@ -197,14 +198,14 @@ function entryOf(port: HTMLElement | null, key: string) {
 }
 
 /** The scrollport's height, and the stretch of its content on screen as fractions of the whole. */
-type View = { height: number; top: number; size: number }
+type View = Thumb & { height: number }
 
 /**
  * Where `port` is scrolled to, read as it scrolls, after every render of the ruler, and as the
  * port or any block inside it is resized: an entry the browser lays out for the first time
- * changes the port's scroll height without scrolling it. The blocks are watched afresh whenever
- * `layout` changes, which is whenever the port's content does. `resized` runs first on each
- * resize, so whatever it scrolls is what is read.
+ * changes the real heights the thumb is read through without scrolling the port. The blocks are
+ * watched afresh whenever `layout` changes, which is whenever the port's content does. `resized`
+ * runs first on each resize, so whatever it scrolls is what is read.
  */
 function useView(port: HTMLElement | null, layout: TimelineLayout, resized: () => void): View {
   const [view, setView] = useState<View>({ height: 0, top: 0, size: 1 })
@@ -215,9 +216,9 @@ function useView(port: HTMLElement | null, layout: TimelineLayout, resized: () =
 
   const read = useCallback(() => {
     if (port === null) return
-    const next = viewOf(port)
+    const next = viewOf(port, layout)
     setView((prev) => (prev.height === next.height && prev.top === next.top && prev.size === next.size ? prev : next))
-  }, [port])
+  }, [port, layout])
 
   useLayoutEffect(() => read())
 
@@ -249,9 +250,45 @@ function scrollTo(port: HTMLElement, fraction: number) {
   port.scrollTop = fraction * port.scrollHeight
 }
 
-function viewOf(port: HTMLElement): View {
+/**
+ * The port's height, and the thumb `layout` places for the stretch of the port on screen. Only the
+ * blocks at the screen's two edges are measured, each found by a search over the blocks' real
+ * tops, which are in layout order.
+ */
+function viewOf(port: HTMLElement, layout: TimelineLayout): View {
   const { scrollTop, scrollHeight, clientHeight } = port
-  // Nothing laid out yet, or nothing to scroll: all of it is on screen.
-  if (scrollHeight <= 0 || scrollHeight <= clientHeight) return { height: clientHeight, top: 0, size: 1 }
-  return { height: clientHeight, top: scrollTop / scrollHeight, size: clientHeight / scrollHeight }
+  const blocks = [...port.querySelectorAll<HTMLElement>("[data-layout-index]")]
+  // Where the top of the port's content is on the viewport.
+  const origin = port.getBoundingClientRect().top + port.clientTop - scrollTop
+  const onPage = (block: HTMLElement): BlockOnPage => {
+    const { top, height } = block.getBoundingClientRect()
+    return { index: Number(block.dataset.layoutIndex), top: top - origin, height }
+  }
+  const bottom = scrollTop + clientHeight
+  const thumb = thumbOnScreen(layout, {
+    top: scrollTop,
+    bottom,
+    contentHeight: scrollHeight,
+    atTop: blockAt(blocks, scrollTop, onPage),
+    atBottom: blockAt(blocks, bottom, onPage),
+  })
+  return { height: clientHeight, ...thumb }
+}
+
+/** The last of `blocks` starting at or above `at` pixels down the port's content, or null above them all. */
+function blockAt(blocks: readonly HTMLElement[], at: number, onPage: (block: HTMLElement) => BlockOnPage) {
+  let found: BlockOnPage | null = null
+  let low = 0
+  let high = blocks.length - 1
+  while (low <= high) {
+    const middle = (low + high) >> 1
+    const block = onPage(blocks[middle]!)
+    if (block.top <= at) {
+      found = block
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return found
 }

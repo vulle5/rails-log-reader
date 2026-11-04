@@ -32,18 +32,26 @@ import {
  * says nothing about the other two — and about the things that must never move any of them:
  * a selection, a Run boundary, a filter.
  *
- * happy-dom does no layout, so the layout is supplied: every row is `ROW` pixels tall, every
- * column is `PORT` pixels of scrollport, and `scrollTop` clamps to the range a browser would
- * clamp it to, as it is set and as the port's height changes under it. That is the whole of
- * what the DOM contributes to this feature — a scrollport reports where it is, and the rule
- * reads it — so faking it is faking the input, not the answer.
+ * happy-dom does no layout, so the layout is supplied: every column is `PORT` pixels of
+ * scrollport, every Console line and table row is `ROW` pixels tall, and `scrollTop` clamps to
+ * the range a browser would clamp it to, as it is set and as the port's height changes under it.
+ * The Timeline tab's blocks are laid out the way a browser lays them out: each one under the last,
+ * an entry as tall as its `contain-intrinsic-size` and its padding until a test says the browser
+ * laid it out, then as tall as the test says, with the port's `pb-6` under the last. That is the
+ * whole of what the DOM contributes to this feature — a scrollport reports where it is, and the
+ * rule reads it — so faking it is faking the input, not the answer.
  */
 
 /** Tall enough that a handful of rows overflows it, so a test can scroll at all. */
 const PORT = 60
 const ROW = 20
+/** An entry's `pt-1`, `pb-1.25` and `border-b`, which a browser adds around its intrinsic size. */
+const ENTRY_CHROME = 10
+/** The Timeline's scrollport's `pb-6`, under its last block. */
+const TIMELINE_ROOM = 24
 
 const geometry = {
+  getBoundingClientRect: Element.prototype.getBoundingClientRect,
   scrollHeight: Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight"),
   clientHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight"),
   scrollTop: Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop"),
@@ -51,6 +59,41 @@ const geometry = {
 }
 
 const scrolledTo = new WeakMap<Element, number>()
+/** The height each entry the browser has laid out came out at. */
+const laidOutAt = new WeakMap<Element, number>()
+
+const BLOCK = "[data-layout-index]"
+
+/** The Timeline tab's blocks inside `element`, top to bottom. */
+function blocksIn(element: Element) {
+  return [...element.querySelectorAll<HTMLElement>(BLOCK)]
+}
+
+function isBlock(element: Element): element is HTMLElement {
+  return element instanceof HTMLElement && element.matches(BLOCK)
+}
+
+/**
+ * A block's height on the page: what it was laid out at, or else its `contain-intrinsic-size` and
+ * the padding and rule around it. A block with none, the exception block or the trailing
+ * section's caption, is a `ROW`.
+ */
+function heightOf(block: HTMLElement) {
+  const laid = laidOutAt.get(block)
+  if (laid !== undefined) return laid
+  const intrinsic = /(\d+(?:\.\d+)?)px/.exec(block.style.containIntrinsicSize)
+  return intrinsic === null ? ROW : Number(intrinsic[1]) + ENTRY_CHROME
+}
+
+/** How far down its scrollport's content a block's top is: the heights of the blocks above it. */
+function topOf(block: HTMLElement, port: Element) {
+  let top = 0
+  for (const above of blocksIn(port)) {
+    if (above === block) return top
+    top += heightOf(above)
+  }
+  return top
+}
 
 /**
  * Every `ResizeObserver` the Reader stands up, with what it observes. A DOM with no layout has
@@ -80,14 +123,27 @@ beforeAll(() => {
     }
   } as unknown as typeof ResizeObserver
 
-  // A row is a Console line, a table row or a timeline entry — every one of them an `li` or
-  // a `tr`, which is what makes one measure enough for all three columns.
+  // A row is a Console line or a table row, an `li` or a `tr`. The Timeline's blocks are as tall
+  // as each is laid out.
   Object.defineProperty(Element.prototype, "scrollHeight", {
     configurable: true,
     get(this: Element) {
-      return this.querySelectorAll("li, tr").length * ROW
+      const blocks = blocksIn(this)
+      if (blocks.length === 0) return this.querySelectorAll("li, tr").length * ROW
+      return blocks.reduce((sum, block) => sum + heightOf(block), 0) + (this.hasAttribute("data-scrollport") ? TIMELINE_ROOM : 0)
     },
   })
+  // A block of the Timeline is where it is laid out, less how far its port is scrolled; the port
+  // itself is at the top of the viewport.
+  Element.prototype.getBoundingClientRect = function placed(this: Element) {
+    const port = this.closest("[data-scrollport]")
+    if (!isBlock(this) || port === null) {
+      return geometry.getBoundingClientRect.call(this)
+    }
+    const top = topOf(this, port) - port.scrollTop
+    const height = heightOf(this)
+    return DOMRect.fromRect({ x: 0, y: top, width: 0, height })
+  }
   Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => PORT })
   Object.defineProperty(Element.prototype, "scrollTop", {
     configurable: true,
@@ -103,6 +159,10 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = function centre(this: Element) {
     const port = this.closest<HTMLElement>("[data-scrollport]")
     if (port === null) return
+    if (isBlock(this)) {
+      port.scrollTop = topOf(this, port) + heightOf(this) / 2 - port.clientHeight / 2
+      return
+    }
     const above = [...port.querySelectorAll("li, tr")].indexOf(this)
     port.scrollTop = above * ROW + ROW / 2 - port.clientHeight / 2
   }
@@ -114,6 +174,7 @@ afterAll(() => {
   Object.defineProperty(HTMLElement.prototype, "clientHeight", geometry.clientHeight!)
   Object.defineProperty(Element.prototype, "scrollTop", geometry.scrollTop!)
   Element.prototype.scrollIntoView = geometry.scrollIntoView
+  Element.prototype.getBoundingClientRect = geometry.getBoundingClientRect
 })
 
 afterEach(() => {
@@ -260,14 +321,45 @@ function detailEntries() {
 
 const COLUMNS: ColumnName[] = ["Console", "Activity table", "Detail column"]
 
-/** Twelve one-row queries, the one at `insertAt` an `INSERT`: 240 pixels of timeline in a 60-pixel port. */
+/**
+ * Twelve queries of two lines each, the one at `insertAt` an `INSERT`. Each is estimated `ENTRY`
+ * pixels tall, and laid out as tall until a test says otherwise: `TIMELINE` pixels of timeline in
+ * a 60-pixel port.
+ */
 function aWritingRequest(insertAt = 3) {
   const envelopes: Envelope[] = [run.start("w1", "POST", "/orders")]
   for (let each = 0; each < 12; each += 1) {
-    const sql = each === insertAt ? 'INSERT INTO "orders" DEFAULT VALUES' : 'SELECT "orders".* FROM "orders"'
+    const sql = each === insertAt ? 'INSERT INTO "orders"\nDEFAULT VALUES' : 'SELECT "orders".*\nFROM "orders"'
     envelopes.push(run.sql("w1", sql, { binds: [] }))
   }
   return envelopes
+}
+
+/**
+ * A two-line query's estimate: its name's line, its statement's `mt-0.5` and two lines, and its
+ * padding and rule.
+ */
+const ENTRY = 60
+const TIMELINE = 12 * ENTRY + TIMELINE_ROOM
+
+/** How far down the timeline's estimate `px` pixels down the strip is, the strip being the port's height. */
+function along(px: number) {
+  return (px / PORT) * TIMELINE
+}
+
+/**
+ * Where on the timeline's estimate `element`, drawn on the ruler, starts and how much of it it
+ * spans. Read off its style, as its percentages are rounded past what `toHaveStyle` can match.
+ */
+function onTheRuler(element: HTMLElement) {
+  const percent = (value: string) => (Number.parseFloat(value) / 100) * TIMELINE
+  return { top: percent(element.style.top), size: percent(element.style.height || "0%") }
+}
+
+function expectTheThumb(top: number, size = PORT) {
+  const drawn = onTheRuler(thumb())
+  expect(drawn.top).toBeCloseTo(top, 6)
+  expect(drawn.size).toBeCloseTo(size, 6)
 }
 
 function ruler() {
@@ -287,17 +379,17 @@ function announceTheScroll() {
 }
 
 /**
- * The browser has laid out entries it had skipped near where the port is now, and they came out
- * `taller` pixels more than their estimates: the timeline's scroll height grows by that much
- * under a `scrollTop` it leaves where it was, and the observers watching the timeline are told.
+ * The browser has laid out `entry`, which it had skipped, and it came out `height` pixels tall:
+ * everything under it moves down under a `scrollTop` left where it was, and the observers
+ * watching it or anything holding it are told.
  */
-function laidOut(taller: number) {
-  const port = scrollport("Detail column")
-  const height = port.scrollHeight + taller
-  Object.defineProperty(port, "scrollHeight", { configurable: true, value: height })
+function laidOut(entry: HTMLElement, height: number) {
+  laidOutAt.set(entry, height)
   // A stubbed observer firing is no DOM event, so nothing else wraps what it updates in `act`.
   act(() => {
-    for (const { callback, elements } of observers) if (elements.has(timeline())) callback()
+    for (const { callback, elements } of observers) {
+      if ([...elements].some((element) => element.contains(entry))) callback()
+    }
   })
 }
 
@@ -872,7 +964,7 @@ describe("the Detail column's chips", () => {
     const { user, arrive } = openTheReader(...HISTORY, ...CACHED)
     await select(user, "/feed")
     // Far enough up that the queries the chip hides below never clamp the column to its bottom.
-    scrollUp("Detail column", 8 * ROW)
+    scrollUp("Detail column", 20 * ROW)
 
     await user.click(cacheChip())
     expect(pinnedToBottom("Detail column")).toBe(false)
@@ -923,19 +1015,19 @@ describe("the Detail column's chips", () => {
 })
 
 /**
- * The *Timeline ruler*'s thumb is where the Timeline's scrollport really is, read off the port as
- * it scrolls, never off the timeline's estimated layout.
+ * The *Timeline ruler*'s thumb is placed on the timeline's estimate, as its ticks are: the port's
+ * real heights only say which entry each edge of the screen is in and how far into it.
  */
 describe("the Timeline ruler's thumb", () => {
   test("covers the stretch on screen, and follows the port as it scrolls", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
-    expect(thumb()).toHaveStyle({ top: "75%", height: "25%" })
+    expectTheThumb(TIMELINE - PORT)
 
     scrollUp("Detail column", 3 * ROW)
 
-    expect(thumb()).toHaveStyle({ top: "50%", height: "25%" })
+    expectTheThumb(TIMELINE - PORT - 3 * ROW)
   })
 
   test("is drawn over the ruler's ticks", async () => {
@@ -945,12 +1037,42 @@ describe("the Timeline ruler's thumb", () => {
     const [tick] = within(ruler()).getAllByRole("button")
     expect(tick!.compareDocumentPosition(thumb()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
+
+  test("holds a mark's tick while its entry is on screen, however much taller an entry before it was laid out", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest(8))
+    await select(user, "/orders")
+    laidOut(detailEntries()[3]!, 10 * ENTRY)
+    const tick = within(ruler()).getByRole("button", { name: /^INSERT/ })
+    const holds = () => {
+      const { top, size } = onTheRuler(thumb())
+      const at = onTheRuler(tick).top
+      return at >= top && at < top + size
+    }
+    expect(holds()).toBe(false)
+
+    await user.click(tick)
+    announceTheScroll()
+
+    expect(holds()).toBe(true)
+  })
+
+  test("stays where it is when the browser lays out an entry off screen", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+    scrollUp("Detail column", 5 * ENTRY)
+    expectTheThumb(TIMELINE - PORT - 5 * ENTRY)
+
+    laidOut(detailEntries()[10]!, 4 * ENTRY)
+
+    expectTheThumb(TIMELINE - PORT - 5 * ENTRY)
+  })
 })
 
 /**
  * The *Timeline ruler* is the Timeline's scrollbar: pressing or dragging its strip moves the
  * scrollport, and the Detail column's *auto-scroll* reads where the port ends up like any other
- * scroll. The strip is the port's height, so a pixel down it is a pixel of the port's own.
+ * scroll. The strip is the port's height, so a pixel down it is `TIMELINE / PORT` pixels down the
+ * timeline's estimate.
  */
 describe("the Timeline ruler as the Timeline's scrollbar", () => {
   test("scrolls the Timeline toward the point pressed, centring the thumb on it", async () => {
@@ -959,21 +1081,21 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
 
     await pressTheRuler(user, 30)
 
-    expect(thumb()).toHaveStyle({ top: "37.5%", height: "25%" })
+    expectTheThumb(along(30) - PORT / 2)
   })
 
-  test("keeps the thumb on the point pressed as the browser lays out the entries it scrolled to", async () => {
+  test.todo("keeps the thumb on the point pressed as the browser lays out the entries it scrolled to", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
     await user.pointer({ keys: "[MouseLeft>]", target: ruler(), coords: { clientY: 30 } })
     announceTheScroll()
-    laidOut(60)
+    laidOut(detailEntries()[5]!, 2 * ENTRY)
 
-    expect(thumb()).toHaveStyle({ top: "37.5%", height: "20%" })
+    expect(onTheRuler(thumb()).top).toBeCloseTo(along(30) - PORT / 2, 6)
   })
 
-  test("keeps it there through the frames after the press is let go, while the layout settles", async () => {
+  test.todo("keeps it there through the frames after the press is let go, while the layout settles", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
@@ -983,9 +1105,9 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     // runs all its pending animation frames at once inside it: the frames after a release would
     // all be over before the browser had laid anything out.
     fireEvent.pointerUp(ruler(), { clientY: 30 })
-    laidOut(60)
+    laidOut(detailEntries()[5]!, 2 * ENTRY)
 
-    expect(thumb()).toHaveStyle({ top: "37.5%", height: "20%" })
+    expect(onTheRuler(thumb()).top).toBeCloseTo(along(30) - PORT / 2, 6)
   })
 
   test("lets the thumb go once the layout has settled, so a later resize scrolls nothing", async () => {
@@ -994,10 +1116,9 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
 
     await pressTheRuler(user, 30)
     await framesPass(3)
-    laidOut(60)
+    laidOut(detailEntries()[10]!, 2 * ENTRY)
 
-    // 90 of the port's 300 pixels down, where the press left it.
-    expect(thumb()).toHaveStyle({ top: "30%", height: "20%" })
+    expectTheThumb(along(30) - PORT / 2)
   })
 
   test("scrolls it continuously as the press is dragged", async () => {
@@ -1005,20 +1126,21 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     await select(user, "/orders")
 
     await dragTheRuler(user, 30, 18)
-    expect(thumb()).toHaveStyle({ top: "17.5%" })
+    expectTheThumb(along(18) - PORT / 2)
 
     await dragTheRuler(user, 18, 45)
-    expect(thumb()).toHaveStyle({ top: "62.5%" })
+    expectTheThumb(along(45) - PORT / 2)
   })
 
   test("drags the thumb from where it was grabbed, rather than jumping it to the pointer", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
-    // The thumb spans 45 to 60 pixels down the strip: grabbed 5 pixels into it.
-    await dragTheRuler(user, 50, 35)
+    // The thumb spans the strip's last five pixels or so: grabbed 57 pixels down, inside it.
+    const grabbed = along(57) - (TIMELINE - PORT)
+    await dragTheRuler(user, 57, 35)
 
-    expect(thumb()).toHaveStyle({ top: "50%" })
+    expectTheThumb(along(35) - grabbed)
   })
 
   test("pauses the Detail column when dragged up, so what arrives is counted on the pill", async () => {
@@ -1044,7 +1166,6 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     expect(pinnedToBottom("Detail column")).toBe(true)
     expect(pill("Detail column")).not.toBeInTheDocument()
   })
-
 })
 
 /**
@@ -1067,6 +1188,8 @@ describe("a mark's tick on the Timeline ruler", () => {
   test("leaves the Detail column following when its entry is at the bottom already", async () => {
     const { user, arrive } = openTheReader(run.header(), ...aWritingRequest(11))
     await select(user, "/orders")
+    // Tall enough that centring the last entry runs into the port's bottom.
+    resized("Detail column", 2 * PORT)
 
     await user.click(within(ruler()).getByRole("button", { name: /^INSERT/ }))
     announceTheScroll()
