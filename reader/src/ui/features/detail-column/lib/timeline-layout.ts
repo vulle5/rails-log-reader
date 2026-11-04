@@ -1,6 +1,7 @@
 import type { TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, SqlEvent } from "../../../../shared/wire"
 import type { BacktraceSegment } from "../../../lib/backtrace"
+import { unreachable } from "../../../lib/unreachable"
 import { bindText } from "./format"
 
 /**
@@ -73,35 +74,52 @@ const END_PADDING = 24
 
 /** Every block of `content`, top to bottom, at `width`: the width of the scrollport's content. */
 export function timelineLayout(content: TimelineContent, width: number, metrics = FONT_METRICS): TimelineLayout {
-  const sized: (TimelineBlock & { height: number })[] = []
-  for (const event of content.timeline) {
-    sized.push({ kind: "entry", section: "timeline", event, height: entryHeight(event, width, metrics) })
-  }
-  if (content.exception !== null) {
-    sized.push({ kind: "exception", exception: content.exception, height: BLOCK_GAP + exceptionHeight(content.exception, width, metrics) })
-  }
+  const blocks: TimelineBlock[] = content.timeline.map((event) => ({ kind: "entry", section: "timeline", event }))
+  if (content.exception !== null) blocks.push({ kind: "exception", exception: content.exception })
   if (content.trailing.length > 0) {
-    sized.push({ kind: "caption", height: BLOCK_GAP + captionHeight(metrics) })
-    for (const event of content.trailing) {
-      sized.push({ kind: "entry", section: "trailing", event, height: entryHeight(event, width, metrics) })
-    }
+    blocks.push({ kind: "caption" })
+    for (const event of content.trailing) blocks.push({ kind: "entry", section: "trailing", event })
   }
 
   let offset = 0
-  const placed = sized.map((block) => {
+  const placed = blocks.map((block) => {
     const top = offset
-    offset += block.height
-    return { ...block, offset: top }
+    const height = blockHeight(block, width, metrics)
+    offset += height
+    return { ...block, height, offset: top }
   })
   const total = offset + END_PADDING
   return { blocks: placed.map((block) => ({ ...block, fraction: block.offset / total })), total }
 }
 
+/** A block's estimated height at `width`, the gap above it included. */
+function blockHeight(block: TimelineBlock, width: number, metrics: FontMetrics) {
+  switch (block.kind) {
+    case "entry":
+      return entryHeight(block.event, width, metrics)
+    case "exception":
+      return BLOCK_GAP + exceptionHeight(block.exception, width, metrics)
+    case "caption":
+      return BLOCK_GAP + captionHeight(metrics)
+    default:
+      return unreachable(block)
+  }
+}
+
 /** One timeline entry's estimated height at `width`, its padding and rule included. */
 export function entryHeight(event: TimelineEvent, width: number, metrics = FONT_METRICS) {
-  const inner = width - ENTRY_INSET
-  const content = event.type === "sql" ? queryHeight(event, inner, metrics) : logLineHeight(event, inner, metrics)
-  return ENTRY_CHROME + content
+  return ENTRY_CHROME + contentHeight(event, width - ENTRY_INSET, metrics)
+}
+
+function contentHeight(event: TimelineEvent, width: number, metrics: FontMetrics) {
+  switch (event.type) {
+    case "sql":
+      return queryHeight(event, width, metrics)
+    case "app_log":
+      return logLineHeight(event, width, metrics)
+    default:
+      return unreachable(event)
+  }
 }
 
 /**

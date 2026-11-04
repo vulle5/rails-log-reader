@@ -1,4 +1,4 @@
-import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode, type RefObject } from "react"
+import { memo, useContext, useId, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 
 import type { ActivityRow, EvaluationRow, RequestRow, RowResponse, RunRow, TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, BindValue, RequestException, SqlEvent } from "../../../../shared/wire"
@@ -9,6 +9,7 @@ import { LinkButton } from "../../../components/LinkButton"
 import { Tag } from "../../../components/Tag"
 import { PrettyRawPill } from "../../../components/PrettyRawPill"
 import { cn } from "../../../lib/cn"
+import { unreachable } from "../../../lib/unreachable"
 import { controllerAction, ms, runDescription } from "../../../lib/format"
 import { Highlight, Marked, SearchContext, useMatches, type Search } from "../../../hooks/search"
 import { Copyable, CopyButton, LineCopy } from "../../../components/CopyButton"
@@ -708,6 +709,9 @@ const NOTHING: readonly TimelineEvent[] = []
  * in as the chips leave it. The ruler's layout and every entry's own estimate are taken at the
  * one width, measured off the timeline.
  *
+ * The tab is drawn by walking the ruler's own layout, so the page holds exactly the blocks the
+ * ruler places, in its order. Each block's root carries its index in the layout as `data-block`.
+ *
  * Which of the exception's gem-frame markers are open is held here, and the ruler's layout grows
  * the exception block by each one. A new `subject` opens with every marker closed.
  */
@@ -747,56 +751,79 @@ function TimelinePanel({
     return timelineLayout({ timeline, exception: block, trailing }, width)
   }, [timeline, exception, cutFrom, segments, opened, search, trailing, width])
 
+  // The layout's blocks are in order, so each section's are consecutive.
+  const timelineEntries: ReactNode[] = []
+  let exceptionBlock: ReactNode = null
+  let captionBlock: ReactNode = null
+  const trailingEntries: ReactNode[] = []
+  for (const [index, block] of layout.blocks.entries()) {
+    switch (block.kind) {
+      case "entry": {
+        const entry = <TimelineEntry key={eventKey(block.event)} block={index} event={block.event} width={width} railsRoot={railsRoot} />
+        if (block.section === "timeline") timelineEntries.push(entry)
+        else trailingEntries.push(entry)
+        break
+      }
+      case "exception":
+        // The layout holds an exception block only for an `exception` handed in.
+        if (exception !== null) {
+          exceptionBlock = (
+            <Exception
+              block={index}
+              exception={exception}
+              cutFrom={cutFrom}
+              railsRoot={railsRoot}
+              opened={[opened, (from) => setOpened((prev) => new Set(prev).add(from))]}
+            />
+          )
+        }
+        break
+      case "caption":
+        captionBlock = (
+          <Caption className="px-3 py-1.5" block={index}>
+            {caption}
+          </Caption>
+        )
+        break
+      default:
+        unreachable(block)
+    }
+  }
+
   return (
     <>
       <TimelineRuler layout={layout} />
-      <Timeline label="Timeline" list={list} events={timeline} width={width} railsRoot={railsRoot} />
-      {exception !== null && (
-        <Exception
-          exception={exception}
-          cutFrom={cutFrom}
-          railsRoot={railsRoot}
-          opened={[opened, (from) => setOpened((prev) => new Set(prev).add(from))]}
-        />
+      <ol aria-label="Timeline" ref={list}>
+        {timelineEntries}
+      </ol>
+      {exceptionBlock}
+      {/* The layout holds a caption only while the chips leave the trailing section something to
+          show, so a trailing block of nothing but queries a chip hides leaves no empty section
+          behind. */}
+      {captionBlock !== null && (
+        <Trailing caption={caption} heading={captionBlock}>
+          {trailingEntries}
+        </Trailing>
       )}
-      {/* Checked on what the chips leave rather than on everything the row holds: a trailing
-          block of nothing but queries a chip hides must not leave an empty section behind — the
-          section is about there being something to show under it. */}
-      {trailing.length > 0 && <Trailing caption={caption} events={trailing} width={width} railsRoot={railsRoot} />}
     </>
   )
 }
 
-/** Renders whatever it is handed: the chips' filtering is done once, by every row kind's caller. */
-function Timeline({
-  label,
-  list,
-  events,
-  width,
-  railsRoot,
-}: {
-  /** Absent in the trailing section, whose own heading already names what it lists. */
-  label?: string
-  /** Where the timeline's width is measured from: the first list of the tab. */
-  list?: RefObject<HTMLOListElement | null>
-  events: readonly TimelineEvent[]
-  /** The width the timeline's entries are estimated at. */
-  width: number
-  railsRoot: string | null
-}) {
-  return (
-    <ol aria-label={label} ref={list}>
-      {/* `(run_id, seq)` is the event identity everywhere else in the Reader, and a key is
-          one more place it saves inventing one. */}
-      {events.map((event) =>
-        event.type === "sql" ? (
-          <Query key={`${event.run_id} ${event.seq}`} event={event} width={width} railsRoot={railsRoot} />
-        ) : (
-          <LogLine key={`${event.run_id} ${event.seq}`} event={event} width={width} railsRoot={railsRoot} />
-        ),
-      )}
-    </ol>
-  )
+/** `(run_id, seq)`: the event identity everywhere else in the Reader, here an entry's key. */
+function eventKey(event: TimelineEvent) {
+  return `${event.run_id} ${event.seq}`
+}
+
+/** One timeline entry, `block` its index in the Timeline tab's layout. */
+function TimelineEntry({ event, ...props }: { block: number; event: TimelineEvent; width: number; railsRoot: string | null }) {
+  switch (event.type) {
+    case "sql":
+      return <Query event={event} {...props} />
+    case "app_log":
+      return <LogLine event={event} {...props} />
+    default:
+      return unreachable(event)
+  }
 }
 
 /**
@@ -810,17 +837,28 @@ function Timeline({
  * height is close to its estimated one from the first paint. `auto` in `contain-intrinsic-size`
  * keeps an entry's last rendered height once the browser has measured it.
  */
-function Entry({ className, estimate, ...props }: ComponentProps<"li"> & { estimate: number }) {
+function Entry({ className, block, estimate, ...props }: ComponentProps<"li"> & { block: number; estimate: number }) {
   return (
     <li
       className={cn("border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]", className)}
       style={{ containIntrinsicSize: `auto ${estimate}px` }}
+      data-block={block}
       {...props}
     />
   )
 }
 
-const Query = memo(function Query({ event, width, railsRoot }: { event: SqlEvent; width: number; railsRoot: string | null }) {
+const Query = memo(function Query({
+  block,
+  event,
+  width,
+  railsRoot,
+}: {
+  block: number
+  event: SqlEvent
+  width: number
+  railsRoot: string | null
+}) {
   const { sql, name, duration_ms, cached, async, binds, callsite } = event.payload
   const mark = queryMark(event)
 
@@ -829,6 +867,7 @@ const Query = memo(function Query({ event, width, railsRoot }: { event: SqlEvent
     // in `PUT`/`PATCH`'s, `DELETE` in `DELETE`'s, and `ROLLBACK` in the error colour.
     <Entry
       className="data-[mark=insert]:shadow-mark-insert data-[mark=update]:shadow-mark-update data-[mark=delete]:shadow-mark-delete data-[mark=rollback]:shadow-mark-rollback"
+      block={block}
       estimate={intrinsicHeight(event, width)}
       data-mark={mark ?? undefined}
       data-event={entryKey(event)}
@@ -980,7 +1019,17 @@ function bindKind(value: BindValue): BindKind {
   return "boolean"
 }
 
-const LogLine = memo(function LogLine({ event, width, railsRoot }: { event: AppLogEvent; width: number; railsRoot: string | null }) {
+const LogLine = memo(function LogLine({
+  block,
+  event,
+  width,
+  railsRoot,
+}: {
+  block: number
+  event: AppLogEvent
+  width: number
+  railsRoot: string | null
+}) {
   const { severity, message, source, tags, callsite } = event.payload
 
   return (
@@ -990,6 +1039,7 @@ const LogLine = memo(function LogLine({ event, width, railsRoot }: { event: AppL
     // looks like another query. It wraps only so that a callsite can start a line of its own.
     <Entry
       className="group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm"
+      block={block}
       estimate={intrinsicHeight(event, width)}
       data-level={severity}
       data-source={source}
@@ -1016,11 +1066,14 @@ const LogLine = memo(function LogLine({ event, width, railsRoot }: { event: AppL
 })
 
 function Exception({
+  block,
   exception,
   cutFrom,
   railsRoot,
   opened,
 }: {
+  /** Its index in the Timeline tab's layout. */
+  block: number
   exception: RequestException
   cutFrom: number | null
   railsRoot: string | null
@@ -1032,6 +1085,7 @@ function Exception({
     <section
       className="relative border-y border-border border-t-error py-2 pr-23 pl-3"
       aria-label="Exception"
+      data-block={block}
     >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
           somewhere else, so it alone gets a control for it — a query or a log line is easy
@@ -1091,26 +1145,20 @@ function Callsite({
  * Reader bug rather than as the truth about the file. Set apart by a rule as well as the
  * caption, so it cannot be mistaken for the timeline it sits below.
  */
-function Trailing({
-  caption,
-  events,
-  width,
-  railsRoot,
-}: {
-  caption: string
-  events: readonly TimelineEvent[]
-  width: number
-  railsRoot: string | null
-}) {
+function Trailing({ caption, heading, children }: { caption: string; heading: ReactNode; children: ReactNode }) {
   return (
     <section className="mt-3 border-t border-dashed border-border" aria-label={caption}>
-      <Caption className="px-3 py-1.5">{caption}</Caption>
-      <Timeline events={events} width={width} railsRoot={railsRoot} />
+      {heading}
+      <ol>{children}</ol>
     </section>
   )
 }
 
 /** A small heading over one part of a panel. */
-function Caption({ className, children }: { className?: string; children: ReactNode }) {
-  return <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)}>{children}</h3>
+function Caption({ className, block, children }: { className?: string; block?: number; children: ReactNode }) {
+  return (
+    <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)} data-block={block}>
+      {children}
+    </h3>
+  )
 }

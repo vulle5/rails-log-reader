@@ -1,5 +1,7 @@
+import type { TimelineEvent } from "../../../../shared/activity"
 import type { AppLogEvent, SqlEvent } from "../../../../shared/wire"
 import type { Search } from "../../../hooks/search"
+import { unreachable } from "../../../lib/unreachable"
 import { bindText } from "./format"
 import type { ExceptionContent, TimelineBlock } from "./timeline-layout"
 
@@ -52,8 +54,25 @@ function callsiteMatches(search: Search, callsite: string | undefined) {
 
 /** Whether a block of the Timeline tab lights any match of the current term. A caption is the Reader's own words. */
 export function holdsMatch(search: Search, block: TimelineBlock) {
-  if (block.kind === "caption") return false
-  if (block.kind === "exception") return exceptionMatches(search, block.exception) > 0
-  const { event } = block
-  return (event.type === "sql" ? queryMatches(search, event) : logLineMatches(search, event)) > 0
+  switch (block.kind) {
+    case "entry":
+      return entryMatches(search, block.event) > 0
+    case "exception":
+      return exceptionMatches(search, block.exception) > 0
+    case "caption":
+      return false
+    default:
+      return unreachable(block)
+  }
+}
+
+function entryMatches(search: Search, event: TimelineEvent) {
+  switch (event.type) {
+    case "sql":
+      return queryMatches(search, event)
+    case "app_log":
+      return logLineMatches(search, event)
+    default:
+      return unreachable(event)
+  }
 }
