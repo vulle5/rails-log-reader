@@ -754,12 +754,12 @@ function TimelinePanel({
   // The layout's blocks are in order, so each section's are consecutive.
   const timelineEntries: ReactNode[] = []
   let exceptionBlock: ReactNode = null
-  let captionBlock: ReactNode = null
+  let captionIndex: number | null = null
   const trailingEntries: ReactNode[] = []
   for (const [index, block] of layout.blocks.entries()) {
     switch (block.kind) {
       case "entry": {
-        const entry = <TimelineEntry key={eventKey(block.event)} block={index} event={block.event} width={width} railsRoot={railsRoot} />
+        const entry = <TimelineEntry key={entryKey(block.event)} layoutIndex={index} event={block.event} width={width} railsRoot={railsRoot} />
         if (block.section === "timeline") timelineEntries.push(entry)
         else trailingEntries.push(entry)
         break
@@ -769,7 +769,7 @@ function TimelinePanel({
         if (exception !== null) {
           exceptionBlock = (
             <Exception
-              block={index}
+              layoutIndex={index}
               exception={exception}
               cutFrom={cutFrom}
               railsRoot={railsRoot}
@@ -779,11 +779,7 @@ function TimelinePanel({
         }
         break
       case "caption":
-        captionBlock = (
-          <Caption className="px-3 py-1.5" block={index}>
-            {caption}
-          </Caption>
-        )
+        captionIndex = index
         break
       default:
         unreachable(block)
@@ -800,8 +796,8 @@ function TimelinePanel({
       {/* The layout holds a caption only while the chips leave the trailing section something to
           show, so a trailing block of nothing but queries a chip hides leaves no empty section
           behind. */}
-      {captionBlock !== null && (
-        <Trailing caption={caption} heading={captionBlock}>
+      {captionIndex !== null && (
+        <Trailing caption={caption} layoutIndex={captionIndex}>
           {trailingEntries}
         </Trailing>
       )}
@@ -809,13 +805,8 @@ function TimelinePanel({
   )
 }
 
-/** `(run_id, seq)`: the event identity everywhere else in the Reader, here an entry's key. */
-function eventKey(event: TimelineEvent) {
-  return `${event.run_id} ${event.seq}`
-}
-
-/** One timeline entry, `block` its index in the Timeline tab's layout. */
-function TimelineEntry({ event, ...props }: { block: number; event: TimelineEvent; width: number; railsRoot: string | null }) {
+/** One timeline entry, `layoutIndex` its index in the Timeline tab's layout. */
+function TimelineEntry({ event, ...props }: { layoutIndex: number; event: TimelineEvent; width: number; railsRoot: string | null }) {
   switch (event.type) {
     case "sql":
       return <Query event={event} {...props} />
@@ -837,24 +828,29 @@ function TimelineEntry({ event, ...props }: { block: number; event: TimelineEven
  * height is close to its estimated one from the first paint. `auto` in `contain-intrinsic-size`
  * keeps an entry's last rendered height once the browser has measured it.
  */
-function Entry({ className, block, estimate, ...props }: ComponentProps<"li"> & { block: number; estimate: number }) {
+function Entry({
+  className,
+  layoutIndex,
+  estimate,
+  ...props
+}: ComponentProps<"li"> & { layoutIndex: number; estimate: number }) {
   return (
     <li
       className={cn("border-b border-border px-3 pt-1 pb-1.25 [content-visibility:auto]", className)}
       style={{ containIntrinsicSize: `auto ${estimate}px` }}
-      data-block={block}
+      data-layoutIndex={layoutIndex}
       {...props}
     />
   )
 }
 
 const Query = memo(function Query({
-  block,
+  layoutIndex,
   event,
   width,
   railsRoot,
 }: {
-  block: number
+  layoutIndex: number
   event: SqlEvent
   width: number
   railsRoot: string | null
@@ -867,7 +863,7 @@ const Query = memo(function Query({
     // in `PUT`/`PATCH`'s, `DELETE` in `DELETE`'s, and `ROLLBACK` in the error colour.
     <Entry
       className="data-[mark=insert]:shadow-mark-insert data-[mark=update]:shadow-mark-update data-[mark=delete]:shadow-mark-delete data-[mark=rollback]:shadow-mark-rollback"
-      block={block}
+      layoutIndex={layoutIndex}
       estimate={intrinsicHeight(event, width)}
       data-mark={mark ?? undefined}
       data-event={entryKey(event)}
@@ -1020,12 +1016,12 @@ function bindKind(value: BindValue): BindKind {
 }
 
 const LogLine = memo(function LogLine({
-  block,
+  layoutIndex,
   event,
   width,
   railsRoot,
 }: {
-  block: number
+  layoutIndex: number
   event: AppLogEvent
   width: number
   railsRoot: string | null
@@ -1039,7 +1035,7 @@ const LogLine = memo(function LogLine({
     // looks like another query. It wraps only so that a callsite can start a line of its own.
     <Entry
       className="group flex flex-wrap items-baseline gap-1.5 bg-sunken text-sm"
-      block={block}
+      layoutIndex={layoutIndex}
       estimate={intrinsicHeight(event, width)}
       data-level={severity}
       data-source={source}
@@ -1066,14 +1062,14 @@ const LogLine = memo(function LogLine({
 })
 
 function Exception({
-  block,
+  layoutIndex,
   exception,
   cutFrom,
   railsRoot,
   opened,
 }: {
   /** Its index in the Timeline tab's layout. */
-  block: number
+  layoutIndex: number
   exception: RequestException
   cutFrom: number | null
   railsRoot: string | null
@@ -1085,7 +1081,7 @@ function Exception({
     <section
       className="relative border-y border-border border-t-error py-2 pr-23 pl-3"
       aria-label="Exception"
-      data-block={block}
+      data-layoutIndex={layoutIndex}
     >
       {/* Copy, not select-and-copy: the one block on this page an exception is filed from
           somewhere else, so it alone gets a control for it — a query or a log line is easy
@@ -1145,19 +1141,30 @@ function Callsite({
  * Reader bug rather than as the truth about the file. Set apart by a rule as well as the
  * caption, so it cannot be mistaken for the timeline it sits below.
  */
-function Trailing({ caption, heading, children }: { caption: string; heading: ReactNode; children: ReactNode }) {
+function Trailing({
+  caption,
+  layoutIndex,
+  children,
+}: {
+  caption: string
+  /** Its caption's index in the Timeline tab's layout. */
+  layoutIndex: number
+  children: ReactNode
+}) {
   return (
     <section className="mt-3 border-t border-dashed border-border" aria-label={caption}>
-      {heading}
+      <Caption className="px-3 py-1.5" layoutIndex={layoutIndex}>
+        {caption}
+      </Caption>
       <ol>{children}</ol>
     </section>
   )
 }
 
 /** A small heading over one part of a panel. */
-function Caption({ className, block, children }: { className?: string; block?: number; children: ReactNode }) {
+function Caption({ className, layoutIndex, children }: { className?: string; layoutIndex?: number; children: ReactNode }) {
   return (
-    <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)} data-block={block}>
+    <h3 className={cn("text-2xs font-semibold tracking-wider text-faint uppercase", className)} data-layoutIndex={layoutIndex}>
       {children}
     </h3>
   )

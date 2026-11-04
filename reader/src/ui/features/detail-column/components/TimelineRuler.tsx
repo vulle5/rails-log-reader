@@ -1,5 +1,6 @@
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react"
 
+import type { TimelineEvent } from "../../../../shared/activity"
 import type { SqlEvent } from "../../../../shared/wire"
 import { SearchContext, type Search } from "../../../hooks/search"
 import { queryMark, type MarkKind } from "../lib/sql-highlight"
@@ -182,8 +183,11 @@ function tickLabel(kind: MarkKind, event: SqlEvent) {
   return name === null || name === "" ? kind.toUpperCase() : `${kind.toUpperCase()} · ${name}`
 }
 
-/** What a query's timeline entry carries as `data-event`, for its tick to find it by. */
-export function entryKey(event: SqlEvent) {
+/**
+ * A timeline entry's `(run_id, seq)`, the event identity everywhere else in the Reader: its key,
+ * and, on a query, the `data-event` its tick finds it by.
+ */
+export function entryKey(event: TimelineEvent) {
   return `${event.run_id} ${event.seq}`
 }
 
