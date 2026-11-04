@@ -33,10 +33,6 @@ beforeEach(() => {
   available = 1616
 })
 
-afterEach(() => {
-  localStorage.clear()
-})
-
 function divider(name: "Console" | "Detail column") {
   return screen.getByRole("separator", { name })
 }

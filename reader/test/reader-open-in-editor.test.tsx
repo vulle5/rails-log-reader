@@ -13,7 +13,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  localStorage.clear()
   opened.mockRestore()
 })
 

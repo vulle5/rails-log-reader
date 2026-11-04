@@ -42,10 +42,6 @@ beforeEach(() => {
   window.innerHeight = 900
 })
 
-afterEach(() => {
-  localStorage.clear()
-})
-
 function edge() {
   return screen.getByRole("separator", { name: "REPL" })
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { waitFor, within } from "@testing-library/react"
 
 import type { Completion, ReplState } from "../src/shared/repl"
@@ -15,10 +15,6 @@ const PID = 48213
 const READY: ReplState = { kind: "ready", pid: PID }
 const BUSY: ReplState = { kind: "busy", pid: PID, id: 1, since: Date.now() }
 const COMPLETES = ["complete"]
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 /** Puts `inputs` in storage as an earlier page load left them, the last one newest. */
 function kept(...inputs: string[]) {

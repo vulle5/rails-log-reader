@@ -65,6 +65,9 @@
   /* A search match: a background and nothing else, so the text it lights keeps whatever
      colour it was already saying something with — a keyword, a warning, a Rails line. */
   --color-match: #ffe58f;
+  /* A match's tick on the Timeline ruler: `match`'s hue, deep enough to show on the `sunken`
+     strip, which `match` itself all but vanishes into. */
+  --color-match-tick: #bf8700;
 
   /* What floats over the columns — the new-activity pill and the Settings dialog — and the
      only places a shadow is what says so. Darker in the dark theme, where a light surface on a
@@ -86,6 +89,12 @@
   /* A *Transcript* evaluation's edge once it raised or lost its console process: the pinned
      group's edge in the error colour. */
   --shadow-failed: inset 2px 0 0 var(--color-error);
+  /* A *marked statement*'s edge, drawn inside its entry so marking it moves no text, and as wide
+     as an Interrupted row's edge. */
+  --shadow-mark-insert: inset 3px 0 0 var(--color-method-post);
+  --shadow-mark-update: inset 3px 0 0 var(--color-method-put-patch);
+  --shadow-mark-delete: inset 3px 0 0 var(--color-method-delete);
+  --shadow-mark-rollback: inset 3px 0 0 var(--color-error);
 
   /* The small labels set into a line of text: filter chips, and the tags beside a Console line. */
   --radius-chip: 3px;
@@ -154,6 +163,7 @@
     --color-status-4xx: #ff9757;
 
     --color-match: rgb(187 128 9 / 55%);
+    --color-match-tick: #bb8009;
 
     --color-shadow: rgb(0 0 0 / 45%);
     --color-backdrop: rgb(0 0 0 / 50%);

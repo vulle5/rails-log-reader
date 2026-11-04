@@ -17,7 +17,6 @@ const READY: ReplState = { kind: "ready", pid: PID }
 const MINUTE = 60_000
 
 afterEach(() => {
-  localStorage.clear()
   setSystemTime()
 })
 

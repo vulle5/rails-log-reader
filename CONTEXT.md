@@ -190,7 +190,9 @@ one arriving from two directions. All levels show by default: a floor above `deb
 hide the developer's own calls. Rails' own lines are hidden by default: in a real dev app
 they *are* the log — `Started GET`, `Processing by`, `Rendering`, `Completed 200 OK`, and
 an *Echo* under every query — so a rail that opens on them buries the handful you wrote
-just as surely. Both settings persist, and both are remembered as what is *off*, so a
+just as surely. It is the one thinning in the Reader that starts off, and the exception holds
+because every line it hides is already in its row's *Detail column*, which opens on
+everything it holds. Both settings persist, and both are remembered as what is *off*, so a
 level the Reader has not met yet arrives shown.
 
 Hidden is never dropped, which is what keeps this a filter rather than the decision the
@@ -546,13 +548,76 @@ Pinned once opened, so selecting never reflows the layout. Renders what the Init
 emitted and nothing derived from it: SQL is never reformatted, and a field the wire had to
 cut says so where it is read rather than passing as whole.
 
-`SCHEMA` and `EXPLAIN` queries are hidden by default too, for the mirror-image reason the
-Console's `rails` chip is: `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops them
-before `development.log` is ever written to, while `SqlSubscriber` forwards them
-anyway — the rare "why was the first request after a restart the slow one" question only
-the dropped ones answer. One chip brings them back, persisted the same way the Console's
-chips are. Hidden is never dropped: the timeline still holds every one, and a hidden query
-is one click away rather than in the way of the ordinary request beside it.
+The column opens on everything it holds. Two chips thin it, each remembered the way the
+Console's chips are, and one setting of them applies to every row kind:
+- **`cache`** hides cached queries. `development.log` shows them, prefixed `CACHE`, but a
+  cached query never reached the database: it is an answer handed back a second time, and in
+  a real app there are enough of them to bury the queries that ran.
+- **`schema`** hides `SCHEMA` and `EXPLAIN` queries, which
+  `ActiveRecord::LogSubscriber::IGNORE_PAYLOAD_NAMES` drops before `development.log` is ever
+  written to, while `SqlSubscriber` forwards them anyway — the rare "why was the first request
+  after a restart the slow one" question only the dropped ones answer.
+
+Neither starts off: a column that showed everything except one kind of query would be an
+exception to explain, and the developer, not the Reader, knows which kind is in the way. A
+chip turned off wears the struck-through "off" mark, so a thinned timeline says so. Hidden is
+never dropped: the timeline still holds every one, and a hidden query is one click away. Nor
+is it unfound: a *Search* match inside a query a chip hides is counted on that chip, the way a
+*Detail tab* that is not showing counts its own, and never turns the chip back on, for the
+reason Search never opens a *Collapsed Console*.
+
+Each chip says how many such queries the selected row holds, its trailing section included
+(`cache 38`), on or off: how much a chip hides is worth knowing before turning it off. The
+Search count rides on the same chip as a lit segment at its end, in words (`cache 38 · 2 matches`),
+because two bare numbers side by side read as one.
+
+Four kinds of statement are marked, because they are what a timeline is scanned for: `INSERT`,
+`UPDATE` and `DELETE`, which changed data, and `ROLLBACK`, which undid changes. A `ROLLBACK`
+is marked because, if it weren't, a rolled-back `INSERT` would read as one that happened. The
+kind is read off the statement's first keyword, as `development.log` colours it, past any
+leading comment, which `development.log` does not skip. So a write that opens with `WITH` goes
+unmarked there and here alike. Nothing else is marked: a column where every statement stood
+out would have none that did.
+
+The mark is a coloured edge down the entry's left side, and the statement keeps its own
+colours: the edge is what the eye finds at scrolling speed, and a statement recoloured to
+match it reads less like SQL. The colours are the HTTP methods' a change usually comes from:
+`INSERT` as `POST`, `UPDATE` as `PUT`/`PATCH`, `DELETE` as `DELETE`. `ROLLBACK` alone is in the
+error colour, the one of the four that means something did not go as written. This departs from
+`development.log`, which colours `DELETE` red too, for the reason the Activity table already
+keeps the `DELETE` method out of the error colour: a delete is not a failure.
+
+**Timeline ruler** — the strip down the right side of the Timeline tab, in place of its
+scrollbar, for every row kind and over the trailing section too: a full-width tick per marked
+statement, a tick per entry holding a *Search* match, and a thumb over the stretch on screen,
+each at its place in the timeline. Pressing or dragging the strip scrolls, as a scrollbar's
+track does. A mark's tick goes to its entry and, hovered, says what it marks. A match's tick is
+too thin to aim at and is only drawn, so the ruler says where the matches are without ever
+stepping through them. It draws what the timeline already shows and decides nothing: it is the
+marks and the matches seen from further away, so a long timeline's few writes are found
+without scrolling past everything between them. It replaces the scrollbar rather than sitting
+beside it, because two things saying where the reader is would be one thing said twice. The
+other *Detail tabs* keep a plain scrollbar: nothing in them is marked.
+
+The thumb is drawn over the ticks, never under them, so it stays readable however they crowd. A
+data migration's thousands of `UPDATE`s, or a term matching every entry, make a solid stripe,
+and the stripe is the truth about that timeline rather than something to thin: grouping ticks
+would take a threshold.
+
+Ticks move when the timeline itself changes: an entry arriving while its row is *In-flight*, a
+chip toggled, the column resized, a fold opened. They never move because the column laid out an
+entry it had skipped while that entry was off screen.
+
+The ticks, the thumb and a press all measure the timeline the same way, each entry as tall as its
+own content says it is, so a tick lies inside the thumb exactly when its entry is on screen, and a
+press lands on what the strip draws at that point. Where an entry turns out taller or shorter than
+its content said, only the thumb's pace through that entry shows it: it moves slower or faster
+than the content there, and never apart from the ticks.
+
+Where a press or drag meets an edge case, the ruler does what a native scrollbar does: an entry
+arriving while the strip is held leaves what is on screen still and moves the thumb, and the
+thumb pushed against either end of the strip reaches that end of the timeline.
+_Avoid_: pill (the "↓ N new" pill is another thing), box, scroll pill — for its thumb.
 
 A backtrace collapses gem frames by default for the same reason: a real exception's trace
 is mostly framework internals, and scanning past forty of them to find the three that
@@ -677,14 +742,9 @@ moving the mouse is exactly what you do next.
 
 The rule assumes both ends are on screen, and at real volume — 58 rows, 145 console
 lines — the row usually isn't: it runs to a stub captioned "row is off screen — click to
-jump" instead of connecting. Built and measured, not argued away: at low volume the rule
-connects and reads fine; it degrades only at the volume the Console exists for, and a
-click dissolves the case rather than leaving it dangling. Per-request **colour coding**,
-**dimming** the non-matching lines, and **scrollbar markers** (ticks showing every
-occurrence, including off screen) were all built and rejected — colour collides long
-before a busy dev app runs out of requests, dimming makes everything else unreadable
-exactly when you are hovering constantly, and markers tell you *that* something is
-elsewhere without letting you read the connection to it.
+jump" instead of connecting. At low volume the rule connects and reads fine; it degrades
+only at the volume the Console exists for, and a click dissolves the case rather than leaving
+it dangling.
 
 **Gutter** — the strip down the *Console rail*'s inner edge, kept clear of text, that
 *Hover grouping*'s rule travels down. Part of the Console, not a boundary between columns.
@@ -722,12 +782,18 @@ chip are not, and a Run boundary is not — a restart may not yank a reader away
 were reading. One rule and no second, hidden pause state, which is a promise about what the
 Reader does *not* do rather than a feature it has.
 
-*Hover grouping*'s jump is the one place a column is moved for you, and it is not an exception
-to the rule but the plainest case of it: the jump scrolls the *Activity table* to the row, and
-where the port ends up is read like any other scroll — so landing on a row above the fold
-pauses the table exactly as scrolling to it by hand would. That is the click's doing and not
-the selection's, and it is what you wanted: a table that snapped back to the bottom after
-taking you somewhere would not have taken you anywhere.
+*Hover grouping*'s jump is one of two places a column is moved for you, and it is not an
+exception to the rule but the plainest case of it: the jump scrolls the *Activity table* to the
+row, and where the port ends up is read like any other scroll — so landing on a row above the
+fold pauses the table exactly as scrolling to it by hand would. That is the click's doing and
+not the selection's, and it is what you wanted: a table that snapped back to the bottom after
+taking you somewhere would not have taken you anywhere. The other is a mark's tick on the
+*Timeline ruler*, read the same way.
+
+In the *Detail column*'s Timeline the *Timeline ruler* is the scrollbar, so it is the control
+there: dragging it up pauses the column, as going to a mark above the bottom does, and
+reaching the bottom on it resumes it. A wheel, a trackpad and the keyboard scroll the column
+as they always did.
 
 A paused column counts what has arrived below and offers the count as a floating "↓ N new"
 pill, which resumes on click. The count is the point of the pill — it is what says when to
@@ -763,8 +829,8 @@ another tab is never counted at its start and again at its end.
 
 All four open pinned to the bottom of the loaded history. The *Detail column* is the one that
 starts following again on its own, whenever *Selection* changes — another row's timeline is a
-different thing to be at the bottom of, rather than the same stream thinned. Its own SCHEMA
-chip is the same stream thinned, exactly the case a Console chip already is, so toggling it
+different thing to be at the bottom of, rather than the same stream thinned. Its own chips
+are the same stream thinned, exactly the case a Console chip already is, so toggling one
 never refollows on its own — only a new Selection does. The Transcript starts following again
 whenever the *REPL* submits from this tab, because a submit asks to see its answer. Another
 tab's submit is something that arrived, and is counted when it ends. Picking an *Input history*
@@ -788,7 +854,8 @@ counts on its header without unfolding. It **highlights and never hides**: v1 fi
 *Activity table* by row kind and nothing else, and a text box that thinned rows or lines would
 be that exclusion returning through the one control nobody would think to check it against.
 So it is not a filter, it reaches no *Auto-scroll*, and it has neither a regex — a query
-language — nor next/prev — navigation. A match is found on the text as rendered, so SQL is
+language — nor next/prev — navigation. The *Timeline ruler* shows where its matches lie in a
+long timeline and is not navigation either: a match's tick is drawn, never clicked. A match is found on the text as rendered, so SQL is
 matched whole and lit across the highlighter's own tokens, and never edited to do it. Typing
 never waits on the lighting: when there is a lot to light, the matches trail the term, and
 every column catches up together, because one term is never shown two ways at once.

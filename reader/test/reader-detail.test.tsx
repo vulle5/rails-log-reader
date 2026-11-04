@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
@@ -6,26 +6,25 @@ import { aRun } from "./sidecar.fixtures"
 import { DENSE_TRAFFIC } from "./traffic.fixtures"
 import { LOAD_ON_OPEN_EVENTS } from "../src/shared/bounds"
 import type { RequestRow, RunRow } from "../src/shared/activity"
-import type { Envelope } from "../src/shared/wire"
+import type { Envelope, SqlPayload } from "../src/shared/wire"
+import { intrinsicHeight } from "../src/ui/features/detail-column/lib/timeline-layout"
 import {
   cellUnder,
   chip,
   column,
+  detailPanel,
   folded,
   isQuery,
   itemsOf,
+  lit,
   openTheReaderOver,
   rowShowing,
+  search,
   select,
+  showDetailTab,
   timeline,
   wholeText,
 } from "./reader.harness"
-
-afterEach(() => {
-  // The schema chip persists by design, which between tests is one test writing another's
-  // filter.
-  localStorage.clear()
-})
 
 /**
  * Seam 2, reached the way a developer reaches it: the Reader is mounted over a seeded fold
@@ -385,31 +384,503 @@ describe("a query", () => {
 })
 
 /**
- * #54: `development.log` never shows a SCHEMA or EXPLAIN query — Rails' own log subscriber
- * drops them by name before a line is ever written — so the Detail column hides them the same
- * way on open, with one chip to bring them back for the reload-diagnosis case they exist for.
+ * A statement that changed data, or undid changes, is marked by the kind its first keyword names,
+ * past any leading comment. Every other statement is left unmarked.
  */
-describe("the schema chip", () => {
-  function schemaChip() {
-    return chip("schema", "Filter by query kind")
+describe("a marked statement", () => {
+  /** The entry of the one query a request ran, selected. */
+  async function theEntryOf(sql: string, query: Omit<Partial<SqlPayload>, "sql"> = {}) {
+    const run = aRun("srv-1")
+    const { user } = theReader(run.start("req-1", "POST", "/orders"), run.sql("req-1", sql, query))
+
+    await select(user, "/orders")
+    const [entry] = queries()
+    if (entry === undefined) throw new Error("the detail column rendered no query")
+    return entry
   }
 
-  function trailing() {
-    return within(detail()).queryByRole("region", { name: "After the request finished" })
-  }
+  test.each([
+    ['INSERT INTO "orders" ("total") VALUES (?) RETURNING "id"', "insert"],
+    ['UPDATE "orders" SET "total" = ? WHERE "orders"."id" = ?', "update"],
+    ['DELETE FROM "orders" WHERE "orders"."id" = ?', "delete"],
+    ["ROLLBACK", "rollback"],
+    ["ROLLBACK TO SAVEPOINT active_record_1", "rollback"],
+    ["insert into orders (total) values (3)", "insert"],
+  ])("marks %s as %s", async (sql, kind) => {
+    expect(await theEntryOf(sql)).toHaveAttribute("data-mark", kind)
+  })
 
-  test("hides SCHEMA and EXPLAIN queries on open, among a request's ordinary ones", async () => {
+  test("reads the kind past a leading QueryLogs comment", async () => {
+    const entry = await theEntryOf(`/*action='create',controller='orders'*/ INSERT INTO "orders" DEFAULT VALUES`)
+
+    expect(entry).toHaveAttribute("data-mark", "insert")
+  })
+
+  test("reads the kind past leading whitespace and a line comment", async () => {
+    expect(await theEntryOf(`\n  -- backfill\n  UPDATE orders SET total = 0`)).toHaveAttribute("data-mark", "update")
+  })
+
+  test.each([
+    ['SELECT "orders".* FROM "orders"'],
+    ["BEGIN"],
+    ["COMMIT"],
+    ["SAVEPOINT active_record_1"],
+    ["RELEASE SAVEPOINT active_record_1"],
+    ['SELECT "orders".* FROM "orders" WHERE "orders"."id" = ? LIMIT ? FOR UPDATE'],
+    ['WITH "totals" AS (SELECT 1) INSERT INTO "orders" ("total") SELECT * FROM "totals"'],
+    ["/* nothing but a comment */"],
+  ])("leaves %s unmarked", async (sql) => {
+    expect(await theEntryOf(sql)).not.toHaveAttribute("data-mark")
+  })
+
+  test("marks a raw execute with a nil name by its statement like any other", async () => {
+    expect(await theEntryOf("DELETE FROM sessions", { name: null, binds: [] })).toHaveAttribute("data-mark", "delete")
+  })
+
+  test("keeps the statement's own token colours", async () => {
+    const entry = await theEntryOf('INSERT INTO "orders" DEFAULT VALUES')
+    const statement = within(entry).getByRole("code")
+
+    expect(entry).toHaveAttribute("data-mark", "insert")
+
+    for (const keyword of ["INSERT", "INTO", "DEFAULT", "VALUES"]) {
+      expect(within(statement).getByText(keyword)).toHaveAttribute("data-token", "keyword")
+    }
+    expect(within(statement).getByText('"orders"')).toHaveAttribute("data-token", "identifier")
+  })
+
+  test("is marked the same way in the trailing section", async () => {
     const run = aRun("srv-1")
     const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", "SELECT 1"),
+      run.finish("req-1"),
+      run.sql("req-1", 'UPDATE "orders" SET "synced" = ?'),
+    )
+
+    await select(user, "/orders")
+    const trailing = within(detail()).getByRole("region", { name: "After the request finished" })
+    const [entry] = within(trailing).getAllByRole("listitem").filter(isQuery)
+
+    expect(entry).toHaveAttribute("data-mark", "update")
+    expect(queries()[0]).not.toHaveAttribute("data-mark")
+  })
+})
+
+/**
+ * The *Timeline ruler*: a strip down the Timeline tab's side with a tick per marked statement and
+ * a thumb over the stretch on screen. happy-dom lays nothing out, so what is asserted here is
+ * what the ruler holds and where a tick takes the reader, never where it is drawn.
+ */
+describe("the Timeline ruler", () => {
+  function ruler() {
+    return within(detail()).getByRole("group", { name: "Timeline ruler" })
+  }
+
+  function noRuler() {
+    return within(detail()).queryByRole("group", { name: "Timeline ruler" })
+  }
+
+  test("is on a Request row's Timeline tab and on none of its other tabs", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.route("req-1", "OrdersController", "create", { pairs: [["total", "3"]] }),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.finish("req-1"),
+      run.response("req-1"),
+    )
+
+    await select(user, "/orders")
+    expect(within(detailPanel("Timeline")).getByRole("group", { name: "Timeline ruler" })).toBeInTheDocument()
+
+    for (const name of ["Params", "Headers", "Response"]) {
+      await showDetailTab(user, name)
+      expect(noRuler()).not.toBeInTheDocument()
+    }
+  })
+
+  test("is on an Evaluation row's Timeline tab and not on its Result tab", async () => {
+    const run = aRun("con-1")
+    const { user } = theReader(
+      run.header("console"),
+      run.evaluationStart("repl-a-1", "Order.create!"),
+      run.sql("repl-a-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.evaluationFinish("repl-a-1"),
+    )
+
+    await select(user, "Order.create!")
+    expect(within(detailPanel("Timeline")).getByRole("group", { name: "Timeline ruler" })).toBeInTheDocument()
+
+    await showDetailTab(user, "Result")
+    expect(noRuler()).not.toBeInTheDocument()
+  })
+
+  function ticks() {
+    return within(ruler()).queryAllByRole("button")
+  }
+
+  test("has a tick per marked statement, in timeline order, named by its kind and its query's name", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", "BEGIN", { name: "TRANSACTION", binds: [] }),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.sql("req-1", 'SELECT "orders".* FROM "orders"', { name: "Order Load" }),
+      run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+      run.sql("req-1", "DELETE FROM sessions", { name: null, binds: [] }),
+      run.sql("req-1", "ROLLBACK", { name: "TRANSACTION", binds: [] }),
+      run.finish("req-1"),
+      run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Update" }),
+    )
+
+    await select(user, "/orders")
+
+    const expected = [
+      ["INSERT · Order Create", "insert"],
+      ["UPDATE · Order Update", "update"],
+      ["DELETE", "delete"],
+      ["ROLLBACK · TRANSACTION", "rollback"],
+      ["UPDATE · Order Update", "update"],
+    ]
+    expect(ticks()).toHaveLength(expected.length)
+    for (const [at, [name, kind]] of expected.entries()) {
+      expect(ticks()[at]).toHaveAccessibleName(name!)
+      expect(ticks()[at]).toHaveAttribute("title", name)
+      expect(ticks()[at]).toHaveAttribute("data-mark", kind)
+    }
+  })
+
+  test("has a tick for every one of a timeline of nothing but marked statements", async () => {
+    const run = aRun("rake-1")
+    const updates = Array.from({ length: 40 }, (_, at) => run.sql(null, `UPDATE "orders" SET "total" = ${at}`, { name: null }))
+    const { user } = theReader(run.header("rake", 91_887), ...updates)
+
+    await select(user, "rake")
+
+    expect(ticks()).toHaveLength(40)
+  })
+
+  test("has no tick for a marked statement a chip hides", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.sql("req-1", 'DELETE FROM "orders" WHERE "id" = ?', { name: "Order Destroy", cached: true }),
+    )
+    await select(user, "/orders")
+
+    await user.click(chip(/^cache\b/, "Filter by query kind"))
+
+    expect(ticks()).toHaveLength(1)
+    expect(ticks()[0]).toHaveAccessibleName("INSERT · Order Create")
+  })
+
+  test("moves a tick below the exception down when a gem-frame marker in its backtrace is opened", async () => {
+    const run = aRun("srv-1")
+    const gems = Array.from({ length: 30 }, (_, at) => `rack (3.1.8) lib/rack/layer_${at}.rb:12:in \`call'`)
+    const { user } = theReader(
+      run.header(),
+      run.start("req-1", "POST", "/orders"),
+      run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+      run.finish("req-1", {
+        status: 500,
+        exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44:in `total'", ...gems] },
+      }),
+      run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+    )
+    await select(user, "/orders")
+    const tick = () => within(ruler()).getByRole("button", { name: "UPDATE · Order Sync" })
+    const closed = parseFloat(tick().style.top)
+
+    await user.click(within(detail()).getByRole("button", { name: "30 frames hidden" }))
+
+    expect(parseFloat(tick().style.top)).toBeGreaterThan(closed)
+  })
+
+  /** Every match tick: drawn only, so hidden from assistive technology with the layer it is in. */
+  function matchTicks() {
+    return within(ruler()).queryAllByRole("img", { name: "Search match", hidden: true })
+  }
+
+  function topOf(tick: HTMLElement) {
+    return parseFloat(tick.style.top)
+  }
+
+  describe("with a Search term", () => {
+    /** Four marked statements, so each match tick can be held against the mark tick of its own entry. */
+    function aRequestOfWrites() {
+      const run = aRun("srv-1")
+      return [
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+        run.sql("req-1", 'UPDATE "widgets" SET "total" = ?', { name: "Widget Update", binds: ["widget"] }),
+        run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+        run.sql("req-1", 'UPDATE "widgets" SET "synced" = ?', { name: "Widget Sync" }),
+      ]
+    }
+
+    test("has one match tick per entry holding a match, at its entry's place", async () => {
+      const { user } = theReader(...aRequestOfWrites())
+      await select(user, "/orders")
+
+      await search(user, "widget")
+
+      const marks = ticks()
+      expect(matchTicks().map(topOf)).toEqual([topOf(marks[1]!), topOf(marks[3]!)])
+    })
+
+    test("draws its match ticks out of reach: not buttons, and not exposed to assistive technology", async () => {
+      const { user } = theReader(...aRequestOfWrites())
+      await select(user, "/orders")
+
+      await search(user, "widget")
+
+      expect(within(ruler()).queryAllByRole("img", { name: "Search match" })).toEqual([])
+      const names = ["UPDATE · Order Update", "UPDATE · Widget Update", "UPDATE · Order Sync", "UPDATE · Widget Sync"]
+      expect(ticks()).toHaveLength(names.length)
+      for (const [at, name] of names.entries()) expect(ticks()[at]).toHaveAccessibleName(name)
+    })
+
+    test("moves its match ticks as the term changes, and has none once it is cleared", async () => {
+      const { user } = theReader(...aRequestOfWrites())
+      await select(user, "/orders")
+      expect(matchTicks()).toEqual([])
+
+      await search(user, "widget")
+      await search(user, "sync")
+
+      const marks = ticks()
+      expect(matchTicks().map(topOf)).toEqual([topOf(marks[2]!), topOf(marks[3]!)])
+
+      await search(user, "")
+
+      expect(matchTicks()).toEqual([])
+    })
+
+    test("has a match tick for a log line, the exception and an entry of the trailing section, in timeline order", async () => {
+      const run = aRun("srv-1")
+      const gems = Array.from({ length: 3 }, (_, at) => `rack (3.1.8) lib/rack/layer_${at}.rb:12:in \`call'`)
+      const { user } = theReader(
+        run.header(),
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+        run.log("req-1", "Charging the card"),
+        run.log("req-1", "Charged", { tags: ["card"] }),
+        run.log("req-1", "Charged", { callsite: "app/models/card.rb:3:in 'charge'" }),
+        run.log("req-1", "Completed", { source: "rails", callsite: "app/models/card.rb:9:in 'charge'" }),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+        run.finish("req-1", {
+          status: 500,
+          exception: { class: "CardError", message: "declined", backtrace: ["app/models/order.rb:44:in `total'", ...gems] },
+        }),
+        run.sql("req-1", 'SELECT "cards".* FROM "cards"', { name: "Card Load" }),
+        run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+      )
+      await select(user, "/orders")
+      const [insert, update, sync] = ticks().map(topOf)
+
+      await search(user, "card")
+
+      const found = matchTicks().map(topOf)
+      // Three of the log lines, the exception, and the trailing SELECT: the Rails line's Callsite is never shown.
+      expect(found).toHaveLength(5)
+      expect(found.toSorted((a, b) => a - b)).toEqual(found)
+      expect(found.slice(0, 3).every((at) => at > insert! && at < update!)).toBe(true)
+      expect(found[3]).toBeGreaterThan(update!)
+      expect(found[4]).toBeLessThan(sync!)
+    })
+
+    test("has a match tick for the exception when only a frame folded into a gem-frame marker matches", async () => {
+      const run = aRun("srv-1")
+      const gems = ["rack (3.1.8) lib/rack/runtime.rb:12:in `call'", "rack (3.1.8) lib/rack/sendfile.rb:9:in `call'"]
+      const { user } = theReader(
+        run.header(),
+        run.start("req-1", "POST", "/orders"),
+        run.finish("req-1", {
+          status: 500,
+          exception: { class: "NoMethodError", message: "boom", backtrace: ["app/models/order.rb:44:in `total'", ...gems] },
+        }),
+      )
+      await select(user, "/orders")
+
+      await search(user, "sendfile")
+
+      expect(matchTicks()).toHaveLength(1)
+    })
+
+    test("has no match tick for a query a chip hides", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "GET", "/posts/12"),
+        run.sql("req-1", 'SELECT "widgets".* FROM "widgets"', { name: "Widget Load", cached: true }),
+        run.sql("req-1", 'SELECT "widgets".* FROM "widgets"', { name: "Widget Load" }),
+      )
+      await select(user, "/posts/12")
+      await search(user, "widget")
+      expect(matchTicks()).toHaveLength(2)
+
+      await user.click(chip(/^cache\b/, "Filter by query kind"))
+
+      expect(matchTicks()).toHaveLength(1)
+    })
+  })
+
+  describe("a mark's tick", () => {
+    const scrollIntoView = Element.prototype.scrollIntoView
+    let scrolledTo: { element: Element; options: ScrollIntoViewOptions | boolean | undefined }[] = []
+
+    beforeAll(() => {
+      Element.prototype.scrollIntoView = function record(this: Element, options?: ScrollIntoViewOptions | boolean) {
+        scrolledTo.push({ element: this, options })
+      }
+    })
+
+    afterEach(() => {
+      scrolledTo = []
+    })
+
+    afterAll(() => {
+      Element.prototype.scrollIntoView = scrollIntoView
+    })
+
+    test("brings its entry into view, centred, on a click", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'INSERT INTO "orders" DEFAULT VALUES', { name: "Order Create" }),
+        run.sql("req-1", 'SELECT "orders".* FROM "orders"', { name: "Order Load" }),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+      )
+      await select(user, "/orders")
+
+      await user.click(within(ruler()).getByRole("button", { name: "UPDATE · Order Update" }))
+
+      expect(scrolledTo).toEqual([{ element: queries()[2]!, options: { block: "center" } }])
+    })
+
+    test("is kept, and still brings its entry into view, when its entry holds a Search match", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'SELECT "orders".* FROM "orders"', { name: "Order Load" }),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+      )
+      await select(user, "/orders")
+      await search(user, "total")
+
+      const tick = within(ruler()).getByRole("button", { name: "UPDATE · Order Update" })
+      expect(matchTicks().map(topOf)).toEqual([topOf(tick)])
+      await user.click(tick)
+
+      expect(scrolledTo).toEqual([{ element: queries()[1]!, options: { block: "center" } }])
+    })
+
+    test("brings an entry in the trailing section into view", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "POST", "/orders"),
+        run.sql("req-1", 'UPDATE "orders" SET "total" = ?', { name: "Order Update" }),
+        run.finish("req-1"),
+        run.sql("req-1", 'UPDATE "orders" SET "synced" = ?', { name: "Order Sync" }),
+      )
+      await select(user, "/orders")
+
+      await user.click(within(ruler()).getByRole("button", { name: "UPDATE · Order Sync" }))
+
+      const trailing = within(detail()).getByRole("region", { name: "After the request finished" })
+      const [entry] = within(trailing).getAllByRole("listitem").filter(isQuery)
+      expect(scrolledTo.map(({ element }) => element)).toEqual([entry!])
+    })
+  })
+
+  test("is on a Run row's timeline", async () => {
+    const run = aRun("rake-1")
+    const { user } = theReader(run.header("rake", 91_887), run.sql(null, 'UPDATE "orders" SET "total" = 0', { name: null }))
+
+    await select(user, "rake")
+
+    expect(ruler()).toBeInTheDocument()
+  })
+})
+
+/**
+ * The column opens on everything it holds, and two chips thin it by query kind: `cache` hides
+ * the queries the query cache answered, `schema` the SCHEMA and EXPLAIN ones `development.log`
+ * never shows. One setting of them thins every row kind's timeline.
+ */
+describe("the Detail column's chips", () => {
+  function cacheChip() {
+    return chip(/^cache\b/, "Filter by query kind")
+  }
+
+  function schemaChip() {
+    return chip(/^schema\b/, "Filter by query kind")
+  }
+
+  const STORED = "rails-log-reader.detail-filter"
+
+  function trailing(caption = "After the request finished") {
+    return within(detail()).getByRole("region", { name: caption })
+  }
+
+  function noTrailing(caption = "After the request finished") {
+    return within(detail()).queryByRole("region", { name: caption })
+  }
+
+  /** A request holding one of each kind of query, in this order. */
+  function aMixedRequest(run = aRun("srv-1")) {
+    return [
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
-      run.sql("req-1", "EXPLAIN SELECT 1", { name: "EXPLAIN" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
-    )
+      run.sql("req-1", "SELECT 1", { name: "Post Load", cached: true }),
+      run.sql("req-1", "EXPLAIN SELECT 1", { name: "EXPLAIN" }),
+      run.sql("req-1", "SELECT 2", { name: "Comment Load", cached: true }),
+    ]
+  }
+
+  test("shows cached, SCHEMA and EXPLAIN queries on open, with both chips on", async () => {
+    const { user } = theReader(...aMixedRequest())
 
     await select(user, "/posts/12")
 
-    expect(timelineSays()).toEqual(["SELECT 1"])
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1", "SELECT 1", "EXPLAIN SELECT 1", "SELECT 2"])
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("hides every cached query once cache is off, and reports the chip not pressed", async () => {
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+    await user.click(cacheChip())
+
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1", "EXPLAIN SELECT 1"])
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "false")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("brings cached queries back where they were emitted, each still marked CACHE", async () => {
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+    await user.click(cacheChip())
+    await user.click(cacheChip())
+
+    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1", "SELECT 1", "EXPLAIN SELECT 1", "SELECT 2"])
+    const [schema, ran, cached, explain, alsoCached] = queries()
+    for (const query of [schema, ran, explain]) expect(query).not.toHaveTextContent("CACHE")
+    for (const query of [cached, alsoCached]) expect(query).toHaveTextContent("CACHE")
+  })
+
+  test("hides SCHEMA and EXPLAIN queries once schema is off, and leaves the rest alone", async () => {
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+    await user.click(schemaChip())
+
+    expect(timelineSays()).toEqual(["SELECT 1", "SELECT 1", "SELECT 2"])
     expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
   })
 
@@ -418,27 +889,32 @@ describe("the schema chip", () => {
     const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", callsite: "app/models/post.rb:3:in '<class:Post>'" }),
-      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
-    )
-
-    await select(user, "/posts/12")
-
-    expect(callsiteLines()).toHaveLength(0)
-  })
-
-  test("brings them back, interleaved where they were emitted, once the chip is on", async () => {
-    const run = aRun("srv-1")
-    const { user } = theReader(
-      run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+      run.sql("req-1", "SELECT 1", { cached: true, callsite: "app/models/post.rb:9:in 'recent'" }),
       run.sql("req-1", "SELECT 1", { name: "Post Load" }),
     )
 
     await select(user, "/posts/12")
     await user.click(schemaChip())
+    await user.click(cacheChip())
 
-    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master", "SELECT 1"])
-    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+    expect(callsiteLines()).toHaveLength(0)
+  })
+
+  test("hides a cached SCHEMA query when either chip is off", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", cached: true }),
+      run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+    )
+
+    await select(user, "/posts/12")
+    await user.click(schemaChip())
+    expect(timelineSays()).toEqual(["SELECT 1"])
+
+    await user.click(schemaChip())
+    await user.click(cacheChip())
+    expect(timelineSays()).toEqual(["SELECT 1"])
   })
 
   test("leaves a query named anything else alone", async () => {
@@ -450,41 +926,271 @@ describe("the schema chip", () => {
     )
 
     await select(user, "/posts/12")
+    await user.click(schemaChip())
+    await user.click(cacheChip())
 
     expect(timelineSays()).toEqual(["SELECT 1", "PRAGMA foreign_keys"])
   })
 
-  test("hides an all-SCHEMA trailing section rather than leaving it empty", async () => {
+  test("thins the trailing section too, in emitted order", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      run.start("req-1", "GET", "/posts/12"),
+      run.finish("req-1"),
+      run.sql("req-1", "SELECT 1", { cached: true, binds: [] }),
+      run.log("req-1", "after the fact"),
+      run.sql("req-1", "SELECT 2", { cached: true, binds: [] }),
+    )
+
+    await select(user, "/posts/12")
+    await user.click(cacheChip())
+
+    expect(trailing()).toHaveTextContent("after the fact")
+    expect(trailing()).not.toHaveTextContent("SELECT")
+
+    await user.click(cacheChip())
+
+    expect(itemsOf(within(trailing()).getByRole("list")).map((entry) => entry.textContent)).toEqual([
+      expect.stringContaining("SELECT 1"),
+      expect.stringContaining("after the fact"),
+      expect.stringContaining("SELECT 2"),
+    ])
+  })
+
+  test("hides a trailing section of nothing but hidden queries rather than leaving it empty", async () => {
     const run = aRun("srv-1")
     const { user } = theReader(
       run.start("req-1", "GET", "/posts/12"),
       run.finish("req-1"),
       run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
+      run.sql("req-1", "SELECT 1", { cached: true }),
     )
 
     await select(user, "/posts/12")
+    expect(trailing()).toBeInTheDocument()
 
-    expect(trailing()).not.toBeInTheDocument()
+    await user.click(schemaChip())
+    expect(trailing()).toBeInTheDocument()
+
+    await user.click(cacheChip())
+    expect(noTrailing()).not.toBeInTheDocument()
   })
 
-  test("persists the choice, like the Console's chips", async () => {
-    const run = aRun("srv-1")
-    const envelopes = [
-      run.start("req-1", "GET", "/posts/12"),
-      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA" }),
-    ]
+  test("thins a Run row and an Evaluation row with the same setting", async () => {
+    const server = aRun("srv-1")
+    const console = aRun("con-1")
+    const { user } = theReader(
+      server.header(),
+      server.sql(null, "SELECT 1", { name: "Boot Load" }),
+      server.sql(null, "SELECT 1", { name: "Boot Load", cached: true }),
+      console.header("console", 48_213),
+      console.evaluationStart("repl-a-1", "Post.count"),
+      console.sql("repl-a-1", 'SELECT COUNT(*) FROM "posts"'),
+      console.sql("repl-a-1", 'SELECT COUNT(*) FROM "posts"', { cached: true }),
+      console.evaluationFinish("repl-a-1"),
+      console.sql("repl-a-1", "SELECT 2", { cached: true }),
+    )
+
+    await select(user, "server")
+    await user.click(cacheChip())
+
+    expect(timelineSays()).toEqual(["SELECT 1"])
+
+    await select(user, "Post.count")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "false")
+    expect(timelineSays()).toEqual(['SELECT COUNT(*) FROM "posts"'])
+    expect(noTrailing("After the evaluation finished")).not.toBeInTheDocument()
+  })
+
+  test("persists both choices, like the Console's chips, stored as what is off", async () => {
+    const envelopes = aMixedRequest()
 
     const first = theReader(...envelopes)
     await select(first.user, "/posts/12")
+    await first.user.click(cacheChip())
     await first.user.click(schemaChip())
+    await first.user.click(cacheChip())
+
+    expect(JSON.parse(localStorage.getItem(STORED)!)).toEqual({ kindsOff: ["schema"] })
 
     first.unmount()
 
     const second = theReader(...envelopes)
     await select(second.user, "/posts/12")
 
-    expect(timelineSays()).toEqual(["SELECT sql FROM sqlite_master"])
+    expect(timelineSays()).toEqual(["SELECT 1", "SELECT 1", "SELECT 2"])
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
+  })
+
+  test("shows a kind of query nothing stored says is off", async () => {
+    localStorage.setItem(STORED, '{"kindsOff":["schema","a-kind-from-later"]}')
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
+  })
+
+  test("reads a choice for schema stored before the cache chip existed", async () => {
+    localStorage.setItem(STORED, '{"showingSchema":false}')
+    const hidden = theReader(...aMixedRequest())
+    await select(hidden.user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "false")
+
+    hidden.unmount()
+    localStorage.setItem(STORED, '{"showingSchema":true}')
+    const shown = theReader(...aMixedRequest())
+    await select(shown.user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
     expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("opens on everything when what is stored is unreadable", async () => {
+    localStorage.setItem(STORED, "{not json")
+    const { user } = theReader(...aMixedRequest())
+
+    await select(user, "/posts/12")
+
+    expect(cacheChip()).toHaveAttribute("aria-pressed", "true")
+    expect(schemaChip()).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("counts each kind the selected row holds, its trailing section included, on and off", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      ...aMixedRequest(run),
+      run.finish("req-1"),
+      run.sql("req-1", "SELECT 3", { cached: true }),
+      run.sql("req-1", "SELECT sql FROM sqlite_master", { name: "SCHEMA", cached: true }),
+    )
+
+    await select(user, "/posts/12")
+
+    expect(cacheChip()).toHaveAccessibleName("cache 4")
+    expect(schemaChip()).toHaveAccessibleName("schema 3")
+
+    await user.click(cacheChip())
+    await user.click(schemaChip())
+
+    expect(cacheChip()).toHaveAccessibleName("cache 4")
+    expect(schemaChip()).toHaveAccessibleName("schema 3")
+  })
+
+  test("counts what the newly selected row holds", async () => {
+    const run = aRun("srv-1")
+    const { user } = theReader(
+      ...aMixedRequest(run),
+      run.start("req-2", "GET", "/authors"),
+      run.sql("req-2", "SELECT 1", { name: "Author Load" }),
+    )
+
+    await select(user, "/posts/12")
+    expect(cacheChip()).toHaveAccessibleName("cache 2")
+
+    await select(user, "/authors")
+
+    expect(cacheChip()).toHaveAccessibleName("cache 0")
+    expect(schemaChip()).toHaveAccessibleName("schema 0")
+  })
+
+  describe("with a Search term matching inside a query a chip hides", () => {
+    /**
+     * `widget` is in a cached query's name, statement, binds and Callsite — five matches, every
+     * one inside a single token, so each lights as one mark — and in nothing else on the page.
+     * A sixth is in a cached query of the trailing section.
+     */
+    function aRequestWithCachedWidgets() {
+      const run = aRun("srv-1")
+      return [
+        run.start("req-1", "GET", "/posts/12"),
+        run.sql("req-1", 'SELECT "widgets".* FROM "widgets"', {
+          name: "Widget Load",
+          cached: true,
+          binds: ["widget", 7],
+          callsite: "app/models/widget.rb:3:in 'recent'",
+        }),
+        run.sql("req-1", "SELECT 1", { name: "Post Load" }),
+        run.finish("req-1"),
+        run.sql("req-1", "SELECT 2", { name: "Widget Count", cached: true, binds: [] }),
+      ]
+    }
+
+    function litInTheTimeline() {
+      return [...lit(timeline()), ...lit(within(detail()).getByRole("region", { name: "After the request finished" }))]
+    }
+
+    test("describes the chip as holding them, counted as they light once it is on", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await search(user, "widget")
+
+      expect(cacheChip()).toHaveAccessibleDescription("6 matches")
+      expect(schemaChip()).not.toHaveAccessibleDescription(/match/)
+
+      await user.click(cacheChip())
+
+      expect(cacheChip()).not.toHaveAccessibleDescription(/match/)
+      expect(litInTheTimeline()).toHaveLength(6)
+    })
+
+    test("says 1 match for one", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await search(user, "Count")
+
+      expect(cacheChip()).toHaveAccessibleDescription("1 match")
+    })
+
+    test("says nothing while the chip is on, or when nothing it hides matches", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await search(user, "widget")
+
+      expect(cacheChip()).not.toHaveAccessibleDescription(/match/)
+
+      await user.click(cacheChip())
+      await search(user, "Post Load")
+
+      expect(cacheChip()).not.toHaveAccessibleDescription(/match/)
+    })
+
+    test("counts a match inside a cached SCHEMA query on both chips while both are off", async () => {
+      const run = aRun("srv-1")
+      const { user } = theReader(
+        run.start("req-1", "GET", "/posts/12"),
+        run.sql("req-1", "SELECT widgets FROM sqlite_master", { name: "SCHEMA", cached: true, binds: [] }),
+      )
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await user.click(schemaChip())
+      await search(user, "widget")
+
+      expect(cacheChip()).toHaveAccessibleDescription("1 match")
+      expect(schemaChip()).toHaveAccessibleDescription("1 match")
+    })
+
+    test("never turns the chip back on", async () => {
+      const { user } = theReader(...aRequestWithCachedWidgets())
+
+      await select(user, "/posts/12")
+      await user.click(cacheChip())
+      await search(user, "widget")
+
+      expect(cacheChip()).toHaveAttribute("aria-pressed", "false")
+      expect(timelineSays()).toEqual(["SELECT 1"])
+    })
   })
 })
 
@@ -527,6 +1233,44 @@ describe("a field the Sidecar had to cut", () => {
     await select(user, "/posts/12")
 
     expect(within(detail()).queryByText(CUT)).not.toBeInTheDocument()
+  })
+})
+
+describe("an entry the column has not laid out yet", () => {
+  // The width a DOM with no layout is told the timeline has, so the estimate is the one at a
+  // width the column measured rather than at any it could assume.
+  const WIDTH = 412
+  const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => WIDTH })
+  })
+
+  afterAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", clientWidth!)
+  })
+
+  test("is sized by its own estimate at the timeline's width, in the trailing section too", async () => {
+    const run = aRun("srv-1")
+    const start = run.start("req-1", "GET", "/posts/12")
+    const events = [
+      run.sql("req-1", "SELECT 1", { binds: [] }),
+      run.sql("req-1", `SELECT ${'"posts"."title", '.repeat(30)}"posts"."id" FROM "posts"`, { callsite: "app/models/post.rb:3" }),
+      run.log("req-1", "word ".repeat(60), { tags: ["www.example.test"] }),
+    ]
+    const finish = run.finish("req-1")
+    const trailing = run.log("req-1", "Executor#to_complete ran after the body closed")
+    const { user } = theReader(start, ...events, finish, trailing)
+
+    await select(user, "/posts/12")
+
+    const entries = itemsOf(timeline())
+    expect(entries).toHaveLength(events.length)
+    for (const [at, entry] of entries.entries()) {
+      expect(entry).toHaveStyle({ containIntrinsicSize: `auto ${intrinsicHeight(events[at]!, WIDTH)}px` })
+    }
+    const after = within(detail()).getByRole("region", { name: "After the request finished" })
+    expect(within(after).getByRole("listitem")).toHaveStyle({ containIntrinsicSize: `auto ${intrinsicHeight(trailing, WIDTH)}px` })
   })
 })
 

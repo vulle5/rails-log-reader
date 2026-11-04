@@ -84,7 +84,6 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.ResizeObserver = realObserver
   Element.prototype.scrollIntoView = scrollIntoView
-  localStorage.clear()
 })
 
 /** How far down a port goes: what "the bottom" means, and what a browser clamps to. */

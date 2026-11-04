@@ -14,7 +14,7 @@ const twMerge = extendTailwindMerge({
     theme: {
       radius: ["chip"],
       leading: ["sql"],
-      shadow: ["pill", "dialog", "pinned", "pinned-row", "interrupted", "failed"],
+      shadow: ["pill", "dialog", "pinned", "pinned-row", "interrupted", "failed", "mark-insert", "mark-update", "mark-delete", "mark-rollback"],
     },
   },
 })

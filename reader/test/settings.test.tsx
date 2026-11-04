@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { screen, within } from "@testing-library/react"
 import type { UserEvent } from "@testing-library/user-event"
 
@@ -344,8 +344,6 @@ function expectOnlyPressed(dialog: HTMLElement, figure: string) {
 }
 
 describe("the Events kept setting", () => {
-  afterEach(() => localStorage.removeItem(EVENTS_KEPT_KEY))
-
   test("offers 5,000, 10,000, 25,000 and 50,000 as pressed-state buttons, with 5,000 pressed until set", async () => {
     const { user } = openTheReader()
     const dialog = await openSettings(user)

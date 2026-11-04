@@ -10,8 +10,6 @@ import { recallPreference, rememberPreference } from "../src/ui/lib/preference"
 
 const asIs = (stored: string) => stored
 
-beforeEach(() => localStorage.clear())
-
 describe("recallPreference", () => {
   test("reads the stored value under the setting's own namespaced key", () => {
     localStorage.setItem("rails-log-reader.theme", "dark")

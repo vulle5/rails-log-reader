@@ -23,6 +23,7 @@ describe("cn", () => {
     ["leading-sql", "text-sm"],
     ["rounded-chip", "border-border"],
     ["shadow-pinned-row", "shadow-accent"],
+    ["shadow-mark-delete", "shadow-error"],
     ["text-faint", "group-data-[state=interrupted]:text-faint!"],
   ])("keeps %s beside %s, which say different things", (first, second) => {
     expect(cn(first, second)).toBe(`${first} ${second}`)
@@ -37,6 +38,7 @@ describe("cn", () => {
     ["rounded", "rounded-chip"],
     ["shadow-interrupted", "shadow-pinned-row"],
     ["shadow-pinned", "shadow-failed"],
+    ["shadow-mark-insert", "shadow-mark-rollback"],
     ["bg-raised", "bg-transparent"],
     ["py-0.75", "py-2"],
   ])("lets %s give way to a later %s", (first, second) => {

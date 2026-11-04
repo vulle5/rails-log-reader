@@ -36,9 +36,6 @@ beforeEach(() => {
 
 afterEach(() => {
   Element.prototype.scrollIntoView = scrollIntoView
-  // The level chips persist by design, which between tests is one test writing another's
-  // filter.
-  localStorage.clear()
 })
 
 /**

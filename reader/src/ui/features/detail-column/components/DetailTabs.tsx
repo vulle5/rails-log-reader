@@ -37,6 +37,8 @@ export type DetailTab = {
   subject?: string
   /** Where this panel's scroll is followed from: the Timeline's *auto-scroll*. */
   scroll?: PanelScroll
+  /** Whether the panel draws the *Timeline ruler*, which its scrollport makes room for. */
+  ruled?: boolean
   panel: ReactNode
 }
 
@@ -141,6 +143,7 @@ export function DetailTabs({
                 // reader; this says so to whatever reads the tree rather than the styles.
                 aria-hidden={tab !== showing}
                 scroll={tab.scroll}
+                ruled={tab.ruled}
               >
                 {tab.panel}
               </DetailScroller>
@@ -154,16 +157,21 @@ export function DetailTabs({
 /**
  * One scrollport in the Detail column: a tab's panel, or a *Run row*'s timeline, which has no
  * bar. The gutter is reserved whether or not the content needs a scrollbar yet, so the column
- * does not narrow under the reader the moment it first has something to scroll.
+ * does not narrow under the reader the moment it first has something to scroll. A ruled one has
+ * no scrollbar: the *Timeline ruler* is its scrollbar, in a right padding kept whether or not
+ * there is anything to scroll.
  */
 export function DetailScroller({
   className,
   scroll,
+  ruled = false,
   children,
   ...props
 }: {
   className?: string
   scroll?: PanelScroll
+  /** Whether it holds the *Timeline ruler*. */
+  ruled?: boolean
   children: ReactNode
   id?: string
   role?: string
@@ -173,7 +181,8 @@ export function DetailScroller({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-col gap-px overflow-auto pb-6 [scrollbar-gutter:stable] [scrollbar-width:thin]",
+        "flex min-h-0 flex-col gap-px overflow-auto pb-6",
+        ruled ? "pr-2.5 [scrollbar-width:none]" : "[scrollbar-gutter:stable] [scrollbar-width:thin]",
         className,
       )}
       data-scrollport

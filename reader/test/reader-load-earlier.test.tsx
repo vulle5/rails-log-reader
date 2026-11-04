@@ -17,7 +17,6 @@ beforeEach(fakeTheSidecar)
 
 afterEach(() => {
   restoreTheSidecar()
-  localStorage.clear()
 })
 
 const run = aRun("srv-1")

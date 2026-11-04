@@ -203,7 +203,8 @@ export function lineSaying(text: string) {
   return found
 }
 
-export function chip(name: string, group: string) {
+/** A chip by its name, or — a chip that counts what it holds — by a pattern its name starts with. */
+export function chip(name: string | RegExp, group: string) {
   return within(screen.getByRole("group", { name: group })).getByRole("button", { name })
 }
 

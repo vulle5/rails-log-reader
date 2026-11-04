@@ -46,7 +46,6 @@ beforeEach(() => {
 
 afterEach(() => {
   Element.prototype.scrollIntoView = scrollIntoView
-  localStorage.clear()
 })
 
 const PID = 48213

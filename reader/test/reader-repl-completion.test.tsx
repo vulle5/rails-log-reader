@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { screen, waitFor, within } from "@testing-library/react"
 
 import type { Candidate, Completion, ReplState } from "../src/shared/repl"
@@ -13,10 +13,6 @@ const PID = 48213
 const READY: ReplState = { kind: "ready", pid: PID }
 const BUSY: ReplState = { kind: "busy", pid: PID, id: 1, since: Date.now() }
 const COMPLETES = ["complete"]
-
-afterEach(() => {
-  localStorage.clear()
-})
 
 /** The Reader with its drawer open over a session in `state` that completes, unless `capabilities` says it cannot. */
 async function opened(state: ReplState = READY, capabilities: string[] = COMPLETES, completing?: Parameters<typeof aReplSession>[2]) {
@@ -390,10 +386,6 @@ describe("the completion popover", () => {
 })
 
 describe("the completion trigger set to as you type", () => {
-  afterEach(() => {
-    localStorage.clear()
-  })
-
   async function typing(state: ReplState = READY, capabilities: string[] = COMPLETES) {
     localStorage.setItem("rails-log-reader.completion-trigger", "typing")
     return await opened(state, capabilities)
