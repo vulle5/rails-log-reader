@@ -331,3 +331,35 @@ function placeEdge(layout: TimelineLayout, at: number, block: BlockOnPage | null
 function share(into: number, of: number) {
   return of <= 0 ? 1 : Math.min(Math.max(into / of, 0), 1)
 }
+
+/**
+ * Where a press on the strip lands: an end of the timeline, or a block, by its index in the
+ * layout, and the share of its height above the point pressed.
+ */
+export type Target = { at: "start" } | { at: "end" } | { at: "block"; index: number; share: number }
+
+/**
+ * What the strip draws `fraction` of the way down `layout`: the block the point falls in, and how
+ * far into its estimated height. Scrolling that share of the block's real element to the top of
+ * the screen puts the thumb's top back on the point, as `thumbOnScreen` reads it. A point at or
+ * past either end, or in the room under the last block, is that end.
+ */
+export function targetOnStrip(layout: TimelineLayout, fraction: number): Target {
+  if (fraction <= 0) return { at: "start" }
+  const at = fraction * layout.total
+  let low = 0
+  let high = layout.blocks.length - 1
+  let index = -1
+  while (low <= high) {
+    const middle = (low + high) >> 1
+    if (layout.blocks[middle]!.offset <= at) {
+      index = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  const block = layout.blocks[index]
+  if (fraction >= 1 || block === undefined || at >= block.offset + block.height) return { at: "end" }
+  return { at: "block", index, share: share(at - block.offset, block.height) }
+}

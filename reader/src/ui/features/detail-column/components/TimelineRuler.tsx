@@ -3,8 +3,16 @@ import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, ty
 import type { TimelineEvent } from "../../../../shared/activity"
 import type { SqlEvent } from "../../../../shared/wire"
 import { SearchContext, type Search } from "../../../hooks/search"
+import { unreachable } from "../../../lib/unreachable"
 import { queryMark, type MarkKind } from "../lib/sql-highlight"
-import { thumbOnScreen, type BlockOnPage, type Thumb, type TimelineLayout } from "../lib/timeline-layout"
+import {
+  targetOnStrip,
+  thumbOnScreen,
+  type BlockOnPage,
+  type Target,
+  type Thumb,
+  type TimelineLayout,
+} from "../lib/timeline-layout"
 import { holdsMatch } from "../lib/timeline-matches"
 
 /**
@@ -12,25 +20,27 @@ import { holdsMatch } from "../lib/timeline-matches"
  * statement and a tick per entry, or exception block, holding a *Search* match, each at its place
  * in `layout`, and a thumb over the stretch the scrollport is showing.
  *
- * Ticks and thumb are placed on one measure, the timeline's estimated layout, so a tick stays put
- * while the browser lays out entries it skipped off screen, and lies inside the thumb exactly when
- * its entry starts on screen. The page's real heights only say which block each edge of the
- * screen is in and how far into it. An entry holds a match by the same rule it lights by, so a
- * match tick is drawn exactly where something is lit. Drawn first inside the scrollport, sticky
- * and of no height, so it stays in view and lays out nothing in the timeline under it: the
- * scrollport's right padding is its room, and the port has no scrollbar of its own beside it.
+ * Ticks, thumb and presses are all on one measure, the timeline's estimated layout. A tick stays
+ * put while the browser lays out entries it skipped off screen, lies inside the thumb exactly when
+ * its entry starts on screen, and a press where it is drawn lands on its entry. The page's real
+ * heights only say which block each edge of the screen is in and how far into it, and where a
+ * pressed block's element is. An entry holds a match by the same rule it lights by, so a match
+ * tick is drawn exactly where something is lit. Drawn first inside the scrollport, sticky and of
+ * no height, so it stays in view and lays out nothing in the timeline under it: the scrollport's
+ * right padding is its room, and the port has no scrollbar of its own beside it.
  *
  * It is the port's scrollbar. Pressing the strip anywhere but a tick centres the thumb on the
  * point pressed, or, pressed on the thumb, holds it where it was grabbed; dragging moves it on
- * from there. It only ever sets the port's `scrollTop`, so the scroll it causes is read by the
- * column's *auto-scroll* like any other.
+ * from there. The point the thumb's top is aimed at names a block and a share of it, and the port
+ * is scrolled to put that share of the block's element at the top of the screen. A thumb pushed
+ * against either end of the strip scrolls the port to that end of its range. It only ever sets the
+ * port's `scrollTop`, so the scroll it causes is read by the column's *auto-scroll* like any other.
  *
- * Scrolling somewhere the browser has not laid out yet changes the port's scroll height a frame
- * or two later, as the entries brought near the screen take their real heights in place of their
- * estimates. The `scrollTop` the press set is then a different fraction of the whole, and the
- * thumb would settle away from the pointer. So the thumb's top stays aimed at the point while the
- * strip is held and for `SETTLE_FRAMES` after it is let go: whenever the timeline is resized in
- * that time, the port is scrolled back to it.
+ * Edge cases follow a native scrollbar. A press stays held on its block and share while the strip
+ * is held and for `SETTLE_FRAMES` after it is let go: whenever the timeline is resized in that
+ * time, as entries brought near the screen take their real heights, the port is scrolled back to
+ * it, so the thumb stays under the pointer. An entry arriving in that time leaves the hold alone,
+ * so what is on screen stays still and the thumb moves, until the next pointer move re-aims it.
  */
 export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
   const anchor = useRef<HTMLDivElement>(null)
@@ -40,12 +50,12 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
   const matched = useMemo(() => matchesAt(layout, search), [layout, search])
   // How far below the thumb's top the press that is dragging it landed, as a fraction of the whole.
   const grab = useRef<number | null>(null)
-  // Where the press or drag put the thumb's top, as a fraction of the whole, while it is held there.
-  const aimed = useRef<number | null>(null)
+  // What the press or drag aimed the thumb's top at, while it is held there.
+  const held = useRef<Target | null>(null)
   const letGo = useRef(0)
   const view = useView(port, layout, () => {
-    if (port === null || aimed.current === null) return
-    scrollTo(port, aimed.current)
+    if (port === null || held.current === null) return
+    scrollTo(port, held.current)
     if (grab.current === null) letGoLater()
   })
 
@@ -59,12 +69,12 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
     const { top, size } = viewOf(port, layout)
     grab.current = at >= top && at <= top + size ? at - top : size / 2
     cancelAnimationFrame(letGo.current)
-    aim(port, at - grab.current)
+    aim(port, at - grab.current, size)
   }
 
   function drag(event: PointerEvent<HTMLDivElement>) {
     if (port === null || grab.current === null) return
-    aim(port, pointedAt(port, event) - grab.current)
+    aim(port, pointedAt(port, event) - grab.current, view.size)
   }
 
   function release() {
@@ -73,9 +83,10 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
     letGoLater()
   }
 
-  function aim(port: HTMLElement, fraction: number) {
-    aimed.current = fraction
-    scrollTo(port, fraction)
+  /** Holds the thumb's top on what the strip draws at `top`, its bottom `size` under it. */
+  function aim(port: HTMLElement, top: number, size: number) {
+    held.current = top + size >= 1 ? { at: "end" } : targetOnStrip(layout, top)
+    scrollTo(port, held.current)
   }
 
   /** Stops holding the thumb where it was aimed once `SETTLE_FRAMES` pass from now. */
@@ -84,7 +95,7 @@ export function TimelineRuler({ layout }: { layout: TimelineLayout }) {
     const wait = (left: number) => {
       letGo.current = requestAnimationFrame(() => {
         if (left > 1) wait(left - 1)
-        else aimed.current = null
+        else held.current = null
       })
     }
     wait(SETTLE_FRAMES)
@@ -245,9 +256,36 @@ function pointedAt(port: HTMLElement, event: PointerEvent<HTMLDivElement>) {
   return (event.clientY - event.currentTarget.getBoundingClientRect().top) / port.clientHeight
 }
 
-/** Scrolls `port` so the thumb's top is at `fraction` of the strip. The port clamps it to its range. */
-function scrollTo(port: HTMLElement, fraction: number) {
-  port.scrollTop = fraction * port.scrollHeight
+/**
+ * Scrolls `port` to `target`: an end of its range, or the target's share of its block's element at
+ * the top of the screen. The port clamps it to its range.
+ */
+function scrollTo(port: HTMLElement, target: Target) {
+  switch (target.at) {
+    case "start":
+      port.scrollTop = 0
+      return
+    case "end":
+      port.scrollTop = port.scrollHeight
+      return
+    case "block": {
+      const element = port.querySelector<HTMLElement>(`[data-layout-index="${target.index}"]`)
+      if (element === null) return
+      const block = onPage(port, element)
+      port.scrollTop = block.top + target.share * block.height
+      return
+    }
+    default:
+      unreachable(target)
+  }
+}
+
+/** `block`'s index in the layout, and its real top and height in `port`'s content. */
+function onPage(port: HTMLElement, block: HTMLElement): BlockOnPage {
+  // Where the top of the port's content is on the viewport.
+  const origin = port.getBoundingClientRect().top + port.clientTop - port.scrollTop
+  const { top, height } = block.getBoundingClientRect()
+  return { index: Number(block.dataset.layoutIndex), top: top - origin, height }
 }
 
 /**
@@ -258,31 +296,25 @@ function scrollTo(port: HTMLElement, fraction: number) {
 function viewOf(port: HTMLElement, layout: TimelineLayout): View {
   const { scrollTop, scrollHeight, clientHeight } = port
   const blocks = [...port.querySelectorAll<HTMLElement>("[data-layout-index]")]
-  // Where the top of the port's content is on the viewport.
-  const origin = port.getBoundingClientRect().top + port.clientTop - scrollTop
-  const onPage = (block: HTMLElement): BlockOnPage => {
-    const { top, height } = block.getBoundingClientRect()
-    return { index: Number(block.dataset.layoutIndex), top: top - origin, height }
-  }
   const bottom = scrollTop + clientHeight
   const thumb = thumbOnScreen(layout, {
     top: scrollTop,
     bottom,
     contentHeight: scrollHeight,
-    atTop: blockAt(blocks, scrollTop, onPage),
-    atBottom: blockAt(blocks, bottom, onPage),
+    atTop: blockAt(port, blocks, scrollTop),
+    atBottom: blockAt(port, blocks, bottom),
   })
   return { height: clientHeight, ...thumb }
 }
 
 /** The last of `blocks` starting at or above `at` pixels down the port's content, or null above them all. */
-function blockAt(blocks: readonly HTMLElement[], at: number, onPage: (block: HTMLElement) => BlockOnPage) {
+function blockAt(port: HTMLElement, blocks: readonly HTMLElement[], at: number) {
   let found: BlockOnPage | null = null
   let low = 0
   let high = blocks.length - 1
   while (low <= high) {
     const middle = (low + high) >> 1
-    const block = onPage(blocks[middle]!)
+    const block = onPage(port, blocks[middle]!)
     if (block.top <= at) {
       found = block
       low = middle + 1

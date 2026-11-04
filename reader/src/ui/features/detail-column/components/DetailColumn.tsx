@@ -745,12 +745,16 @@ function TimelinePanel({
   const backtrace = exception?.backtrace
   const segments = useMemo(() => (backtrace === undefined ? [] : segmentBacktrace(backtrace, railsRoot)), [backtrace, railsRoot])
 
+  // The fold adds to a row's timeline and trailing section in place, so an arrival changes their
+  // lengths and not the arrays.
+  const timelineLength = timeline.length
+  const trailingLength = trailing.length
   const layout = useMemo(() => {
     const shown = new Set<number>()
     for (const segment of segments) if (segment.type === "gap" && gapShown(segment, opened, search)) shown.add(segment.from)
     const block = exception === null ? null : { exception, segments, opened: shown, cut: cutFrom !== null }
     return timelineLayout({ timeline, exception: block, trailing }, width)
-  }, [timeline, exception, cutFrom, segments, opened, search, trailing, width])
+  }, [timeline, timelineLength, exception, cutFrom, segments, opened, search, trailing, trailingLength, width])
 
   // The layout's blocks are in order, so each section's are consecutive.
   const timelineEntries: ReactNode[] = []

@@ -5,6 +5,7 @@ import type { TimelineEvent } from "../src/shared/activity"
 import { segmentBacktrace } from "../src/ui/lib/backtrace"
 import {
   entryHeight,
+  targetOnStrip,
   thumbOnScreen,
   timelineLayout,
   type BlockOnPage,
@@ -234,6 +235,19 @@ describe("laying out what follows the timeline", () => {
   })
 })
 
+type Page = { blocks: BlockOnPage[]; contentHeight: number }
+
+/** The page as a browser lays it out: each block `heights` tall, one under the other, and `room` under the last. */
+function page(heights: readonly number[], room = 24): Page {
+  let top = 0
+  const blocks = heights.map((height, index) => {
+    const block = { index, top, height }
+    top += height
+    return block
+  })
+  return { blocks, contentHeight: top + room }
+}
+
 /**
  * The thumb, placed on the estimate from where the screen really is: the page's real heights
  * say which block each edge of the screen is in and how far into it, and that share of the
@@ -243,19 +257,6 @@ describe("placing the thumb", () => {
   const entries = [query(), run.log("req-1", "Hi"), query(LONG), query("COMMIT"), query(), run.log("req-1", "Bye"), query(LONG)]
   const layout = timelineLayout(content(entries), WIDE)
   const VIEWPORT = 50
-
-  type Page = { blocks: BlockOnPage[]; contentHeight: number }
-
-  /** The page as a browser lays it out: each block `heights` tall, one under the other, and `room` under the last. */
-  function page(heights: readonly number[], room = 24): Page {
-    let top = 0
-    const blocks = heights.map((height, index) => {
-      const block = { index, top, height }
-      top += height
-      return block
-    })
-    return { blocks, contentHeight: top + room }
-  }
 
   /** Every block as tall on the page as its estimate, but those in `taller`. */
   function heights(taller: Record<number, number> = {}) {
@@ -349,5 +350,99 @@ describe("placing the thumb", () => {
   test("covers the whole strip over an empty timeline", () => {
     const empty = timelineLayout(content([]), WIDE)
     expect(thumbOnScreen(empty, { top: 0, bottom: 0, contentHeight: 0, atTop: null, atBottom: null })).toEqual({ top: 0, size: 1 })
+  })
+})
+
+/**
+ * A press on the strip, named as the block of the layout it falls in and the share of that
+ * block's estimated height above it. The port is scrolled so that share of the block's real
+ * element is at the top of the screen.
+ */
+describe("pressing the strip", () => {
+  const entries = [query(), run.log("req-1", "Hi"), query(LONG), query("COMMIT"), query(), run.log("req-1", "Bye"), query(LONG)]
+  const layout = timelineLayout(content(entries), WIDE)
+  const VIEWPORT = 50
+
+  /** Where the top of the screen goes on `onPage` for a press `at` the strip. */
+  function scrolledTo(onPage: Page, at: number) {
+    const target = targetOnStrip(layout, at)
+    if (target.at !== "block") throw new Error(`${at} is past an end`)
+    const block = onPage.blocks[target.index]!
+    return block.top + target.share * block.height
+  }
+
+  /** The thumb's top with the screen's top `top` pixels down `onPage`. */
+  function thumbTopAt(onPage: Page, top: number) {
+    const bottom = Math.min(top + VIEWPORT, onPage.contentHeight)
+    const at = (edge: number): BlockOnPage | null => onPage.blocks.findLast((block) => block.top <= edge) ?? null
+    return thumbOnScreen(layout, { top, bottom, contentHeight: onPage.contentHeight, atTop: at(top), atBottom: at(bottom) }).top
+  }
+
+  /** Points down the strip, each inside a block. */
+  const points = layout.blocks.flatMap((block) => [0.1, 0.5, 0.9].map((share) => (block.offset + share * block.height) / layout.total))
+
+  test.each([
+    ["every block as tall as its estimate", {}],
+    ["an entry laid out three times its estimate", { 2: 3 }],
+    ["an entry laid out at half its estimate", { 4: 0.5 }],
+  ])("gives the point pressed back as the thumb's top, with %s", (_, scale: Record<number, number>) => {
+    const onPage = page(layout.blocks.map((block, index) => block.height * (scale[index] ?? 1)))
+    for (const at of points) expect(thumbTopAt(onPage, scrolledTo(onPage, at))).toBeCloseTo(at, 12)
+  })
+
+  test("names the block a point falls in and the share of it above the point", () => {
+    const block = layout.blocks[2]!
+    const target = targetOnStrip(layout, (block.offset + block.height / 4) / layout.total)
+    expect(target).toEqual({ at: "block", index: 2, share: expect.closeTo(0.25, 12) })
+  })
+
+  test("lands a press on a tick at the top of its block, the first block's tick being the start", () => {
+    expect(targetOnStrip(layout, layout.blocks[0]!.fraction)).toEqual({ at: "start" })
+    for (const [index, block] of layout.blocks.entries()) {
+      if (index === 0) continue
+      expect(targetOnStrip(layout, block.fraction)).toEqual({ at: "block", index, share: expect.closeTo(0, 12) })
+    }
+  })
+
+  test.each([
+    ["the top", -0.2, "start"],
+    ["the very top", 0, "start"],
+    ["the very bottom", 1, "end"],
+    ["the bottom", 1.3, "end"],
+  ] as const)("gives that end for a point at or past %s", (_, at, end) => {
+    expect(targetOnStrip(layout, at)).toEqual({ at: end })
+  })
+
+  test("gives the end for a point in the room under the last block", () => {
+    const last = layout.blocks.at(-1)!
+    expect(targetOnStrip(layout, (last.offset + last.height + 1) / layout.total)).toEqual({ at: "end" })
+  })
+
+  test("gives the end for any point over an empty timeline", () => {
+    expect(targetOnStrip(timelineLayout(content([]), WIDE), 0.5)).toEqual({ at: "end" })
+  })
+
+  test("lands on the exception block and on the trailing section's caption", () => {
+    const exception = { exception: { class: "RuntimeError", message: "boom" }, segments: [], opened: new Set<number>(), cut: false }
+    const shown = timelineLayout(content(entries, { exception, trailing: [query()] }), WIDE)
+    for (const kind of ["exception", "caption"] as const) {
+      const index = shown.blocks.findIndex((block) => block.kind === kind)
+      const block = shown.blocks[index]!
+      const target = targetOnStrip(shown, (block.offset + block.height / 2) / shown.total)
+      expect({ kind, target }).toEqual({ kind, target: { at: "block", index, share: expect.closeTo(0.5, 12) } })
+    }
+  })
+
+  test("leaves a held block and share on the same place on the page when an entry is appended", () => {
+    const at = (layout.blocks[3]!.offset + layout.blocks[3]!.height / 3) / layout.total
+    const held = targetOnStrip(layout, at)
+    const appended = timelineLayout(content([...entries, query(LONG)]), WIDE)
+    const before = page(layout.blocks.map((block) => block.height))
+    const after = page(appended.blocks.map((block) => block.height))
+    if (held.at !== "block") throw new Error("pressed past an end")
+
+    expect(appended.blocks[held.index]).toMatchObject({ kind: "entry", event: entries[3] })
+    const top = (onPage: Page) => onPage.blocks[held.index]!.top + held.share * onPage.blocks[held.index]!.height
+    expect(top(after)).toBe(top(before))
   })
 })

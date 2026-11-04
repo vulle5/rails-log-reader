@@ -836,6 +836,17 @@ describe("the Detail column", () => {
     expect(pinnedToBottom("Detail column")).toBe(true)
   })
 
+  test("shows the selected row's own arrivals at the end of its Timeline, and ticks them on the ruler", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+
+    arrive(run.sql("w1", 'UPDATE "orders" SET "state" = ?', { name: "Order Update" }))
+
+    expect(detailEntries()).toHaveLength(13)
+    expect(detailEntries().at(-1)).toHaveTextContent('UPDATE "orders"')
+    expect(within(ruler()).getByRole("button", { name: "UPDATE · Order Update" })).toBeInTheDocument()
+  })
+
   test("counts them while it is paused, and never the other columns' traffic", async () => {
     const { user, arrive } = openTheReader(...HISTORY)
     await select(user, "/reports/monthly.csv")
@@ -1084,7 +1095,7 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     expectTheThumb(along(30) - PORT / 2)
   })
 
-  test.todo("keeps the thumb on the point pressed as the browser lays out the entries it scrolled to", async () => {
+  test("keeps the thumb on the point pressed as the browser lays out the entries it scrolled to", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
@@ -1095,7 +1106,7 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     expect(onTheRuler(thumb()).top).toBeCloseTo(along(30) - PORT / 2, 6)
   })
 
-  test.todo("keeps it there through the frames after the press is let go, while the layout settles", async () => {
+  test("keeps it there through the frames after the press is let go, while the layout settles", async () => {
     const { user } = openTheReader(run.header(), ...aWritingRequest())
     await select(user, "/orders")
 
@@ -1108,6 +1119,23 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
     laidOut(detailEntries()[5]!, 2 * ENTRY)
 
     expect(onTheRuler(thumb()).top).toBeCloseTo(along(30) - PORT / 2, 6)
+  })
+
+  test("leaves the Timeline still under an entry arriving while the strip is held, and moves the thumb", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+    await user.pointer({ keys: "[MouseLeft>]", target: ruler(), coords: { clientY: 30 } })
+    announceTheScroll()
+    const wasAt = scrollport("Detail column").scrollTop
+    const thumbWasAt = onTheRuler(thumb()).top
+
+    arrive(run.sql("w1"))
+    laidOut(detailEntries().at(-1)!, ENTRY)
+    announceTheScroll()
+
+    expect(scrollport("Detail column").scrollTop).toBe(wasAt)
+    // The thumb is read on a strip one entry longer than `TIMELINE`, so drawn higher up it.
+    expect(onTheRuler(thumb()).top).toBeLessThan(thumbWasAt)
   })
 
   test("lets the thumb go once the layout has settled, so a later resize scrolls nothing", async () => {
@@ -1152,6 +1180,34 @@ describe("the Timeline ruler as the Timeline's scrollbar", () => {
 
     expect(pinnedToBottom("Detail column")).toBe(false)
     expect(pill("Detail column")).toHaveTextContent("1 new")
+  })
+
+  test("brings a mark's entry on screen when pressed where its tick is drawn, however much taller an entry before it was laid out", async () => {
+    const { user } = openTheReader(run.header(), ...aWritingRequest(8))
+    await select(user, "/orders")
+    laidOut(detailEntries()[3]!, 10 * ENTRY)
+    const tick = within(ruler()).getByRole("button", { name: /^INSERT/ })
+    const drawnAt = (onTheRuler(tick).top / TIMELINE) * PORT
+
+    // Pressed on the strip a pixel above the tick, off its own hit area.
+    await pressTheRuler(user, drawnAt - 1)
+
+    const entry = detailEntries()[8]!
+    const { top, bottom } = entry.getBoundingClientRect()
+    expect(top < PORT && bottom > 0).toBe(true)
+  })
+
+  test("resumes following when dragged to the bottom, though the last entry was laid out taller than its estimate", async () => {
+    const { user, arrive } = openTheReader(run.header(), ...aWritingRequest())
+    await select(user, "/orders")
+    await dragTheRuler(user, 50, 20)
+    laidOut(detailEntries().at(-1)!, 3 * ENTRY)
+
+    await dragTheRuler(user, 20, PORT)
+    arrive(run.sql("w1"))
+
+    expect(pinnedToBottom("Detail column")).toBe(true)
+    expect(pill("Detail column")).not.toBeInTheDocument()
   })
 
   test("resumes following when dragged back to the bottom, and clears the pill", async () => {
